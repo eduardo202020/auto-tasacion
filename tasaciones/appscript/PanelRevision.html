@@ -58,8 +58,8 @@
             document.getElementById('dirVal').innerText = caso.direccion;
             document.getElementById('tipoVal').innerText = caso.tipo;
             document.getElementById('obsVal').innerText = caso.observacion;
-            document.getElementById('sugVal').innerText = caso.sugerencia; 
-            
+            document.getElementById('sugVal').innerText = caso.sugerencia;
+
             document.getElementById('loading').style.display = 'none';
             document.getElementById('content').style.display = 'block';
           } else {
@@ -76,13 +76,13 @@
     function aprobarCaso() {
       if (!casoActual) return;
       var tipoSeleccionado = document.getElementById('correccionSelect').value;
-      
+
       document.getElementById('loading').style.display = 'block';
       document.getElementById('content').style.display = 'none';
 
       google.script.run
         .withSuccessHandler(function() {
-          cargarSiguiente(); 
+          cargarSiguiente();
         })
         .withFailureHandler(function(err) {
           alert("Error al aplicar: " + err.message);
