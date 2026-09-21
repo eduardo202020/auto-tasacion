@@ -4,6 +4,8 @@ var CONFIG = {
   SHEET_REVISION: "🔍 Bandeja de Revisión",
   SHEET_BANCO: "⚡ Listos para el Banco",
   SHEET_EXPORT: "📥 Exportación Excel",
+  MAX_PDFS_POR_LOTE: 300,
+  MAX_TAMANO_PDF_MB: 10,
   RESULT_HEADERS: [
     "ID / Codigo PDF", "PDF_Archivo", "PDF_Original_Drive", "Drive_File_ID",
     "Drive_Modificado", "Direccion extraida", "Pagina direccion",

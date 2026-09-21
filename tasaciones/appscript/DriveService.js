@@ -1,5 +1,46 @@
 var FOLDER_ID = "1eBW9eN4qpe2dMy9S65h_8Njebv28rDWZ";
 
+function abrirPanelCargaPDFs() {
+  var html = HtmlService.createTemplateFromFile("CargaPDFs").evaluate()
+    .setTitle("Cargar PDFs de tasación")
+    .setWidth(430);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+// Se invoca una vez por archivo desde CargaPDFs.html. La carga secuencial
+// permite procesar lotes grandes sin superar el límite de una sola solicitud.
+function cargarPdfEnDrive(upload) {
+  if (!upload || !upload.nombre || !upload.base64) {
+    throw new Error("No se recibió un archivo válido.");
+  }
+  var nombre = String(upload.nombre).replace(/[\\/]/g, "_").trim();
+  var extensionPdf = /\.pdf$/i.test(nombre);
+  if (!extensionPdf) throw new Error("Solo se permiten archivos PDF.");
+
+  var bytes = Utilities.base64Decode(String(upload.base64));
+  var maxBytes = CONFIG.MAX_TAMANO_PDF_MB * 1024 * 1024;
+  if (!bytes.length || bytes.length > maxBytes) {
+    throw new Error("El archivo supera el máximo de " + CONFIG.MAX_TAMANO_PDF_MB + " MB.");
+  }
+  if (bytes.length < 5 || bytes[0] !== 37 || bytes[1] !== 80 || bytes[2] !== 68 || bytes[3] !== 70 || bytes[4] !== 45) {
+    throw new Error("El contenido no corresponde a un PDF válido.");
+  }
+
+  var folder = DriveApp.getFolderById(FOLDER_ID);
+  var existing = folder.getFilesByName(nombre);
+  if (existing.hasNext()) {
+    return { estado: "omitido", nombre: nombre, mensaje: "Ya existe un archivo con este nombre." };
+  }
+  var blob = Utilities.newBlob(bytes, MimeType.PDF, nombre);
+  var file = folder.createFile(blob);
+  return { estado: "cargado", nombre: file.getName(), fileId: file.getId() };
+}
+
+function finalizarCargaDeLote() {
+  escanearCarpetaPDFs();
+  return { mensaje: "Panel de entrada actualizado." };
+}
+
 function escanearCarpetaPDFs() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = obtenerOCrearPestaña(ss, CONFIG.SHEET_ENTRADA);

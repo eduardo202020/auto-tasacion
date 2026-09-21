@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; color: #1f2937; margin: 0; padding: 16px; }
+    h2 { font-size: 18px; margin: 0 0 8px; }
+    p { color: #4b5563; font-size: 13px; line-height: 1.45; }
+    #drop-zone { border: 2px dashed #2563eb; border-radius: 8px; padding: 24px 12px; text-align: center; background: #eff6ff; cursor: pointer; }
+    #drop-zone.drag { background: #dbeafe; border-color: #1d4ed8; }
+    #file-input { display: none; }
+    button { border: 0; border-radius: 6px; cursor: pointer; font-weight: 600; padding: 10px 12px; width: 100%; }
+    #upload { background: #2563eb; color: #fff; margin-top: 12px; }
+    #upload:disabled { background: #9ca3af; cursor: wait; }
+    #clear { background: transparent; color: #2563eb; padding: 8px; margin-top: 4px; }
+    #summary, #progress { font-size: 13px; margin-top: 12px; }
+    #files { max-height: 190px; overflow-y: auto; margin: 8px 0; padding: 0; list-style: none; }
+    #files li { border-bottom: 1px solid #e5e7eb; font-size: 12px; padding: 7px 0; word-break: break-word; }
+    .error { color: #b91c1c; }
+    .success { color: #047857; }
+  </style>
+</head>
+<body>
+  <h2>Cargar PDFs de tasación</h2>
+  <p>Selecciona o arrastra hasta <span id="max-files"></span> PDF. Cada archivo puede pesar hasta <span id="max-size"></span> MB. Los archivos se guardan en la carpeta corporativa del lote.</p>
+
+  <div id="drop-zone" role="button" tabindex="0">
+    <strong>Arrastra PDFs aquí</strong><br>
+    <span>o haz clic para seleccionarlos</span>
+  </div>
+  <input id="file-input" type="file" accept="application/pdf,.pdf" multiple>
+  <div id="summary">No hay archivos seleccionados.</div>
+  <ul id="files"></ul>
+  <button id="upload" disabled onclick="iniciarCarga()">Cargar lote</button>
+  <button id="clear" onclick="limpiar()">Limpiar selección</button>
+  <div id="progress" aria-live="polite"></div>
+
+  <script>
+    var maxFiles = <?= CONFIG.MAX_PDFS_POR_LOTE ?>;
+    var maxBytes = <?= CONFIG.MAX_TAMANO_PDF_MB ?> * 1024 * 1024;
+    var selected = [];
+    var input = document.getElementById('file-input');
+    var zone = document.getElementById('drop-zone');
+
+    document.getElementById('max-files').textContent = maxFiles;
+    document.getElementById('max-size').textContent = <?= CONFIG.MAX_TAMANO_PDF_MB ?>;
+    zone.addEventListener('click', function() { input.click(); });
+    zone.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') input.click(); });
+    input.addEventListener('change', function() { seleccionar(Array.prototype.slice.call(input.files)); });
+    ['dragenter', 'dragover'].forEach(function(eventName) {
+      zone.addEventListener(eventName, function(event) { event.preventDefault(); zone.classList.add('drag'); });
+    });
+    ['dragleave', 'drop'].forEach(function(eventName) {
+      zone.addEventListener(eventName, function(event) { event.preventDefault(); zone.classList.remove('drag'); });
+    });
+    zone.addEventListener('drop', function(event) { seleccionar(Array.prototype.slice.call(event.dataTransfer.files)); });
+
+    function seleccionar(files) {
+      var invalidos = [];
+      files.forEach(function(file) {
+        if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) invalidos.push(file.name);
+        else if (file.size > maxBytes) invalidos.push(file.name + ' (supera el tamaño máximo)');
+        else if (!selected.some(function(current) { return current.name === file.name && current.size === file.size; })) selected.push(file);
+      });
+      if (selected.length > maxFiles) {
+        invalidos.push('El lote no puede superar ' + maxFiles + ' archivos.');
+        selected = selected.slice(0, maxFiles);
+      }
+      renderizar();
+      if (invalidos.length) estado('No se agregaron: ' + invalidos.join(', '), 'error');
+    }
+
+    function renderizar() {
+      var list = document.getElementById('files');
+      list.innerHTML = '';
+      selected.forEach(function(file) {
+        var item = document.createElement('li');
+        item.textContent = file.name + ' — ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
+        list.appendChild(item);
+      });
+      document.getElementById('summary').textContent = selected.length ? selected.length + ' PDF(s) listos para cargar.' : 'No hay archivos seleccionados.';
+      document.getElementById('upload').disabled = !selected.length;
+    }
+
+    function limpiar() {
+      if (document.getElementById('upload').disabled === false && document.getElementById('upload').textContent !== 'Cargar lote') return;
+      selected = []; input.value = ''; renderizar(); estado('', '');
+    }
+
+    function estado(texto, clase) {
+      var target = document.getElementById('progress');
+      target.className = clase || '';
+      target.textContent = texto;
+    }
+
+    function leerBase64(file) {
+      return new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onerror = function() { reject(new Error('No se pudo leer ' + file.name)); };
+        reader.onload = function() { resolve(String(reader.result).split(',')[1]); };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function llamarServidor(file, base64) {
+      return new Promise(function(resolve, reject) {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)
+          .cargarPdfEnDrive({ nombre: file.name, base64: base64 });
+      });
+    }
+
+    async function iniciarCarga() {
+      var button = document.getElementById('upload');
+      button.disabled = true;
+      var cargados = 0, omitidos = 0, errores = [];
+      for (var index = 0; index < selected.length; index++) {
+        var file = selected[index];
+        estado('Cargando ' + (index + 1) + ' de ' + selected.length + ': ' + file.name);
+        try {
+          var result = await llamarServidor(file, await leerBase64(file));
+          if (result.estado === 'cargado') cargados++; else omitidos++;
+        } catch (error) {
+          errores.push(file.name + ': ' + (error.message || error));
+        }
+      }
+      try {
+        await new Promise(function(resolve, reject) {
+          google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).finalizarCargaDeLote();
+        });
+        estado('Finalizado. Cargados: ' + cargados + '. Omitidos: ' + omitidos + '. Errores: ' + errores.length + '.', errores.length ? 'error' : 'success');
+      } catch (error) {
+        estado('Los archivos se cargaron, pero no se pudo actualizar el panel: ' + error.message, 'error');
+      }
+      if (errores.length) estado(document.getElementById('progress').textContent + ' Detalle: ' + errores.join(' | '), 'error');
+      button.textContent = 'Carga finalizada';
+    }
+  </script>
+</body>
+</html>

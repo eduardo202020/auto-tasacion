@@ -23,8 +23,9 @@ instaladas.
 
 ## Flujo funcional
 
-1. El operador carga los PDFs en la carpeta de Google Drive autorizada.
-2. Desde el menú de Google Sheets, ejecuta **Escanear PDFs**.
+1. El operador carga los PDFs desde el panel lateral del Google Sheet; Apps
+   Script los almacena en la carpeta de Google Drive autorizada.
+2. El Sheet actualiza la lista del lote automáticamente.
 3. Apps Script envía los identificadores de archivo al endpoint de Cloud Run.
 4. Python extrae 25 campos: dirección, tipo de inmueble, valores comercial y
    de reconstrucción en US$/S/, año, pisos, sótanos, páginas de evidencia y

@@ -24,18 +24,22 @@ correos, chats o archivos personales.
 
 ### 1. Cargar los PDFs
 
-1. Abra la carpeta de Drive de tasaciones.
-2. Cargue los informes en formato PDF.
-3. Confirme que cada documento tiene un nombre identificable y que abre sin
+1. Abra el Google Sheet y seleccione **Automatización de Tasaciones → 1.
+   Cargar PDFs**.
+2. En el panel lateral, seleccione o arrastre los informes PDF. Se admiten
+   hasta 300 archivos por lote y 10 MB por archivo.
+3. Pulse **Cargar lote** y espere el resultado final. Los duplicados por nombre
+   se omiten para evitar una carga accidental doble.
+4. Confirme que cada documento tiene un nombre identificable y que abre sin
    pedir contraseña.
 
 No modifique ni elimine archivos mientras el lote se está procesando.
 
 ### 2. Escanear la carpeta
 
-1. Abra el Google Sheet.
-2. Seleccione **Automatización de Tasaciones → 1. Escanear PDFs desde Google
-   Drive**.
+1. La carga actualiza automáticamente el panel de entrada. Si necesita volver
+   a leer la carpeta, seleccione **Automatización de Tasaciones → 2.
+   Actualizar lista de PDFs**.
 3. Espere el aviso que indica cuántos PDFs fueron detectados.
 4. Revise la pestaña **🎛️ Panel de Entrada**. Debe contener el nombre de cada
    PDF, su identificador interno de Drive y la fecha de modificación.
@@ -44,7 +48,7 @@ Si el total no coincide con el de Drive, vuelva a escanear antes de continuar.
 
 ### 3. Procesar y clasificar
 
-1. Seleccione **Automatización de Tasaciones → 2. Procesar y clasificar
+1. Seleccione **Automatización de Tasaciones → 3. Procesar y clasificar
    archivos**.
 2. Espere el mensaje final; no cierre el Sheet durante el proceso.
 3. El sistema crea o actualiza dos pestañas:
@@ -64,7 +68,7 @@ Un dato vacío no significa cero ni un valor por defecto: debe ser revisado.
 
 ### 4. Revisar casos observados
 
-1. Seleccione **Automatización de Tasaciones → 3. Abrir panel de revisión**.
+1. Seleccione **Automatización de Tasaciones → 4. Abrir panel de revisión**.
 2. Lea la dirección, el tipo detectado y la observación mostrada por el panel.
 3. Abra el PDF original desde Drive y confirme el dato usando la página de
    evidencia indicada en la fila.
@@ -77,7 +81,7 @@ Banco**. No apruebe una fila si el PDF no permite confirmar sus datos.
 ### 5. Generar el Excel
 
 1. Compruebe que **Listos para el Banco** contiene únicamente casos correctos.
-2. Seleccione **Automatización de Tasaciones → 4. Generar Excel de casos
+2. Seleccione **Automatización de Tasaciones → 5. Generar Excel de casos
    validados**.
 3. El sistema muestra un enlace a un archivo `.xlsx` creado en Google Drive.
 4. Abra el enlace y descargue el Excel.
