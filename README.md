@@ -67,6 +67,9 @@ npm run apps:status
 Consulta `tasaciones/README.local.md` para los comandos de ejecución local,
 despliegue de Cloud Run y sincronización de Apps Script.
 
+El manual operativo para los usuarios del Sheet está disponible en
+[`docs/MANUAL_DE_USO_TASACIONES.md`](docs/MANUAL_DE_USO_TASACIONES.md).
+
 ## Variables y seguridad
 
 No copies claves a código fuente ni al manifest de Apps Script. Usa un `.env`
