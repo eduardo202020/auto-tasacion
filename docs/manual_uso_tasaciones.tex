@@ -1,0 +1,191 @@
+\documentclass[11pt,a4paper,landscape]{article}
+\usepackage[margin=1.45cm]{geometry}
+\usepackage[spanish]{babel}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{tcolorbox}
+\usetikzlibrary{positioning,arrows.meta}
+
+\definecolor{nttblue}{HTML}{0072BC}
+\definecolor{nttdark}{HTML}{003B5C}
+\definecolor{nttlight}{HTML}{EAF5FB}
+\definecolor{nttgray}{HTML}{4B5563}
+\definecolor{nttline}{HTML}{B9DCEC}
+\hypersetup{colorlinks=true,urlcolor=nttblue,linkcolor=nttblue}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\color{nttdark}\sffamily\bfseries NTT DATA \enspace | \enspace Operaciones Hipotecarias}
+\rhead{\color{nttgray}\sffamily Manual de uso \enspace \thepage}
+\renewcommand{\headrulewidth}{0.5pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{nttblue}\leaders\hrule height \headrulewidth\hfill}}
+\setlength{\headheight}{24pt}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+
+\newcommand{\wordmark}[1]{
+  {\sffamily\bfseries\fontsize{22}{22}\selectfont\color{#1} NTT DATA}
+}
+\newcommand{\brandicon}[1]{
+  \begin{tikzpicture}[baseline=-0.55ex,scale=.28]
+    \draw[color=#1,line width=2.3pt] (0,0) circle (1);
+    \draw[color=#1,line width=2.3pt] (-.58,.52) arc (150:-100:.68);
+    \fill[color=#1] (.52,-.18) circle (.13);
+  \end{tikzpicture}
+}
+\newcommand{\paso}[4]{
+  \clearpage
+  \begin{tcolorbox}[colback=nttlight,colframe=nttblue,boxrule=0pt,
+    arc=2mm,left=4mm,right=4mm,top=2.3mm,bottom=2.3mm]
+    {\color{nttblue}\sffamily\bfseries\large PASO #1}\hspace{0.8em}
+    {\sffamily\bfseries\large #2}
+  \end{tcolorbox}
+  {\color{nttgray}\small #3}
+  \vspace{0.3em}
+  \begin{center}
+    \fcolorbox{nttline}{white}{\includegraphics[width=0.94\linewidth,height=0.72\textheight,keepaspectratio]{../../tutorial/#4.png}}
+  \end{center}
+}
+\newcommand{\pasoinicio}[1]{
+  \clearpage
+  \begin{tcolorbox}[colback=nttlight,colframe=nttblue,boxrule=0pt,
+    arc=2mm,left=4mm,right=4mm,top=2.3mm,bottom=2.3mm]
+    {\color{nttblue}\sffamily\bfseries\large PASO 02}\hspace{0.8em}
+    {\sffamily\bfseries\large Ubicar Automatizar transacciones}
+  \end{tcolorbox}
+  {\color{nttgray}\small #1}
+  \vspace{0.3em}
+  \begin{center}
+    \fcolorbox{nttline}{white}{\includegraphics[width=0.94\linewidth,height=0.72\textheight,keepaspectratio]{../../tutorial/inicio.png}}
+  \end{center}
+}
+
+\begin{document}
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[nttblue] (current page.south west) rectangle (current page.north east);
+  \fill[nttdark] ([xshift=10cm]current page.south west) -- (current page.south east) -- (current page.north east) -- ([xshift=18cm,yshift=-1cm]current page.north west) -- cycle;
+  \fill[white,opacity=.08] ([xshift=2cm,yshift=1cm]current page.south west) circle (5.2cm);
+  \draw[white,opacity=.16,line width=1.1pt] ([xshift=2cm,yshift=1cm]current page.south west) circle (4.3cm);
+  \draw[white,opacity=.16,line width=1.1pt] ([xshift=2cm,yshift=1cm]current page.south west) circle (3.4cm);
+\end{tikzpicture}
+
+\vspace*{1.1cm}
+\begin{minipage}[t]{0.63\linewidth}
+  {\color{white}\brandicon{white}\hspace{0.2cm}\wordmark{white}}\\[2.5cm]
+  {\color{white}\sffamily\bfseries\fontsize{31}{36}\selectfont
+    Manual de uso\\
+    Automatización de Tasaciones}\\[0.65cm]
+  {\color{white}\sffamily\large
+    Carga, procesamiento, revisión y exportación de casos hipotecarios.}\\[1.2cm]
+  \begin{tcolorbox}[width=.88\linewidth,colback=white,colframe=white,arc=2mm,
+      boxrule=0pt,left=4mm,right=4mm,top=3mm,bottom=3mm]
+    {\color{nttdark}\sffamily\bfseries Uso interno - Operaciones Hipotecarias}\\[-0.1em]
+    {\color{nttgray}\small Siga los pasos en orden y valide los casos observados antes de exportar.}\\[0.25em]
+    {\color{nttgray}\scriptsize Programador del flujo: Jhunior Eduardo Guevara Lazaro.}
+  \end{tcolorbox}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.29\linewidth}
+  \vspace{5.7cm}
+  {\color{white}\small\sffamily ACCESOS DIRECTOS}\\[0.3cm]
+  {\color{white}\footnotesize\sffamily
+    Sheet de Tasaciones\\[-0.05cm]
+    \href{https://docs.google.com/spreadsheets/d/1eOUVKs2gtmO1ligTwHVwdMiuTX37vzmL0LRbI3xeMMM/edit?gid=1416849096#gid=1416849096}{\color{white}\underline{Abrir aplicación}}\\[0.55cm]
+    Repositorio del proyecto\\[-0.05cm]
+    \href{https://github.com/eduardo202020/auto-tasacion}{\color{white}\underline{Abrir repositorio}}}
+\end{minipage}
+
+\clearpage
+\section*{\color{nttdark}\sffamily Guía rápida}
+\begin{tcolorbox}[colback=nttlight,colframe=nttline,boxrule=.4pt,arc=2mm]
+  \textbf{Objetivo.} Cargar informes PDF de tasación, extraer sus campos,
+  revisar las alertas y descargar un Excel con los casos validados.
+\end{tcolorbox}
+
+\begin{center}
+\begin{tikzpicture}[node distance=0.38cm, every node/.style={font=\sffamily\small}]
+  \node[draw=nttblue,fill=nttblue,text=white,rounded corners=2mm,minimum width=3.1cm,minimum height=1.1cm] (a) {1. Cargar PDFs};
+  \node[draw=nttblue,fill=nttlight,text=nttdark,rounded corners=2mm,minimum width=3.1cm,minimum height=1.1cm,right=of a] (b) {2. Procesar lote};
+  \node[draw=nttblue,fill=nttlight,text=nttdark,rounded corners=2mm,minimum width=3.1cm,minimum height=1.1cm,right=of b] (c) {3. Revisar alertas};
+  \node[draw=nttblue,fill=nttdark,text=white,rounded corners=2mm,minimum width=3.1cm,minimum height=1.1cm,right=of c] (d) {4. Exportar Excel};
+  \draw[-latex,thick,nttblue] (a) -- (b);
+  \draw[-latex,thick,nttblue] (b) -- (c);
+  \draw[-latex,thick,nttblue] (c) -- (d);
+\end{tikzpicture}
+\end{center}
+
+\begin{tabular}{@{}p{.29\linewidth}p{.64\linewidth}@{}}
+\color{nttblue}\textbf{Acceso al Sheet} & \href{https://docs.google.com/spreadsheets/d/1eOUVKs2gtmO1ligTwHVwdMiuTX37vzmL0LRbI3xeMMM/edit?gid=1416849096#gid=1416849096}{Abrir Google Sheet de Tasaciones}.\\[0.45cm]
+\color{nttblue}\textbf{Regla de seguridad} & Utilice solo PDF autorizados. No comparta información de clientes ni exporte filas con observaciones pendientes.\\[0.45cm]
+\color{nttblue}\textbf{Salida} & El Excel descargado no conserva macros. Para el paso NT3270/HIPO, use la plantilla corporativa \texttt{.xlsm} aprobada.
+\end{tabular}
+
+\paso{01}{Abrir el Sheet}{
+Abra el enlace de la aplicación. La pestaña \textbf{Panel de Entrada} es el punto de inicio del lote.
+}{01}
+\pasoinicio{Después de abrir el Sheet, ubique el botón \textbf{Automatizar transacciones}. Este botón abre el menú que inicia el flujo.}
+\paso{03}{Iniciar la carga}{
+En el menú \textbf{Automatización de Tasaciones}, seleccione \textbf{Cargar PDFs}.
+}{02}
+\paso{04}{Seleccionar los PDF}{
+Seleccione los informes PDF correspondientes al lote. Verifique los nombres antes de continuar.
+}{03}
+\paso{05}{Confirmar la selección}{
+Revise la lista mostrada en el panel lateral y pulse \textbf{Cargar lote}.
+}{04}
+\paso{06}{Esperar la carga}{
+Espere el mensaje final. Los archivos se guardan en Drive y el Panel de Entrada se actualiza.
+}{05}
+\paso{07}{Procesar el lote}{
+Abra el menú y seleccione \textbf{Procesar y clasificar archivos}.
+}{06}
+\paso{08}{Confirmar el procesamiento}{
+Si se solicita confirmación, acepte para iniciar la extracción de datos.
+}{07}
+\paso{09}{Esperar el resultado}{
+No cierre el Sheet durante el análisis. El sistema informa cuando el lote termina.
+}{08}
+\paso{10}{Leer el resumen}{
+El aviso muestra cuántos casos quedaron listos y cuántos requieren revisión. Pulse \textbf{Aceptar}.
+}{09}
+\paso{11}{Revisar casos listos}{
+Abra \textbf{Listos para el Banco} y compruebe que los campos necesarios estén completos.
+}{10}
+\paso{12}{Abrir la bandeja de revisión}{
+Los casos con datos ausentes o inconsistentes aparecen en \textbf{Bandeja de Revisión}.
+}{11}
+\paso{13}{Abrir el panel de revisión}{
+Seleccione \textbf{Abrir panel de revisión}. El panel muestra un caso pendiente por vez.
+}{12}
+\paso{14}{Validar la información}{
+Compruebe el PDF original y corrija únicamente datos verificables.
+}{13}
+\paso{15}{Aprobar y continuar}{
+Pulse \textbf{Aplicar Corrección y Siguiente}. El caso pasa a \textbf{Listos para el Banco}. Luego use \textbf{Generar Excel de casos validados}.
+}{14}
+
+\clearpage
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[nttdark] (current page.south west) rectangle (current page.north east);
+  \fill[nttblue] ([xshift=18cm]current page.south west) -- (current page.south east) -- (current page.north east) -- ([xshift=25cm]current page.north west) -- cycle;
+\end{tikzpicture}
+\vspace*{4.8cm}
+\begin{center}
+  {\color{white}\brandicon{white}\hspace{0.2cm}\wordmark{white}}\\[1.1cm]
+  {\color{white}\sffamily\Large\bfseries Proceso finalizado}\\[0.4cm]
+  {\color{white}\sffamily\large Valide el Excel antes de incorporarlo al flujo bancario.}\\[1.2cm]
+  {\color{white}\sffamily\small Operaciones Hipotecarias - Uso interno}\\[1.1cm]
+  {\color{white}\sffamily\footnotesize Programador del flujo: Jhunior Eduardo Guevara Lazaro}\\[0.2cm]
+  {\color{white}\sffamily\footnotesize Código base de Colab desarrollado por: Christofer Richard Cardenas Pareja}
+\end{center}
+
+\end{document}
