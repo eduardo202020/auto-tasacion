@@ -1,0 +1,5 @@
+# Only source and runtime dependencies belong in a Cloud Run source build.
+.venv/
+__pycache__/
+*.pyc
+.env

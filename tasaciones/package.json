@@ -1,0 +1,15 @@
+{
+  "name": "auto-tasacion-dev",
+  "private": true,
+  "scripts": {
+    "apps:status": "clasp status",
+    "apps:push": "clasp push",
+    "apps:watch": "clasp push --watch",
+    "apps:open": "clasp open",
+    "cloud:local": "./funcions/.venv/bin/functions-framework --source funcions/google-funcion.py --target procesar_tasaciones --port 8080 --debug"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.1",
+    "@types/google-apps-script": "^2.0.13"
+  }
+}

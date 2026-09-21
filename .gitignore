@@ -1,0 +1,17 @@
+# Material de consulta, documentos de negocio, macros y PDFs de prueba.
+_referencias_locales/
+
+# Credenciales, identificadores de proyectos individuales y archivos locales.
+.env
+**/.env
+**/.env.*
+!**/.env.example
+**/.clasp.json
+
+# Entornos y artefactos generados.
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/*.py[cod]
+npm-debug.log*
+.DS_Store

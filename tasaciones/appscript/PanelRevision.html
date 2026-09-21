@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 15px; background-color: #F9FAFB; color: #1F2937; margin: 0; }
+    .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; border-left: 4px solid #F59E0B; }
+    .label { font-size: 11px; font-weight: bold; color: #6B7280; text-transform: uppercase; margin-bottom: 3px; }
+    .value { font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 10px; word-break: break-word; }
+    .quote-box { background: #FEF3C7; border-left: 3px solid #D97706; padding: 10px; font-size: 12px; color: #92400E; margin-top: 5px; border-radius: 4px; line-height: 1.4; }
+    .btn-success { background-color: #10B981; color: white; border: none; padding: 10px 15px; width: 100%; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: center; }
+    .btn-success:hover { background-color: #059669; }
+    #loading { text-align: center; color: #6B7280; font-style: italic; margin-top: 30px; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+  <div id="loading">🔍 Buscando siguiente caso pendiente...</div>
+
+  <div id="content" style="display:none;">
+    <div class="card">
+      <div class="label">Dirección Extraída</div>
+      <div class="value" id="dirVal">-</div>
+
+      <div class="label">Tipo de Inmueble</div>
+      <div class="value" id="tipoVal">-</div>
+
+      <div class="label">Anomalía Detectada</div>
+      <div class="value" id="obsVal" style="color: #DC2626;">-</div>
+
+      <div class="label">🤖 Copiloto IA (Evidencia y Acción)</div>
+      <div class="quote-box" id="sugVal">-</div>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label class="label">Acción de Corrección (1 a 1):</label>
+      <select id="correccionSelect" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #D1D5DB; margin-top: 5px; background: white;">
+        <option value="CASA">Aprobar como: CASA</option>
+        <option value="DEPARTAMENTO">Aprobar como: DEPARTAMENTO</option>
+      </select>
+    </div>
+
+    <button class="btn-success" onclick="aprobarCaso()">✔ Aplicar Corrección y Siguiente</button>
+  </div>
+
+  <script>
+    var casoActual = null;
+
+    function cargarSiguiente() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('content').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(caso) {
+          if (caso) {
+            casoActual = caso;
+            document.getElementById('dirVal').innerText = caso.direccion;
+            document.getElementById('tipoVal').innerText = caso.tipo;
+            document.getElementById('obsVal').innerText = caso.observacion;
+            document.getElementById('sugVal').innerText = caso.sugerencia; 
+            
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+          } else {
+            document.getElementById('loading').innerHTML = "🎉 ¡Excelente! No quedan casos pendientes en la bandeja de revisión.";
+            document.getElementById('content').style.display = 'none';
+          }
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('loading').innerText = "⚠️ Error al cargar: " + err.message;
+        })
+        .obtenerSiguienteCasoPendiente();
+    }
+
+    function aprobarCaso() {
+      if (!casoActual) return;
+      var tipoSeleccionado = document.getElementById('correccionSelect').value;
+      
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('content').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function() {
+          cargarSiguiente(); 
+        })
+        .withFailureHandler(function(err) {
+          alert("Error al aplicar: " + err.message);
+          cargarSiguiente();
+        })
+        .aplicarCorreccionFila(casoActual.fila, tipoSeleccionado);
+    }
+
+    window.onload = cargarSiguiente;
+  </script>
+</body>
+</html>

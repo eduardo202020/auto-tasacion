@@ -1,0 +1,13 @@
+# Python local environment and credentials
+funcions/.venv/
+funcions/.env
+funcions/.env.*
+!funcions/.env.example
+
+# clasp identifies a specific remote Apps Script project locally.
+# Keep the project identifier outside source control.
+.clasp.json
+
+# Node dependencies and local diagnostic files
+node_modules/
+npm-debug.log*
