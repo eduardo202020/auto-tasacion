@@ -6,7 +6,9 @@
     "apps:push": "clasp push",
     "apps:watch": "clasp push --watch",
     "apps:open": "clasp open",
-    "cloud:local": "./funcions/.venv/bin/functions-framework --source funcions/google-funcion.py --target procesar_tasaciones --port 8080 --debug"
+    "cloud:local": "./funcions/.venv/bin/functions-framework --source funcions/google-funcion.py --target procesar_tasaciones --port 8080 --debug",
+    "cloud:local:linux": "./funcions/.venv/bin/functions-framework --source funcions/google-funcion.py --target procesar_tasaciones --port 8080 --debug",
+    "cloud:local:win": "funcions\\.venv\\Scripts\\functions-framework.exe --source funcions\\google-funcion.py --target procesar_tasaciones --port 8080 --debug"
   },
   "devDependencies": {
     "@google/clasp": "^3.4.1",

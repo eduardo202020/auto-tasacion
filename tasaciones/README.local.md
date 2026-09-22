@@ -10,11 +10,28 @@ Abre una terminal nueva después de esta configuración para que `gcloud` esté 
 
 ## Ejecutar la función Python localmente
 
+Cada PC debe tener su propio `funcions/.venv` y `node_modules`; ambos directorios
+están excluidos de Git. Ejecuta el comando correspondiente al sistema operativo.
+
+### Linux
+
 ```bash
 cd /ruta/a/auto-tasacion/tasaciones
 source funcions/.venv/bin/activate
-npm run cloud:local
+npm run cloud:local:linux
 ```
+
+### Windows PowerShell
+
+```powershell
+cd "C:\ruta\a\auto-tasacion\tasaciones"
+.\funcions\.venv\Scripts\Activate.ps1
+npm.cmd run cloud:local:win
+```
+
+No ejecutes ambos servidores a la vez en la misma PC: los dos usan el puerto
+`8080`. Para cambiar de PC, sincroniza primero los cambios de Git y arranca el
+comando correspondiente allí.
 
 En otra terminal, verifica el contrato HTTP sin acceder a Drive ni a datos reales:
 
