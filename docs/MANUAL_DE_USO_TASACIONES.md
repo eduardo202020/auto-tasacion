@@ -27,7 +27,7 @@ correos, chats o archivos personales.
 1. Abra el Google Sheet y seleccione **Automatización de Tasaciones → 1.
    Cargar PDFs**.
 2. En el panel lateral, seleccione o arrastre los informes PDF. Se admiten
-   hasta 300 archivos por lote y 10 MB por archivo.
+   hasta 300 archivos por lote y 25 MB por archivo.
 3. Pulse **Cargar lote** y espere el resultado final. Los duplicados por nombre
    se omiten para evitar una carga accidental doble.
 4. Confirme que cada documento tiene un nombre identificable y que abre sin
@@ -86,9 +86,11 @@ Banco**. No apruebe una fila si el PDF no permite confirmar sus datos.
 3. El sistema muestra un enlace a un archivo `.xlsx` creado en Google Drive.
 4. Abra el enlace y descargue el Excel.
 
-El Excel contiene las columnas de extracción, pero no VBA. Para ejecutar la
-macro NT3270/HIPO, importe o copie los datos en la plantilla `.xlsm` aprobada
-por el área; no intente agregar macros al archivo descargado.
+El Excel contiene únicamente los casos de **Listos para el Banco**, es decir,
+filas validadas automáticamente o aprobadas en el panel de revisión. El archivo
+descargado es `.xlsx` y no contiene VBA. Para ejecutar la macro NT3270/HIPO,
+importe o copie los datos en la plantilla `.xlsm` aprobada por el área; no
+intente agregar macros al archivo descargado.
 
 ## Controles previos a la entrega
 

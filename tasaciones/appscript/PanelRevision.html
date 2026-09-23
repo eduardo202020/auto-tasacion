@@ -9,6 +9,9 @@
     .label { font-size: 11px; font-weight: bold; color: #6B7280; text-transform: uppercase; margin-bottom: 3px; }
     .value { font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 10px; word-break: break-word; }
     .quote-box { background: #FEF3C7; border-left: 3px solid #D97706; padding: 10px; font-size: 12px; color: #92400E; margin-top: 5px; border-radius: 4px; line-height: 1.4; }
+    .source { font-size: 12px; margin: 8px 0; }
+    .source a { color: #2563EB; }
+    input, select { box-sizing: border-box; width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #D1D5DB; margin-top: 5px; background: white; }
     .btn-success { background-color: #10B981; color: white; border: none; padding: 10px 15px; width: 100%; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: center; }
     .btn-success:hover { background-color: #059669; }
     #loading { text-align: center; color: #6B7280; font-style: italic; margin-top: 30px; font-size: 13px; }
@@ -29,19 +32,27 @@
       <div class="label">Anomalía Detectada</div>
       <div class="value" id="obsVal" style="color: #DC2626;">-</div>
 
-      <div class="label">🤖 Copiloto IA (Evidencia y Acción)</div>
+      <div class="label">Campo a revisar</div>
+      <div class="value" id="campoVal">-</div>
+
+      <div class="label">Valor actual</div>
+      <div class="value" id="actualVal">-</div>
+
+      <div class="label">🤖 Sugerencia IA</div>
       <div class="quote-box" id="sugVal">-</div>
+      <div class="source"><a id="pdfLink" target="_blank" rel="noopener">Abrir PDF original</a> · Página <span id="pageVal">-</span></div>
     </div>
 
     <div style="margin-bottom: 15px;">
-      <label class="label">Acción de Corrección (1 a 1):</label>
-      <select id="correccionSelect" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #D1D5DB; margin-top: 5px; background: white;">
+      <label class="label">Corrección del campo</label>
+      <select id="tipoSelect">
         <option value="CASA">Aprobar como: CASA</option>
         <option value="DEPARTAMENTO">Aprobar como: DEPARTAMENTO</option>
       </select>
+      <input id="valorInput" placeholder="Escriba el valor confirmado" />
     </div>
 
-    <button class="btn-success" onclick="aprobarCaso()">✔ Aplicar Corrección y Siguiente</button>
+    <button class="btn-success" onclick="aplicarCampo()">✔ Aplicar campo y continuar</button>
   </div>
 
   <script>
@@ -58,7 +69,14 @@
             document.getElementById('dirVal').innerText = caso.direccion;
             document.getElementById('tipoVal').innerText = caso.tipo;
             document.getElementById('obsVal').innerText = caso.observacion;
+            document.getElementById('campoVal').innerText = caso.etiquetaCampo;
+            document.getElementById('actualVal').innerText = caso.valorActual || '(vacío)';
             document.getElementById('sugVal').innerText = caso.sugerencia;
+            document.getElementById('pageVal').innerText = caso.pagina || 'no indicada';
+            document.getElementById('pdfLink').href = caso.pdfUrl;
+            document.getElementById('tipoSelect').style.display = caso.campo === 'Tipo inmueble' ? 'block' : 'none';
+            document.getElementById('valorInput').style.display = caso.campo === 'Tipo inmueble' ? 'none' : 'block';
+            document.getElementById('valorInput').value = caso.valorActual || '';
 
             document.getElementById('loading').style.display = 'none';
             document.getElementById('content').style.display = 'block';
@@ -73,9 +91,12 @@
         .obtenerSiguienteCasoPendiente();
     }
 
-    function aprobarCaso() {
+    function aplicarCampo() {
       if (!casoActual) return;
-      var tipoSeleccionado = document.getElementById('correccionSelect').value;
+      var valor = casoActual.campo === 'Tipo inmueble'
+        ? document.getElementById('tipoSelect').value
+        : document.getElementById('valorInput').value.trim();
+      if (!valor) return;
 
       document.getElementById('loading').style.display = 'block';
       document.getElementById('content').style.display = 'none';
@@ -88,7 +109,7 @@
           alert("Error al aplicar: " + err.message);
           cargarSiguiente();
         })
-        .aplicarCorreccionFila(casoActual.fila, tipoSeleccionado);
+        .aplicarCorreccionCampo(casoActual.fila, casoActual.campo, valor);
     }
 
     window.onload = cargarSiguiente;

@@ -5,6 +5,7 @@ campos no detectados permanecen vacíos y generan una observación: nunca se
 inventan años, pisos ni valores.
 """
 import json
+import os
 import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,13 +23,20 @@ RESULT_HEADERS = [
     "Valor reconstruccion US$", "Valor reconstruccion S/",
     "Pagina valor reconstruccion", "Año construccion", "Pagina año construccion",
     "Nro pisos edificio", "Nro sotanos edificio", "Pagina pisos/sotanos",
-    "Observacion extraccion",
+    "Sugerencia IA", "Observacion extraccion",
 ]
 RAW_CASA_RE = re.compile(r"\b(CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR|VIVIENDA)\b", re.I)
 RAW_DEPTO_RE = re.compile(r"\b(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT)\b", re.I)
 VALOR_COMERCIAL_RE = re.compile(r"\bVALOR\s+COMERCIAL\b", re.I)
 VALOR_RECONSTRUCCION_RE = re.compile(r"\b(VALORES?\s+DE\s+RECONSTRUCCION|VALOR\s+DE\s+RECONSTRUCCION|RECONSTRUCCION)\b", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+GEMINI_FIELDS = (
+    "direccion_extraida", "pagina_direccion", "tipo_inmueble", "tipo_inmueble_texto",
+    "pagina_tipo_inmueble", "valor_comercial_usd", "valor_comercial_pen",
+    "pagina_valor_comercial", "valor_reconstruccion_usd", "valor_reconstruccion_pen",
+    "pagina_valor_reconstruccion", "anio_construccion", "pagina_anio_construccion",
+    "nro_pisos_edificio", "nro_sotanos_edificio", "pagina_pisos_sotanos",
+)
 
 
 def collapse_spaces(text: str) -> str:
@@ -108,11 +116,18 @@ def extract_values_by_anchor(doc, anchor_re: re.Pattern) -> Tuple[Optional[float
 
 
 def extract_anio_construccion(doc) -> Tuple[Optional[int], Optional[int]]:
-    for page_index in range(min(len(doc), 8)):
+    labels = (
+        "ANO DE CONSTRUCCION", "ANO DE EDIFICACION", "ANTIGUEDAD DEL INMUEBLE",
+        "ANTIGUEDAD",
+    )
+    for page_index in range(len(doc)):
         lines = doc[page_index].get_text("text").splitlines()
         for line_index, line in enumerate(lines):
-            if any(label in norm_up(line) for label in ("CONSTRUCCION", "ANTIGUEDAD", "ANO", "AÑO")):
-                match = YEAR_RE.search(" ".join(lines[line_index:line_index + 3]))
+            normalized_line = norm_up(line)
+            if any(label in normalized_line for label in labels):
+                nearby = " ".join(lines[line_index:line_index + 4])
+                nearby = re.sub(r"(FECHA\s+DE\s+INSPECCION|FECHA\s+DE\s+EXPEDICION|FECHA\s+DE\s+CADUCIDAD)\s*[:\-]?\s*", "", norm_up(nearby))
+                match = YEAR_RE.search(nearby)
                 if match:
                     return int(match.group(1)), page_index + 1
     return None, None
@@ -131,6 +146,63 @@ def extract_pisos_sotanos(doc) -> Tuple[Optional[int], Optional[int], Optional[i
     return None, None, None
 
 
+def document_context(doc) -> str:
+    pages = []
+    for page_index in range(len(doc)):
+        text = collapse_spaces(doc[page_index].get_text("text"))
+        if text:
+            pages.append(f"[PAGINA {page_index + 1}]\n{text}")
+    return "\n\n".join(pages)[:100000]
+
+
+def gemini_json(text: str, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+    if not api_key:
+        return None
+    prompt = f"""Eres un extractor de tasaciones inmobiliarias peruanas. Corrige SOLO los campos del JSON usando evidencia literal del texto del PDF.
+Reglas estrictas:
+- No inventes ni completes datos ausentes.
+- La direccion debe ser la del inmueble tasado, preferentemente la etiqueta 'Dirección según inspección ocular'; si falta, usa 'Dirección Minuta de compraventa' y luego la municipal. No devuelvas etiquetas, solo el valor.
+- 'DEPARTAMENTO' gana si aparece 'Tipo de inmueble Departamento', 'Departamento N°' o 'Departamento Flat'. 'CASA' solo si el inmueble tasado es una casa, no por menciones de vivienda en anexos o descripciones generales.
+- Usa valor comercial para DEPARTAMENTO y valor de reconstrucción solo para CASA.
+- Para año de construcción busca explícitamente 'Año de construcción', 'Año de edificación' o 'Antigüedad'. No uses fechas de inspección, expedición, caducidad, minuta o compraventa. Si la etiqueta no tiene un año asociado, devuelve null.
+- Devuelve páginas 1-based y números como números. Devuelve null cuando no haya evidencia.
+- Devuelve JSON válido, sin markdown, con 'campos' y 'sugerencia'. En 'campos' incluye solo campos corregidos o confirmados con evidencia.
+
+""" + json.dumps({"campos_actuales": {key: result.get(key, "") for key in GEMINI_FIELDS}, "texto_pdf": text}, ensure_ascii=False)
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        params={"key": api_key},
+        json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}},
+        timeout=(10, 90),
+    )
+    response.raise_for_status()
+    body = response.json()
+    output = body["candidates"][0]["content"]["parts"][0]["text"]
+    output = re.sub(r"^```(?:json)?\s*|\s*```$", "", output.strip(), flags=re.I)
+    parsed = json.loads(output)
+    return parsed if isinstance(parsed, dict) else None
+
+
+def apply_gemini_result(result: Dict[str, Any], parsed: Optional[Dict[str, Any]]) -> None:
+    if not parsed:
+        return
+    fields = parsed.get("campos") or {}
+    for key in GEMINI_FIELDS:
+        if key in fields and fields[key] is not None and str(fields[key]).strip() != "":
+            result[key] = fields[key]
+    if result.get("tipo_inmueble") == "DEPARTAMENTO":
+        result["valor_elegido_tipo"] = "VALOR COMERCIAL"
+        result["valor_elegido_usd"] = result.get("valor_comercial_usd", "")
+        result["valor_elegido_pen"] = result.get("valor_comercial_pen", "")
+    elif result.get("tipo_inmueble") == "CASA":
+        result["valor_elegido_tipo"] = "VALOR DE RECONSTRUCCION"
+        result["valor_elegido_usd"] = result.get("valor_reconstruccion_usd", "")
+        result["valor_elegido_pen"] = result.get("valor_reconstruccion_pen", "")
+    result["sugerencia_ia"] = collapse_spaces(parsed.get("sugerencia", ""))
+
+
 def empty_result(pdf: Dict[str, str]) -> Dict[str, Any]:
     return {
         "id_codigo_pdf": clean_pdf_id(pdf["name"]), "pdf_archivo": pdf["name"],
@@ -142,11 +214,12 @@ def empty_result(pdf: Dict[str, str]) -> Dict[str, Any]:
         "valor_reconstruccion_usd": "", "valor_reconstruccion_pen": "", "pagina_valor_reconstruccion": "",
         "anio_construccion": "", "pagina_anio_construccion": "", "nro_pisos_edificio": "",
         "nro_sotanos_edificio": "", "pagina_pisos_sotanos": "", "observacion_extraccion": "",
+        "sugerencia_ia": "",
     }
 
 
 def extract_data_from_bytes(content: bytes, pdf: Dict[str, str]) -> Dict[str, Any]:
-    result, observations = empty_result(pdf), []
+    result = empty_result(pdf)
     with fitz.open(stream=content, filetype="pdf") as doc:
         direccion, page_direccion = extract_address(doc)
         tipo, tipo_texto, page_tipo = extract_tipo_inmueble(doc, direccion)
@@ -154,17 +227,12 @@ def extract_data_from_bytes(content: bytes, pdf: Dict[str, str]) -> Dict[str, An
         reconstruction_usd, reconstruction_pen, page_reconstruction = extract_values_by_anchor(doc, VALOR_RECONSTRUCCION_RE)
         anio, page_anio = extract_anio_construccion(doc)
         pisos, sotanos, page_pisos = extract_pisos_sotanos(doc)
+        context = document_context(doc)
     value_type, chosen_usd, chosen_pen = "", None, None
     if tipo == "DEPARTAMENTO":
         value_type, chosen_usd, chosen_pen = "VALOR COMERCIAL", commercial_usd, commercial_pen
     elif tipo == "CASA":
         value_type, chosen_usd, chosen_pen = "VALOR DE RECONSTRUCCION", reconstruction_usd, reconstruction_pen
-    if not direccion: observations.append("Dirección no encontrada")
-    if not tipo: observations.append("Tipo de inmueble no determinado")
-    if chosen_usd is None or chosen_usd <= 0: observations.append("Valor elegido US$ ausente o inválido")
-    if chosen_pen is None or chosen_pen <= 0: observations.append("Valor elegido S/ ausente o inválido")
-    if anio is None: observations.append("Año de construcción no encontrado")
-    if pisos is None: observations.append("Número de pisos no encontrado")
     result.update({
         "direccion_extraida": direccion, "pagina_direccion": page_direccion or "",
         "tipo_inmueble": tipo, "tipo_inmueble_texto": tipo_texto, "pagina_tipo_inmueble": page_tipo or "",
@@ -177,8 +245,23 @@ def extract_data_from_bytes(content: bytes, pdf: Dict[str, str]) -> Dict[str, An
         "pagina_valor_reconstruccion": page_reconstruction or "", "anio_construccion": anio or "",
         "pagina_anio_construccion": page_anio or "", "nro_pisos_edificio": pisos if pisos is not None else "",
         "nro_sotanos_edificio": sotanos if sotanos is not None else "", "pagina_pisos_sotanos": page_pisos or "",
-        "observacion_extraccion": "; ".join(observations),
     })
+    try:
+        apply_gemini_result(result, gemini_json(context, result))
+    except Exception as error:
+        result["sugerencia_ia"] = "IA no disponible: " + str(error)
+    observations = []
+    if not result["direccion_extraida"]: observations.append("Dirección no encontrada")
+    if result["tipo_inmueble"] not in ("CASA", "DEPARTAMENTO"): observations.append("Tipo de inmueble no determinado")
+    if result["tipo_inmueble"] == "DEPARTAMENTO":
+        if not result["valor_comercial_usd"] or float(result["valor_comercial_usd"]) <= 0: observations.append("Valor comercial US$ ausente o inválido")
+        if not result["valor_comercial_pen"] or float(result["valor_comercial_pen"]) <= 0: observations.append("Valor comercial S/ ausente o inválido")
+    if result["tipo_inmueble"] == "CASA":
+        if not result["valor_reconstruccion_usd"] or float(result["valor_reconstruccion_usd"]) <= 0: observations.append("Valor de reconstrucción US$ ausente o inválido")
+        if not result["valor_reconstruccion_pen"] or float(result["valor_reconstruccion_pen"]) <= 0: observations.append("Valor de reconstrucción S/ ausente o inválido")
+    if not result["anio_construccion"]: observations.append("Año de construcción no encontrado")
+    if not result["nro_pisos_edificio"]: observations.append("Número de pisos no encontrado")
+    result["observacion_extraccion"] = "; ".join(observations)
     return result
 
 

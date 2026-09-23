@@ -5,7 +5,7 @@ var CONFIG = {
   SHEET_BANCO: "⚡ Listos para el Banco",
   SHEET_EXPORT: "📥 Exportación Excel",
   MAX_PDFS_POR_LOTE: 300,
-  MAX_TAMANO_PDF_MB: 10,
+  MAX_TAMANO_PDF_MB: 25,
   RESULT_HEADERS: [
     "ID / Codigo PDF", "PDF_Archivo", "PDF_Original_Drive", "Drive_File_ID",
     "Drive_Modificado", "Direccion extraida", "Pagina direccion",
@@ -15,6 +15,6 @@ var CONFIG = {
     "Valor reconstruccion US$", "Valor reconstruccion S/",
     "Pagina valor reconstruccion", "Año construccion", "Pagina año construccion",
     "Nro pisos edificio", "Nro sotanos edificio", "Pagina pisos/sotanos",
-    "Observacion extraccion", "Estado"
+    "Sugerencia IA", "Observacion extraccion", "Estado"
   ]
 };

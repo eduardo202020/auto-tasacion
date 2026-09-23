@@ -51,7 +51,8 @@ function resultadoAFila(result) {
     result.valor_comercial_usd, result.valor_comercial_pen, result.pagina_valor_comercial,
     result.valor_reconstruccion_usd, result.valor_reconstruccion_pen, result.pagina_valor_reconstruccion,
     result.anio_construccion, result.pagina_anio_construccion, result.nro_pisos_edificio,
-    result.nro_sotanos_edificio, result.pagina_pisos_sotanos, result.observacion_extraccion
+    result.nro_sotanos_edificio, result.pagina_pisos_sotanos, result.sugerencia_ia,
+    result.observacion_extraccion
   ];
 }
 
@@ -61,7 +62,42 @@ function prepararResultados(sheet) {
 }
 
 function escribirFilas(sheet, rows) {
-  if (rows.length) sheet.getRange(2, 1, rows.length, CONFIG.RESULT_HEADERS.length).setValues(rows);
+  if (!rows.length) return;
+  var range = sheet.getRange(2, 1, rows.length, CONFIG.RESULT_HEADERS.length);
+  range.setValues(rows);
+  agregarNotasDeFuente(range, rows);
+}
+
+function agregarNotasDeFuente(range, rows) {
+  var notes = rows.map(function (row) {
+    var noteRow = Array(CONFIG.RESULT_HEADERS.length).fill("");
+    var pdfName = row[1] || row[0] || "PDF";
+    var fileId = String(row[3] || "").trim();
+    var fileUrl = fileId ? "https://drive.google.com/open?id=" + fileId : "";
+    var source = function (page) {
+      if (!page) return "";
+      return "Fuente: " + pdfName + "\nPágina del PDF: " + page +
+        (fileUrl ? "\nAbrir PDF: " + fileUrl : "");
+    };
+    var add = function (column, page) {
+      var note = source(page);
+      if (note) noteRow[column - 1] = note;
+    };
+    add(6, row[6]);
+    add(8, row[9]);
+    add(11, row[9]);
+    add(12, row[15] || row[18]);
+    add(13, row[15] || row[18]);
+    add(14, row[15]);
+    add(15, row[15]);
+    add(17, row[18]);
+    add(18, row[18]);
+    add(20, row[20]);
+    add(22, row[23]);
+    add(23, row[23]);
+    return noteRow;
+  });
+  range.setNotes(notes);
 }
 
 function formatearPestañaCompleta(sheet, esRevision) {
@@ -74,8 +110,14 @@ function formatearPestañaCompleta(sheet, esRevision) {
   sheet.setColumnWidth(6, 300);
   sheet.setColumnWidth(25, 300);
   if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, columns)
-      .setBackground(esRevision ? "#FEF3C7" : "#ECFDF5");
+    var dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, columns);
+    var values = dataRange.getValues();
+    var backgrounds = values.map(function (row) {
+      return row.map(function (value) {
+        return esRevision && String(value).trim() === "" ? "#FECACA" : (esRevision ? "#FEF3C7" : "#ECFDF5");
+      });
+    });
+    dataRange.setBackgrounds(backgrounds);
   }
 }
 
@@ -88,15 +130,63 @@ function exportarResultadosAExcel() {
     Browser.msgBox("No hay casos validados para exportar.", Browser.Buttons.OK);
     return;
   }
+  var headers = origen.getRange(1, 1, 1, origen.getLastColumn()).getValues()[0];
+  var stateIndex = indiceColumna(headers, "Estado");
+  var exportHeaders = [
+    "ID / Codigo PDF", "PDF_Archivo", "PDF_Original_Drive", "Drive_File_ID",
+    "Drive_Modificado", "Direccion extraida", "Pagina direccion", "Tipo inmueble",
+    "Tipo inmueble texto", "Pagina tipo inmueble", "Valor elegido tipo", "Valor elegido US$",
+    "Valor elegido S/", "Valor comercial US$", "Valor comercial S/", "Pagina valor comercial",
+    "Valor reconstruccion US$", "Valor reconstruccion S/", "Pagina valor reconstruccion",
+    "Año construccion", "Pagina año construccion", "Nro pisos edificio", "Nro sotanos edificio",
+    "Pagina pisos/sotanos", "Observacion extraccion"
+  ];
+  var exportIndexes = exportHeaders.map(function (header) { return indiceColumna(headers, header); });
+  var sourceRows = origen.getRange(2, 1, origen.getLastRow() - 1, headers.length).getValues();
+  var invalidRows = sourceRows.filter(function (row) {
+    return row.some(function (value) { return String(value).trim(); }) && !String(row[stateIndex]).includes("Validado");
+  });
+  if (invalidRows.length) {
+    Browser.msgBox("No se puede exportar", "Hay " + invalidRows.length + " caso(s) no validados en Listos para el Banco.", Browser.Buttons.OK);
+    return;
+  }
+  var rows = sourceRows.filter(function (row) {
+    return row.some(function (value) { return String(value).trim(); });
+  }).map(function (row) {
+    return exportIndexes.map(function (index) { return row[index]; });
+  });
+  if (!rows.length) {
+    Browser.msgBox("No hay casos validados para exportar.", Browser.Buttons.OK);
+    return;
+  }
   var temporal = SpreadsheetApp.create("Exportación tasaciones " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd_HHmmss"));
   var destino = temporal.getSheets()[0];
-  var values = origen.getDataRange().getValues().map(function (row) { return row.slice(0, CONFIG.RESULT_HEADERS.length - 1); });
-  destino.getRange(1, 1, values.length, values[0].length).setValues(values);
+  var values = [exportHeaders].concat(rows);
+  destino.getRange(1, 1, values.length, exportHeaders.length).setValues(values);
   destino.setFrozenRows(1);
-  destino.getRange(1, 1, 1, values[0].length).setFontWeight("bold");
-  destino.autoResizeColumns(1, values[0].length);
-  var xlsx = DriveApp.getFileById(temporal.getId()).getBlob().getAs(MimeType.MICROSOFT_EXCEL)
-    .setName(temporal.getName() + ".xlsx");
+  destino.getRange(1, 1, 1, exportHeaders.length).setFontWeight("bold");
+  destino.autoResizeColumns(1, exportHeaders.length);
+  var exportUrl = "https://www.googleapis.com/drive/v3/files/" + temporal.getId() +
+    "/export?mimeType=" + encodeURIComponent(MimeType.MICROSOFT_EXCEL);
+  var exportResponse = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (exportResponse.getResponseCode() !== 200) {
+    DriveApp.getFileById(temporal.getId()).setTrashed(true);
+    throw new Error("Drive no pudo convertir la hoja a XLSX: " + exportResponse.getContentText());
+  }
+  var xlsx = exportResponse.getBlob().setName(temporal.getName() + ".xlsx");
   var file = DriveApp.createFile(xlsx);
-  Browser.msgBox("Excel creado", "Descárgalo desde Drive: " + file.getUrl(), Browser.Buttons.OK);
+  DriveApp.getFileById(temporal.getId()).setTrashed(true);
+  var downloadUrl = file.getDownloadUrl();
+  var dialog = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;padding:18px;line-height:1.5">' +
+    '<h3>Excel listo para el banco</h3>' +
+    '<p>La hoja fue validada y el archivo contiene únicamente los casos aprobados.</p>' +
+    '<a href="' + downloadUrl + '" target="_blank" style="display:inline-block;padding:10px 14px;background:#2563eb;color:#fff;text-decoration:none;border-radius:5px">Descargar Excel</a>' +
+    '<p style="font-size:12px;color:#6b7280">El archivo también quedó guardado en Google Drive.</p>' +
+    '</div>'
+  ).setWidth(420).setHeight(210);
+  SpreadsheetApp.getUi().showModalDialog(dialog, "Exportación completada");
 }
