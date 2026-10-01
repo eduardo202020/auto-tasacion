@@ -6,15 +6,21 @@ var CONFIG = {
   SHEET_EXPORT: "📥 Exportación Excel",
   MAX_PDFS_POR_LOTE: 300,
   MAX_TAMANO_PDF_MB: 25,
-  RESULT_HEADERS: [
-    "ID / Codigo PDF", "PDF_Archivo", "PDF_Original_Drive", "Drive_File_ID",
-    "Drive_Modificado", "Direccion extraida", "Pagina direccion",
-    "Tipo inmueble", "Tipo inmueble texto", "Pagina tipo inmueble",
-    "Valor elegido tipo", "Valor elegido US$", "Valor elegido S/",
-    "Valor comercial US$", "Valor comercial S/", "Pagina valor comercial",
-    "Valor reconstruccion US$", "Valor reconstruccion S/",
-    "Pagina valor reconstruccion", "Año construccion", "Pagina año construccion",
-    "Nro pisos edificio", "Nro sotanos edificio", "Pagina pisos/sotanos",
-    "Sugerencia IA", "Observacion extraccion", "Estado"
-  ]
+    RESULT_HEADERS: [
+      "Nro Préstamo", "ID / Codigo PDF", "PDF_Archivo", "PDF_Original_Drive", "Drive_File_ID",
+      "Drive_Modificado", "Direccion extraida", "Pagina direccion",
+      "TIPO VIA 1", "DOMICILIO 1", "N. EXTERIOR", "N. INTERIOR", "REFERENCIA",
+      "UBICACION TIPO", "UBICACION 1", "DISTRITO", "PROVINCIA", "DEPARTAMENTO",
+      "Tipo inmueble", "Tipo inmueble texto", "Pagina tipo inmueble",
+      "Valor elegido tipo", "Valor elegido US$", "Valor elegido S/",
+      "Valor comercial US$", "Valor comercial S/", "Pagina valor comercial",
+      "Valor reconstruccion US$", "Valor reconstruccion S/",
+      "Pagina valor reconstruccion", "Año construccion", "Pagina año construccion",
+      "Nro pisos edificio", "Nro sotanos edificio", "Pagina pisos/sotanos",
+      "DISTRITO_COD", "TIPO_MASIVO_COD", "PROVINCIA_COD", "DEPARTAMENTO_COD", "CLASE_COD",
+      "Sugerencia IA", "Observacion extraccion", "Estado"
+    ]
+
+
+
 };

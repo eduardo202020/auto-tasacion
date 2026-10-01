@@ -44,17 +44,24 @@ function procesarYClasificarTasaciones() {
 
 function resultadoAFila(result) {
   return [
+    "", // Nro Préstamo
     result.id_codigo_pdf, result.pdf_archivo, result.pdf_original_drive, result.drive_file_id,
     result.drive_modificado, result.direccion_extraida, result.pagina_direccion,
+    result.tipo_via_1, result.domicilio_1, result.n_exterior, result.n_interior, result.referencia,
+    result.ubicacion_tipo, result.ubicacion_1, result.distrito, result.provincia, result.departamento,
     result.tipo_inmueble, result.tipo_inmueble_texto, result.pagina_tipo_inmueble,
     result.valor_elegido_tipo, result.valor_elegido_usd, result.valor_elegido_pen,
     result.valor_comercial_usd, result.valor_comercial_pen, result.pagina_valor_comercial,
     result.valor_reconstruccion_usd, result.valor_reconstruccion_pen, result.pagina_valor_reconstruccion,
     result.anio_construccion, result.pagina_anio_construccion, result.nro_pisos_edificio,
-    result.nro_sotanos_edificio, result.pagina_pisos_sotanos, result.sugerencia_ia,
-    result.observacion_extraccion
+    result.nro_sotanos_edificio, result.pagina_pisos_sotanos,
+    result.distrito_cod, result.tipo_masivo_cod, result.provincia_cod, result.departamento_cod, result.clase_banco,
+    result.sugerencia_ia, result.observacion_extraccion
   ];
 }
+
+
+
 
 function prepararResultados(sheet) {
   sheet.clear();
@@ -83,18 +90,20 @@ function agregarNotasDeFuente(range, rows) {
       var note = source(page);
       if (note) noteRow[column - 1] = note;
     };
-    add(6, row[6]);
-    add(8, row[9]);
-    add(11, row[9]);
-    add(12, row[15] || row[18]);
-    add(13, row[15] || row[18]);
-    add(14, row[15]);
-    add(15, row[15]);
-    add(17, row[18]);
-    add(18, row[18]);
-    add(20, row[20]);
-    add(22, row[23]);
-    add(23, row[23]);
+        add(7, row[7]);
+        add(19, row[20]); // Tipo inmueble
+        add(22, row[20]); // Valor elegido tipo
+        add(23, row[26] || row[29]);
+        add(24, row[26] || row[29]);
+        add(25, row[26]);
+        add(26, row[26]);
+        add(28, row[29]);
+        add(29, row[29]);
+        add(31, row[31]);
+        add(33, row[34]);
+        add(34, row[34]);
+
+
     return noteRow;
   });
   range.setNotes(notes);
@@ -132,40 +141,75 @@ function exportarResultadosAExcel() {
   }
   var headers = origen.getRange(1, 1, 1, origen.getLastColumn()).getValues()[0];
   var stateIndex = indiceColumna(headers, "Estado");
-  var exportHeaders = [
-    "ID / Codigo PDF", "PDF_Archivo", "PDF_Original_Drive", "Drive_File_ID",
-    "Drive_Modificado", "Direccion extraida", "Pagina direccion", "Tipo inmueble",
-    "Tipo inmueble texto", "Pagina tipo inmueble", "Valor elegido tipo", "Valor elegido US$",
-    "Valor elegido S/", "Valor comercial US$", "Valor comercial S/", "Pagina valor comercial",
-    "Valor reconstruccion US$", "Valor reconstruccion S/", "Pagina valor reconstruccion",
-    "Año construccion", "Pagina año construccion", "Nro pisos edificio", "Nro sotanos edificio",
-    "Pagina pisos/sotanos", "Observacion extraccion"
-  ];
-  var exportIndexes = exportHeaders.map(function (header) { return indiceColumna(headers, header); });
+  
+  // MAPEO EXACTO PARA LA MACRO "MASIVO"
+  // Col A: Préstamo (row[0])
+  // Col C: Valor Bien (row[22] o row[23] - Valor elegido US$ / S/)
+  // Col E: Importe (Suele ser igual al valor del bien o manual, se deja espacio)
+  // Col G: Dirección (row[8] - TIPO VIA 1)
+  // Col H: Dirección1 (row[9] - DOMICILIO 1)
+  // Col I: N Exterior (row[10])
+  // Col J: N Interior (row[11])
+  // Col K: Referencia (row[12])
+  // Col M: Ubicación (row[13] - UBICACION TIPO)
+  // Col N: Ubicación1 (row[14] - UBICACION 1)
+  // Col O: Municipio (row[15] - DISTRITO)
+  // Col P: CodDistrito (row[15] - DISTRITO para que el usuario valide)
+  // Col R: CodProvincia (row[16] - PROVINCIA)
+  // Col T: CodDepartamento (row[17] - DEPARTAMENTO)
+  // Col U: Clase Inmueble (row[18] - Tipo Inmueble)
+  // Col V: Pisos (row[32])
+  // Col W: Sótanos (row[33])
+  // Col X: Año (row[30])
+  
   var sourceRows = origen.getRange(2, 1, origen.getLastRow() - 1, headers.length).getValues();
-  var invalidRows = sourceRows.filter(function (row) {
-    return row.some(function (value) { return String(value).trim(); }) && !String(row[stateIndex]).includes("Validado");
-  });
-  if (invalidRows.length) {
-    Browser.msgBox("No se puede exportar", "Hay " + invalidRows.length + " caso(s) no validados en Listos para el Banco.", Browser.Buttons.OK);
-    return;
-  }
-  var rows = sourceRows.filter(function (row) {
-    return row.some(function (value) { return String(value).trim(); });
-  }).map(function (row) {
-    return exportIndexes.map(function (index) { return row[index]; });
-  });
-  if (!rows.length) {
-    Browser.msgBox("No hay casos validados para exportar.", Browser.Buttons.OK);
-    return;
-  }
-  var temporal = SpreadsheetApp.create("Exportación tasaciones " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd_HHmmss"));
+  
+    var rowsParaMasivo = sourceRows.map(function(row) {
+      var output = Array(25).fill(""); // De A hasta Y
+      output[0] = row[0];  // Col A: Préstamo
+      output[1] = row[36]; // Col B: TIPO_MASIVO_COD (C/N)
+      output[2] = row[22]; // Col C: Valor Bien (US$ elegido)
+      output[4] = row[22]; // Col E: Importe (Default al valor del bien)
+      output[6] = row[8];  // Col G: TIPO VIA 1
+      output[7] = row[9];  // Col H: DOMICILIO 1
+      output[8] = row[10]; // Col I: N EXTERIOR
+      output[9] = row[11]; // Col J: N INTERIOR
+      output[10] = row[12]; // Col K: REFERENCIA
+      output[12] = row[13]; // Col M: UBICACION TIPO
+      output[13] = row[14]; // Col N: UBICACION 1
+      output[14] = row[15]; // Col O: Municipio (Nombre Distrito)
+      output[15] = row[35]; // Col P: DISTRITO_COD (CÓDIGO NUMÉRICO)
+      output[17] = row[37]; // Col R: PROVINCIA_COD (CÓDIGO NUMÉRICO)
+      output[19] = row[38]; // Col T: DEPARTAMENTO_COD (CÓDIGO NUMÉRICO)
+      output[20] = row[39]; // Col U: CLASE_COD (1, 2, 3 según pisos)
+      output[21] = row[32]; // Col V: Pisos
+      output[22] = row[33]; // Col W: Sótanos
+      output[23] = row[30]; // Col X: Año
+      return output;
+    });
+
+
+
+  var temporal = SpreadsheetApp.create("Para Macro Masivo " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd_HHmmss"));
   var destino = temporal.getSheets()[0];
-  var values = [exportHeaders].concat(rows);
-  destino.getRange(1, 1, values.length, exportHeaders.length).setValues(values);
+  destino.setName("MASIVO");
+  
+  // Encabezados para que el usuario se guíe (aunque la macro usa índices)
+  var masivoHeaders = Array(25).fill("");
+  masivoHeaders[0] = "PRESTAMO"; masivoHeaders[2] = "VALOR_BIEN"; masivoHeaders[4] = "IMPORTE";
+  masivoHeaders[6] = "DIRECCION"; masivoHeaders[7] = "DIRECCION1"; masivoHeaders[8] = "EXTERIOR";
+  masivoHeaders[9] = "INTERIOR"; masivoHeaders[10] = "REFERENCIA"; masivoHeaders[12] = "UBICACION";
+  masivoHeaders[13] = "UBICACION1"; masivoHeaders[14] = "MUNICIPIO"; masivoHeaders[15] = "DIST_COD";
+  masivoHeaders[17] = "PROV_COD"; masivoHeaders[19] = "DEPT_COD"; masivoHeaders[20] = "CLASE";
+  masivoHeaders[21] = "PISOS"; masivoHeaders[22] = "SOTANOS"; masivoHeaders[23] = "AÑO";
+  
+    var values = [masivoHeaders].concat(rowsParaMasivo);
+  destino.getRange(1, 1, values.length, 25).setValues(values);
+
   destino.setFrozenRows(1);
-  destino.getRange(1, 1, 1, exportHeaders.length).setFontWeight("bold");
-  destino.autoResizeColumns(1, exportHeaders.length);
+  destino.getRange(1, 1, 1, 25).setFontWeight("bold");
+  destino.autoResizeColumns(1, 25);
+
   var exportUrl = "https://www.googleapis.com/drive/v3/files/" + temporal.getId() +
     "/export?mimeType=" + encodeURIComponent(MimeType.MICROSOFT_EXCEL);
   var exportResponse = UrlFetchApp.fetch(exportUrl, {
