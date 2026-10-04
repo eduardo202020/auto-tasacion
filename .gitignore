@@ -15,3 +15,7 @@ _referencias_locales/
 **/*.py[cod]
 npm-debug.log*
 .DS_Store
+
+# Artefactos de pruebas y ejecuciones locales de Cloud Run.
+cloud-run/test-output/
+cloud-run/.pytest_cache/

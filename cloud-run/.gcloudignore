@@ -1,0 +1,8 @@
+# Solo código, catálogo y dependencias de ejecución se despliegan a Cloud Run.
+.venv/
+__pycache__/
+*.pyc
+.env
+tests/
+*.xlsx
+!reference-data/catalogos_tasaciones.xlsx

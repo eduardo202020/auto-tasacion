@@ -1,85 +1,45 @@
-# Automatizaciones hipotecarias — Tasaciones
+# Automatización de tasaciones hipotecarias
 
-Repositorio privado para las automatizaciones operativas de Hipotecas. El
-primer módulo, `tasaciones`, recibe PDFs de tasación desde Google Drive,
-extrae sus campos estructurados en Cloud Run y presenta el resultado en Google
-Sheets para revisión y exportación a Excel.
+Repositorio del flujo de tasaciones que recibe informes PDF desde OneDrive,
+extrae sus datos en Google Cloud Run y genera el Excel que procesa la macro de
+seguros en IBM Mainframe 3270.
+
+## Flujo vigente
+
+1. Power Apps ejecuta el flujo `auto-tasacion` de Power Automate.
+2. Power Automate obtiene `auto.zip` desde OneDrive y lo envía por `POST` como
+   `application/zip` al endpoint de Cloud Run.
+3. Cloud Run procesa cada PDF y devuelve `Resultado_Final.xlsx`.
+4. Power Automate guarda ese archivo en OneDrive.
+5. La macro utiliza la hoja `MASIVO`; antes de ejecutarla, el operador revisa
+   la hoja `CONTROL_EXTRACCION` y completa los campos observados.
 
 ## Estructura
 
 ```text
 auto-tasacion/
-├── tasaciones/                 # Código ejecutable del módulo
-│   ├── appscript/              # Interfaz y orquestación de Google Sheets
-│   ├── funcions/               # Endpoint Python desplegable en Cloud Run
-│   ├── package.json            # Comandos de desarrollo para clasp
-│   └── README.local.md         # Detalle de ejecución local
-└── _referencias_locales/       # Excluido por Git: PDFs, macros y material histórico
+├── cloud-run/                 # Servicio Python activo y sus pruebas
+│   └── reference-data/         # Catálogos de códigos usados por MASIVO
+├── power-platform/             # Contrato de Power Apps y Power Automate
+├── contracts/                  # Contratos de salida y reglas de mapeo
+├── bank-sim/                   # Simulador IBM 3270 y robot VBA de prueba
+├── docs/architecture/          # Arquitectura y decisiones vigentes
+└── legacy/google-sheets/       # Flujo Google archivado; no desplegar
 ```
 
-No se suben al repositorio PDFs de clientes, documentos de negocio, archivos
-Excel con macros, Colabs heredados, claves, entornos virtuales ni dependencias
-instaladas.
+Los PDFs de clientes, exportaciones, macros originales, capturas, Colabs y
+respaldos permanecen fuera de Git en `../contexto-local/`.
 
-## Flujo funcional
+## Desarrollo del servicio
 
-1. El operador carga los PDFs desde el panel lateral del Google Sheet; Apps
-   Script los almacena en la carpeta de Google Drive autorizada.
-2. El Sheet actualiza la lista del lote automáticamente.
-3. Apps Script envía los identificadores de archivo al endpoint de Cloud Run.
-4. Python extrae 25 campos: dirección, tipo de inmueble, valores comercial y
-   de reconstrucción en US$/S/, año, pisos, sótanos, páginas de evidencia y
-   observaciones.
-5. Los casos completos pasan a **Listos para el Banco**; los incompletos a
-   **Bandeja de Revisión**.
-6. El menú genera un archivo Excel de los casos validados. La macro NT3270 se
-   mantiene en una plantilla `.xlsm` externa: un `.xlsx` no conserva VBA.
+Consulta [cloud-run/README.md](cloud-run/README.md) para instalar dependencias,
+ejecutar las pruebas y desplegar una versión validada. Antes de publicar, usa
+el contrato de [contracts/masivo.md](contracts/masivo.md).
 
-## Requisitos para desarrollo
+## Seguridad
 
-- Python 3.11.
-- Node.js 20 o superior.
-- Una cuenta corporativa con acceso al Apps Script, Sheet, carpeta Drive y
-  proyecto Google Cloud de desarrollo.
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) y acceso a
-  Cloud Run.
-- La Apps Script API habilitada en https://script.google.com/home/usersettings.
-
-## Preparación local
-
-```bash
-git clone https://github.com/eduardo202020/auto-tasacion.git
-cd auto-tasacion/tasaciones
-npm install
-python3 -m venv funcions/.venv
-source funcions/.venv/bin/activate
-pip install -r funcions/requirements.txt
-```
-
-Para vincular el proyecto Apps Script propio, crea una copia local de la
-plantilla y reemplaza el identificador. Este archivo nunca debe subirse:
-
-```bash
-cp .clasp.json.example .clasp.json
-npx clasp login
-npm run apps:status
-```
-
-Consulta `tasaciones/README.local.md` para los comandos de ejecución local,
-despliegue de Cloud Run y sincronización de Apps Script.
-
-El manual operativo para los usuarios del Sheet está disponible en
-[`docs/MANUAL_DE_USO_TASACIONES.md`](docs/MANUAL_DE_USO_TASACIONES.md).
-
-## Variables y seguridad
-
-No copies claves a código fuente ni al manifest de Apps Script. Usa un `.env`
-local, secretos administrados por Google Cloud para producción y cuentas de
-servicio con mínimo privilegio. Las claves o documentos que hayan sido
-compartidos fuera de un almacén seguro deben rotarse.
-
-## Agregar el próximo módulo
-
-Cada automatización debe vivir en su propio directorio de primer nivel, con
-su README, pruebas y configuración aislada. Comparte solo utilidades genéricas
-que no contengan reglas de negocio ni datos de clientes.
+- No agregues claves, datos de clientes o capturas productivas al repositorio.
+- Power Automate envía el ZIP como binario; el servicio no debe descargar PDFs
+  desde enlaces públicos ni guardar credenciales.
+- El resultado conserva las ausencias en `CONTROL_EXTRACCION`; ningún campo
+  crítico se completa con valores inventados.
