@@ -26,6 +26,26 @@ def normalize(value: object) -> str:
     return " ".join(text.upper().split())
 
 
+def normalize_geography(value: object) -> str:
+    """Normaliza separadores geográficos sin alterar los catálogos de negocio."""
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", normalize(value)).split())
+
+
+# La columna de departamentos del libro DATOS conserva la grafía histórica
+# ``LAMBAYAQUE``; las columnas de provincia/distrito y los documentos usan la
+# forma oficial ``LAMBAYEQUE``. Son la misma división administrativa y el
+# código 15 ya existe en el catálogo, por lo que se traduce solo para buscarlo.
+DEPARTMENT_ALIASES = {
+    "LAMBAYEQUE": "LAMBAYAQUE",
+    "LAMBAYAQUE": "LAMBAYEQUE",
+}
+
+
+def department_variants(department: str) -> tuple[str, ...]:
+    alias = DEPARTMENT_ALIASES.get(department)
+    return tuple(item for item in (department, alias) if item)
+
+
 @lru_cache(maxsize=1)
 def load_catalog() -> dict[str, dict]:
     """Carga códigos geográficos y reglas de la hoja ``DATOS``."""
@@ -65,20 +85,20 @@ def load_catalog() -> dict[str, dict]:
         group_department, province, province_code = row[4], row[5], row[6]
         district, district_code = row[8], row[9]
 
-        normalized_department = normalize(department)
+        normalized_department = normalize_geography(department)
         if normalized_department and department_code is not None and str(department_code).strip():
             departments[normalized_department] = str(department_code).strip().zfill(2)
 
-        normalized_group_department = normalize(group_department)
+        normalized_group_department = normalize_geography(group_department)
         if normalized_group_department:
             current_province_department = normalized_group_department
-        normalized_province = normalize(province)
+        normalized_province = normalize_geography(province)
         if normalized_province and current_province_department and province_code is not None and str(province_code).strip():
             key = (current_province_department, normalized_province)
             provinces[key] = str(province_code).strip().zfill(2)
             province_department.setdefault(normalized_province, set()).add(current_province_department)
 
-        normalized_district = normalize(district)
+        normalized_district = normalize_geography(district)
         district_heading = re.fullmatch(r"DISTRITOS?\s+(.+)", normalized_district)
         if district_heading:
             # El libro usa ambos encabezados, "DISTRITOS <provincia>" y
@@ -145,16 +165,24 @@ def load_catalog() -> dict[str, dict]:
 def lookup_location(department: object, province: object, district: object) -> dict[str, str]:
     """Obtiene códigos de departamento, provincia y distrito sin adivinar."""
     catalog = load_catalog()
-    dept = normalize(department)
-    prov = normalize(province)
-    dist = normalize(district)
+    dept = normalize_geography(department)
+    prov = normalize_geography(province)
+    dist = normalize_geography(district)
+    variants = department_variants(dept)
+
+    def find_code(mapping: dict, key_builder) -> str:
+        for candidate in variants:
+            if code := mapping.get(key_builder(candidate)):
+                return code
+        return ""
+
     result = {
         "DEPARTAMENTO": dept,
         "PROVINCIA": prov,
         "DISTRITO": dist,
-        "DEPARTAMENTO_COD": catalog["departments"].get(dept, ""),
-        "PROVINCIA_COD": catalog["provinces"].get((dept, prov), ""),
-        "DISTRITO_COD": catalog["districts"].get((dept, prov, dist), ""),
+        "DEPARTAMENTO_COD": find_code(catalog["departments"], lambda candidate: candidate),
+        "PROVINCIA_COD": find_code(catalog["provinces"], lambda candidate: (candidate, prov)),
+        "DISTRITO_COD": find_code(catalog["districts"], lambda candidate: (candidate, prov, dist)),
     }
 
     # Un distrito inequívoco puede resolverse aunque el PDF no indique uno de
@@ -165,10 +193,50 @@ def lookup_location(department: object, province: object, district: object) -> d
             dep, pro, _ = next(iter(matches))
             result["DEPARTAMENTO"] = result["DEPARTAMENTO"] or dep
             result["PROVINCIA"] = result["PROVINCIA"] or pro
-            result["DEPARTAMENTO_COD"] = catalog["departments"].get(dep, "")
+            result["DEPARTAMENTO_COD"] = next(
+                (catalog["departments"].get(candidate, "") for candidate in department_variants(dep)
+                 if catalog["departments"].get(candidate, "")),
+                "",
+            )
             result["PROVINCIA_COD"] = catalog["provinces"].get((dep, pro), "")
             result["DISTRITO_COD"] = catalog["districts"].get((dep, pro, dist), "")
     return result
+
+
+def lookup_location_from_text(value: object) -> dict[str, str]:
+    """Resuelve ubicación solo si los tres nombres del catálogo están escritos.
+
+    Los anexos Solicitud Construyo pueden usar el sufijo ``distrito - provincia
+    - departamento`` sin etiquetas. Esta función no segmenta texto libre: solo
+    acepta una terna única de distrito, provincia y departamento ya presente en
+    el catálogo versionado.
+    """
+    raw_text = normalize(value)
+    text = normalize_geography(raw_text)
+    if not text:
+        return {}
+    catalog = load_catalog()
+    segments = [normalize_geography(item) for item in re.split(r"\s+-\s+", raw_text) if item.strip()]
+    if len(segments) >= 3:
+        district_segment, province_segment, department_segment = segments[-3:]
+        matches = {
+            (department, province, district)
+            for department, province, district in catalog["districts"]
+            if department == department_segment
+            and province == province_segment
+            and re.search(rf"(?:^|\s){re.escape(district)}$", district_segment)
+        }
+    else:
+        matches = {
+            (department, province, district)
+            for department, province, district in catalog["districts"]
+            if all(re.search(rf"(?:^|\s){re.escape(item)}(?:$|\s)", text)
+                   for item in (department, province, district))
+        }
+    if len(matches) != 1:
+        return {}
+    department, province, district = next(iter(matches))
+    return lookup_location(department, province, district)
 
 
 def lookup_property_codes(property_type: object) -> dict[str, str]:

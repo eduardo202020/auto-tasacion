@@ -15,10 +15,10 @@ from tools.verify_workbook import validate
 class WorkbookContractValidatorTests(unittest.TestCase):
     def complete_row(self) -> list[object]:
         values = {
-            "TIPO DE INMUEBLE": "C",
-            "VALOR DEL BIEN": 125000.0,
-            "MONEDA": "USD",
-            "IMPORTE": 125000.0,
+            "TIPO DE INMUEBLE": "DEPARTAMENTO",
+            "VALOR DEL BIEN": "",
+            "MONEDA": "PEN",
+            "IMPORTE": "475,000.00",
             "DIRECCION": "AV.",
             "DIRECCION1": "PRUEBA",
             "MUNICIPIO": "WANCHAQ",

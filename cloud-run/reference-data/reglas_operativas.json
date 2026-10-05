@@ -1,4 +1,16 @@
 {
-  "version": "pendiente-de-validacion-operativa",
-  "rules": []
+  "version": "2026-10-05-auto10",
+  "rules": [
+    "Dirección: priorizar la dirección según minuta de la unidad tasada; usar inspección ocular solo si no existe minuta y dirección municipal/matriz como último respaldo.",
+    "Pisos y sótanos: priorizar la tabla de características del inmueble sobre la descripción narrativa; la azotea no se suma por inferencia. La celda conjunta 'N° de Pisos/Sótanos del edificio' se interpreta como pisos/sótanos, por ejemplo 3/0.",
+    "Primer construyo: cuando el informe declara simultáneamente primer construyo, terreno sin construcciones y una edificación proyectada a N pisos y azotea, usar N pisos, 0 sótanos y edad efectiva 0; el año se deriva de la fecha de expedición documentada.",
+    "Fecha de expedición: tomar el primer año que sigue a la etiqueta 'Fecha de Expedición'; la fecha de caducidad no puede sustituirla.",
+    "Dirección de Solicitud Construyo: solo respalda la ubicación territorial si la dirección prioritaria no contiene distrito, provincia y departamento. Se admiten etiquetas abreviadas y el sufijo explícito distrito-provincia-departamento, siempre que la terna esté en DATOS.",
+    "Catálogo geográfico: Lambayeque del PDF equivale a la etiqueta histórica Lambayaque del bloque de departamentos de DATOS y conserva el código 15 existente.",
+    "Ubicación: si el tipo no tiene código autorizado en DATOS, dejar UBICACION y UBICACION1 vacíos sin bloquear una fila que tenga la geografía obligatoria completa.",
+    "Salida MASIVO: emitir DEPARTAMENTO/CASA, tipos de vía y ubicación con etiquetas completas; conservar los códigos del catálogo en CONTROL.",
+    "Importe: usar el valor elegido en PEN cuando exista, dejar VALOR DEL BIEN vacío y emitir IMPORTE como texto con miles y dos decimales en la salida MASIVO heredada.",
+    "PRESTAMO y SEGURO INMUEBLE: Cloud Run los deja vacíos; Power Automate Desktop e IBM 3270 los completan en el proceso posterior.",
+    "ID_CASO: identificar cada PDF con el nombre interno del ZIP y su contenido, para que copias binarias con nombres distintos no compartan la llave de conciliación."
+  ]
 }

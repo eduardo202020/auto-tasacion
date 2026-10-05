@@ -21,8 +21,21 @@ El flujo debe mantener esta secuencia:
    la respuesta HTTP como contenido del archivo.
 6. Ejecutar PAD/IBM 3270 exclusivamente sobre las filas de la tabla Excel
    `tblParaProcesar`. No leer `tblRevisionIa` ni `tblControl` para operar.
-7. Registrar el resultado de cada operación usando el `ID_CASO` de la misma
+7. Obtener y registrar `PRESTAMO` y `SEGURO INMUEBLE` en PAD/IBM 3270: Cloud
+   Run los entrega vacíos porque no son campos extraídos del PDF.
+8. Registrar el resultado de cada operación usando el `ID_CASO` de la misma
    fila de `tblParaProcesar` y actualizar la fila coincidente de `tblControl`.
 
 No se debe usar el contrato anterior de Google Sheets, que enviaba JSON y
 esperaba una respuesta JSON.
+
+
+## Lotes mayores a 30 MiB
+
+Para evitar el l?mite de entrada HTTP/1, reemplazar el POST binario por estas acciones:
+
+1. **Iniciar carga**: `POST` con `Content-Type: application/json` y el cuerpo `{"operacion":"iniciar_carga","nombre_archivo":"<nombre del ZIP>","tamano_bytes":<tama?o del archivo>}`.
+2. **Subir ZIP**: `PUT` a `url_carga` de la respuesta anterior, con `Content-Type: application/zip` y el contenido binario devuelto por OneDrive. No usar Base64 ni JSON.
+3. **Procesar carga**: `POST` JSON al mismo endpoint con `solicitud_proceso` de **Iniciar carga**. El cuerpo de esta respuesta es `Resultado_Final.xlsx`; usarlo directamente en **Crear archivo** de OneDrive.
+
+La URL de carga es temporal, solo puede escribir en un objeto privado y vence en 15 minutos.

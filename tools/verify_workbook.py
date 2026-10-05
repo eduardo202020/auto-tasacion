@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 import sys
 
 from openpyxl import load_workbook
@@ -26,10 +27,11 @@ PARA_PROCESAR_HEADERS = (
     "COL_S", "DEPT_COD", "CLASE", "PISOS", "SOTANOS", "AÑO", "ID_CASO",
 )
 REQUIRED_READY_FIELDS = (
-    "TIPO DE INMUEBLE", "VALOR DEL BIEN", "MONEDA", "IMPORTE", "DIRECCION",
+    "TIPO DE INMUEBLE", "MONEDA", "IMPORTE", "DIRECCION",
     "DIRECCION1", "MUNICIPIO", "DIST_COD", "PROV_COD", "DEPT_COD", "CLASE",
     "PISOS", "SOTANOS", "AÑO", "ID_CASO",
 )
+IMPORTE_FORMAT = re.compile(r"^\d{1,3}(?:,\d{3})*\.\d{2}$")
 
 
 def is_blank(value: object) -> bool:
@@ -71,6 +73,9 @@ def validate(path: Path) -> list[str]:
         missing = [field for field in REQUIRED_READY_FIELDS if is_blank(values[index[field]])]
         if missing:
             issues.append(f"Fila {row_number} de PARA_PROCESAR tiene campos requeridos vacíos: {', '.join(missing)}")
+        importe = values[index["IMPORTE"]]
+        if not is_blank(importe) and not IMPORTE_FORMAT.fullmatch(str(importe)):
+            issues.append(f"Fila {row_number} de PARA_PROCESAR tiene un IMPORTE fuera del formato #,##0.00")
         case_id = values[index["ID_CASO"]]
         if not is_blank(case_id) and not str(case_id).startswith("TAS-"):
             issues.append(f"Fila {row_number} de PARA_PROCESAR tiene un ID_CASO inválido")

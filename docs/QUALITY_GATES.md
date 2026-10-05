@@ -39,3 +39,8 @@ La publicación necesita aprobación explícita, una revisión de la salida
 generada con datos autorizados y la confirmación de compatibilidad por el
 responsable de Power Automate. Sigue el runbook
 [`CHANGE_AND_DEPLOY.md`](runbooks/CHANGE_AND_DEPLOY.md).
+
+
+## Prueba de ingreso grande
+
+Para un cambio de transporte, comprobar una carga directa menor a 30 MiB y una carga temporal firmada mayor a 30 MiB. Ambas deben devolver un XLSX que apruebe `tools/verify_workbook.py`.

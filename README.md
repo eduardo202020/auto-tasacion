@@ -84,3 +84,8 @@ Para comprobar un Excel generado fuera de la suite de pruebas:
   valor, página y evidencia, y el resultado debe superar la validación normal.
 - La IA se mantiene desactivada por defecto. Antes de habilitarla, usa Secret
   Manager, aprueba el tratamiento de PDFs y configura las reglas operativas.
+
+
+## ZIP mayores a 30 MiB
+
+Cloud Run rechaza solicitudes HTTP/1 mayores a 32 MiB antes de ejecutar el servicio. Para ZIP de hasta 75 MiB, Power Automate solicita una URL temporal, carga el binario en Cloud Storage privado y env?a a Cloud Run el identificador del objeto. El bucket elimina esos objetos al d?a siguiente.

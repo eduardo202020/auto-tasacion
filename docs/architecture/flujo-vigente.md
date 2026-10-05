@@ -21,3 +21,8 @@ fila. Los conflictos sin una regla operativa aprobada quedan en `REVISION_IA`.
 
 El flujo anterior de Google Drive, Google Sheets y Apps Script fue archivado
 en `legacy/google-sheets`. No comparte endpoint ni contrato con Power Platform.
+
+
+## Ruta para lotes grandes
+
+Cuando el ZIP supera 30 MiB, Power Automate obtiene una URL firmada de Cloud Run, carga el ZIP en el bucket privado y solicita `procesar_carga`. Cloud Run descarga solo el objeto indicado bajo `ingresos/`, mantiene las mismas validaciones y devuelve el mismo XLSX contractual.

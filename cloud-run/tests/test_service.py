@@ -1,9 +1,10 @@
 import io
+import os
 import sys
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import fitz
 from flask import Flask, request
@@ -16,10 +17,14 @@ from catalog import (
     lookup_currency_code,
     lookup_direction_code,
     lookup_location,
+    lookup_location_from_text,
     lookup_property_codes,
 )
-from pdf_extractor import extract_pdf
-from service import MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, build_workbook, procesar_tasaciones, process_zip
+from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
+from service import (
+    MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, build_upload_ticket, build_workbook,
+    download_staged_zip, procesar_tasaciones, process_zip, to_macro_row,
+)
 
 
 def build_pdf() -> bytes:
@@ -65,6 +70,81 @@ def build_pdf_with_year_in_adjacent_cell() -> bytes:
     return content
 
 
+def build_pdf_with_minuta_and_table() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "Dirección según Minuta", fontsize=10)
+    page.insert_text((250, 72), "Avenida Minuta 123, Miraflores, Lima", fontsize=10)
+    page.insert_text((72, 96), "Dirección según Inspección ocular", fontsize=10)
+    page.insert_text((250, 96), "Calle Inspección 456, Miraflores, Lima", fontsize=10)
+    page.insert_text((72, 140), "N° de Pisos", fontsize=10)
+    page.insert_text((200, 140), "N° Sótanos", fontsize=10)
+    page.insert_text((88, 158), "6", fontsize=10)
+    page.insert_text((220, 158), "2", fontsize=10)
+    page.insert_text((72, 190), "El edificio consta de 5 pisos y 2 sótanos.", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_pisos_sotanos_pair() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "N° de Pisos/ Sótanos del edificio", fontsize=10)
+    page.insert_text((185, 90), "3 / 0", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_solicitud_construyo_address() -> bytes:
+    document = fitz.open()
+    primary = document.new_page()
+    primary.insert_text((72, 72), "Dirección: Avenida Afilador S/N Mz E Lote 7", fontsize=10)
+    appendix = document.new_page()
+    appendix.insert_text(
+        (72, 72),
+        """Solicitud Construyo
+2. Dirección del inmueble o ubicación:
+AV. AFILADOR S/N MZ. E LT. 7 SECTOR AFILADOR RUPA RUPA - LEONCIO PRADO - HUANUCO
+3. Partida electrónica""",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_first_construyo() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        """Se trata del primer construyo de una edificación proyectada a 2 pisos y azotea.
+Se verificó el terreno sin construcciones.
+Fecha de Expedición 29-May-2026
+Fecha de Caducidad 29-May-2027""",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_geographic_department() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        """Provincia Chiclayo, Departamento Lambayeque.
+Se trata de una vivienda unifamiliar.""",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
 def build_zip(name: str = "D01.pdf", content: bytes | None = None) -> bytes:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -76,8 +156,8 @@ def complete_row(extracted: dict) -> tuple[list, list[str]]:
     """Aísla el enrutamiento de las variaciones del parser de direcciones."""
     row = [""] * len(MACRO_COLUMNS)
     values = {
-        "TIPO DE INMUEBLE": "C", "VALOR DEL BIEN": 125000.0, "MONEDA": "USD", "IMPORTE": 125000.0,
-        "DIRECCION": "AV.", "DIRECCION1": "PRUEBA", "MUNICIPIO": "WANCHAQ", "DIST_COD": "008",
+        "TIPO DE INMUEBLE": "DEPARTAMENTO", "VALOR DEL BIEN": "", "MONEDA": "PEN", "IMPORTE": "475,000.00",
+        "DIRECCION": "AVENIDA", "DIRECCION1": "PRUEBA", "MUNICIPIO": "WANCHAQ", "DIST_COD": "008",
         "PROV_COD": "01", "DEPT_COD": "08", "CLASE": "2", "PISOS": 7, "SOTANOS": 2,
         "AÑO": extracted.get("Año construccion", ""),
     }
@@ -119,14 +199,76 @@ class NeverCalledReviewer:
 
 
 class TasacionesServiceTests(unittest.TestCase):
-    def test_extracts_core_fields_and_detects_floor_conflict(self):
+    def test_extracts_core_fields_without_prestamo(self):
         result = extract_pdf(build_pdf(), "D01.pdf")
-        self.assertEqual(result["PRESTAMO"], "12345678901234567890")
+        self.assertEqual(result["PRESTAMO"], "")
         self.assertEqual(result["Tipo inmueble"], "DEPARTAMENTO")
         self.assertEqual(result["Valor elegido US$"], 125000.0)
         self.assertEqual(result["Año construccion"], 2018)
-        self.assertEqual(result["Nro pisos edificio"], 7)
-        self.assertIn("Conflicto pisos/sótanos", result["Observacion extraccion"])
+        self.assertEqual(result["Nro pisos edificio"], 8)
+        self.assertNotIn("Préstamo", result["Observacion extraccion"])
+
+    def test_prioritizes_minuta_and_characteristics_table(self):
+        content = build_pdf_with_minuta_and_table()
+        with fitz.open(stream=content, filetype="pdf") as document:
+            address, page_address = extract_address(document)
+            pisos, sotanos, page_pisos = extract_pisos_sotanos(document)
+        self.assertEqual(address, "Avenida Minuta 123, Miraflores, Lima")
+        self.assertEqual(page_address, 1)
+        self.assertEqual((pisos, sotanos, page_pisos), (6, 2, 1))
+
+    def test_extracts_pisos_and_sotanos_from_single_pair_cell(self):
+        with fitz.open(stream=build_pdf_with_pisos_sotanos_pair(), filetype="pdf") as document:
+            self.assertEqual(extract_pisos_sotanos(document), (3, 0, 1))
+
+    def test_uses_solicitud_construyo_only_for_missing_administrative_location(self):
+        result = extract_pdf(build_pdf_with_solicitud_construyo_address(), "D01.pdf")
+        self.assertEqual(
+            result["Direccion extraida"],
+            "AV. AFILADOR S/N MZ. E LT. 7 SECTOR AFILADOR RUPA RUPA - LEONCIO PRADO - HUANUCO",
+        )
+        self.assertEqual(result["Pagina direccion"], 2)
+
+    def test_derives_zero_age_and_year_for_documented_first_construyo(self):
+        result = extract_pdf(build_pdf_with_first_construyo(), "D09.pdf")
+        self.assertEqual(result["Nro pisos edificio"], 2)
+        self.assertEqual(result["Nro sotanos edificio"], 0)
+        self.assertEqual(result["Edad efectiva"], 0)
+        self.assertEqual(result["Año expedicion"], 2026)
+        self.assertEqual(result["Año construccion"], 2026)
+
+    def test_ignores_geographic_department_when_resolving_property_type(self):
+        result = extract_pdf(build_pdf_with_geographic_department(), "D04.pdf")
+        self.assertEqual(result["Tipo inmueble"], "CASA")
+
+    def test_builds_historical_pen_row_without_prestamo_or_location_code(self):
+        extracted = {
+            "PRESTAMO": "12345678901234567890", "Valor elegido US$": 125000.0,
+            "Valor elegido S/": 475000.0, "Nro pisos edificio": 6,
+            "Nro sotanos edificio": 2, "Año construccion": 2018,
+            "Tipo inmueble": "DEPARTAMENTO",
+        }
+        parsed = {
+            "TIPO VIA 1": "AVENIDA", "DOMICILIO 1": "PRUEBA", "N. EXTERIOR": "123",
+            "N. INTERIOR": "", "REFERENCIA": "", "UBICACION TIPO": "URBANIZACION",
+            "UBICACION 1": "PRUEBA", "DISTRITO": "WANCHAQ", "DISTRITO_COD": "008",
+            "PROVINCIA_COD": "01", "DEPARTAMENTO_COD": "08",
+        }
+        with patch("service.parse_address", return_value=(parsed, [])), \
+             patch("service.lookup_property_codes", return_value={"tipo_inmueble": "D", "masivo": "C", "valor_del_bien": "C"}), \
+             patch("service.lookup_currency_code", return_value="PEN"), \
+             patch("service.lookup_direction_code", side_effect=lambda value: {"AVENIDA": "AV.", "URBANIZACION": "URB"}.get(value, "")), \
+             patch("service.lookup_class_code", return_value="2"):
+            row, issues = to_macro_row(extracted)
+        self.assertEqual(row[MACRO_COLUMNS.index("PRESTAMO")], "")
+        self.assertEqual(row[MACRO_COLUMNS.index("TIPO DE INMUEBLE")], "DEPARTAMENTO")
+        self.assertEqual(row[MACRO_COLUMNS.index("VALOR DEL BIEN")], "")
+        self.assertEqual(row[MACRO_COLUMNS.index("MONEDA")], "PEN")
+        self.assertEqual(row[MACRO_COLUMNS.index("IMPORTE")], "475,000.00")
+        self.assertEqual(row[MACRO_COLUMNS.index("DIRECCION")], "AVENIDA")
+        self.assertEqual(row[MACRO_COLUMNS.index("UBICACION")], "URBANIZACION")
+        self.assertEqual(row[MACRO_COLUMNS.index("UBICACION1")], "PRUEBA")
+        self.assertEqual(issues, [])
 
     def test_derives_construction_year_from_effective_age(self):
         result = extract_pdf(build_pdf_with_effective_age(), "D02.pdf")
@@ -151,6 +293,12 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(lookup_currency_code("PEN"), "PEN")
         self.assertEqual(lookup_direction_code("AVENIDA"), "AV.")
         self.assertEqual(lookup_location("CUSCO", "CUSCO", "WANCHAQ")["DISTRITO_COD"], "008")
+        self.assertEqual(lookup_location("LAMBAYEQUE", "CHICLAYO", "JOSE LEONARDO ORTIZ")["DEPARTAMENTO_COD"], "15")
+        self.assertEqual(lookup_location("HUANUCO", "LEONCIO PRADO", "RUPA RUPA")["DISTRITO_COD"], "004")
+        self.assertEqual(
+            lookup_location_from_text("Av. Afilador, Rupa Rupa - Leoncio Prado - Huanuco")["DISTRITO_COD"],
+            "004",
+        )
         self.assertEqual(lookup_class_code(4), "1")
         self.assertEqual(lookup_class_code(5), "2")
         self.assertEqual(lookup_class_code(11), "3")
@@ -166,6 +314,16 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(len(control_rows), 1)
         self.assertEqual(control_rows[0]["Ruta final"], "PENDIENTE_IA")
         self.assertEqual(control_rows[0]["Revision IA ejecutada"], "NO")
+
+    def test_assigns_distinct_case_ids_to_duplicate_pdf_content(self):
+        archive = io.BytesIO()
+        content = build_pdf_with_effective_age()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("D04.pdf", content)
+            bundle.writestr("D05.pdf", content)
+        _, review_rows, control_rows = process_zip(archive.getvalue(), use_environment_reviewer=False)
+        self.assertEqual(len(review_rows), 2)
+        self.assertEqual(len({row["ID_CASO"] for row in control_rows}), 2)
 
     def test_ia_result_is_revalidated_before_entering_para_procesar(self):
         extracted = {
@@ -209,7 +367,7 @@ class TasacionesServiceTests(unittest.TestCase):
         control = {"ID_CASO": "TAS-TEST", "PDF_Archivo": "D01.pdf", "Ruta final": "LISTO_DETERMINISTA"}
         workbook = load_workbook(io.BytesIO(build_workbook([[*row, "TAS-TEST"]], [], [control]).read()), data_only=True)
         self.assertEqual(workbook.sheetnames, ["PARA_PROCESAR", "REVISION_IA", "CONTROL"])
-        self.assertEqual(workbook["PARA_PROCESAR"]["B2"].value, "C")
+        self.assertEqual(workbook["PARA_PROCESAR"]["B2"].value, "DEPARTAMENTO")
         self.assertIn("tblParaProcesar", workbook["PARA_PROCESAR"].tables)
         self.assertIn("tblRevisionIa", workbook["REVISION_IA"].tables)
         self.assertIn("tblControl", workbook["CONTROL"].tables)
@@ -221,6 +379,52 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         self.assertIn("Resultado_Final.xlsx", response.headers["Content-Disposition"])
+
+    def test_creates_temporary_signed_upload_ticket(self):
+        credentials = MagicMock()
+        credentials.token = "token-prueba"
+        blob = MagicMock()
+        blob.generate_signed_url.return_value = "https://storage.example/upload"
+        client = MagicMock()
+        client.bucket.return_value.blob.return_value = blob
+        environment = {
+            "GCS_UPLOAD_BUCKET": "tasaciones-prueba",
+            "GCS_SIGNING_SERVICE_ACCOUNT": "runtime@example.iam.gserviceaccount.com",
+        }
+        with patch.dict(os.environ, environment, clear=False), \
+             patch("service.storage.Client", return_value=client), \
+             patch("service.google.auth.default", return_value=(credentials, "project")):
+            ticket = build_upload_ticket({"nombre_archivo": "auto-10.zip", "tamano_bytes": 49_810_784})
+        self.assertEqual(ticket["operacion"], "subir_zip")
+        self.assertTrue(ticket["objeto"].startswith("ingresos/"))
+        self.assertTrue(ticket["objeto"].endswith("/auto-10.zip"))
+        self.assertEqual(ticket["encabezados_carga"], {"Content-Type": "application/zip"})
+        blob.generate_signed_url.assert_called_once()
+
+    def test_endpoint_processes_staged_zip(self):
+        app = Flask(__name__)
+        with patch("service.download_staged_zip", return_value=build_zip("lote/D01.pdf")):
+            with app.test_request_context(
+                "/", method="POST", json={"operacion": "procesar_carga", "objeto": "ingresos/prueba/auto-10.zip"},
+            ):
+                response = procesar_tasaciones(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_downloads_staged_zip_after_loading_metadata(self):
+        raw_zip = build_zip()
+        blob = MagicMock()
+        blob.exists.return_value = True
+        blob.size = None
+        blob.download_as_bytes.return_value = raw_zip
+        blob.reload.side_effect = lambda: setattr(blob, "size", len(raw_zip))
+        client = MagicMock()
+        client.bucket.return_value.blob.return_value = blob
+        with patch.dict(os.environ, {"GCS_UPLOAD_BUCKET": "tasaciones-prueba"}, clear=False), \
+             patch("service.storage.Client", return_value=client):
+            content = download_staged_zip("ingresos/prueba/auto-10.zip")
+        self.assertEqual(content, raw_zip)
+        blob.reload.assert_called_once()
 
 
 if __name__ == "__main__":

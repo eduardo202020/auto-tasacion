@@ -1,6 +1,6 @@
 REGLAS DE NEGOCIO PENDIENTES - TASACIONES
-Estado: BORRADOR PARA VALIDACION OPERATIVA
-Fecha: 2026-10-04
+Estado: PARCIALMENTE IMPLEMENTADO SEGUN PROCESAMIENTO HISTORICO D01-D04
+Fecha: 2026-10-05
 
 Objetivo
 ---------
@@ -167,3 +167,39 @@ Ejemplos de prueba aprobados:
 REGISTRO DE APROBACIONES
 ------------------------
 Regla | Decision | Responsable | Fecha | Version de codigo | Casos de prueba
+
+ACTUALIZACION OPERATIVA - 2026-10-05
+-------------------------------------
+El procesamiento historico de D01, D02, D03 y D04 fue autorizado como base
+para la implementacion activa. Las decisiones se versionaron en
+cloud-run/reference-data/reglas_operativas.json y se prueban con PDFs
+sinteticos.
+
+Regla | Decision implementada | Casos de referencia
+Pisos/sotanos | La tabla de caracteristicas prevalece sobre la descripcion; la azotea no se suma por inferencia. | D03, D04: 6 pisos y 2 sotanos.
+Direccion | Minuta de la unidad; inspeccion ocular como respaldo; matriz municipal como ultimo respaldo. | D01, D02.
+Ubicacion | Una ubicacion no homologable queda vacia y no bloquea la fila si la geografia obligatoria es valida. | D02.
+Salida MASIVO | Se emiten etiquetas completas para tipo de inmueble, via y ubicacion; los codigos del catalogo se conservan en CONTROL. | D01-D04.
+Importe | Se prioriza el valor elegido en PEN, con miles y dos decimales; VALOR DEL BIEN se deja vacio por compatibilidad MASIVO. | D01-D04.
+PRESTAMO y SEGURO INMUEBLE | Cloud Run los deja vacios; PAD/IBM 3270 los obtiene y registra despues. | D01-D04.
+
+Las reglas de casa/valor nuevo, unidades multiples, edad efectiva fuera de
+los casos observados y OCR permanecen pendientes de evidencia operativa.
+
+ACTUALIZACION AUTO-10 - 2026-10-05
+-----------------------------------
+La revisión de D01 a D10 incorporó reglas documentadas en
+``reglas_operativas.json`` y pruebas sintéticas. El lote de control resultó
+en nueve casos operables (D02-D10, excepto D01) y un caso de revisión.
+
+Regla | Evidencia usada | Decisión implementada
+Pisos/sótanos en una celda | D03, D04 y D05 muestran ``N° de Pisos/Sótanos del edificio`` con valores ``3/0`` y ``2/0``. | Leer ambos enteros como pisos y sótanos desde esa celda de tabla.
+Primer construyo | D09 declara primer construyo, terreno sin construcciones y construcción proyectada a 2 pisos y azotea. | Emitir 2 pisos, 0 sótanos y edad efectiva 0; derivar el año desde la fecha de expedición.
+Fecha de expedición | D01-D05 y D09 incluyen Expedición y Caducidad. | Tomar el año asociado a la etiqueta Expedición, nunca el de Caducidad.
+Dirección territorial | D08 incluye Dist./Prov./Dpto. en Solicitud Construyo; D01 usa Rupa Rupa - Leoncio Prado - Huánuco. | Usar esa fuente solo cuando la dirección prioritaria no incluye los tres niveles y la terna coincide de forma única con DATOS.
+Lambayeque | D04 y D05 indican Lambayeque; DATOS conserva Lambayaque en su bloque de departamentos. | Resolver al código existente 15 sin modificar DATOS.
+Llave técnica | D04 y D05 son binariamente iguales, pero representan filas separadas. | ID_CASO combina nombre del PDF interno y contenido para mantener una llave única por fila.
+
+D01 se mantiene en REVISION_IA: Solicitud Construyo confirma la ubicación,
+pero solo indica financiamiento del primer piso y no declara el total de pisos
+ni sótanos. No hay regla que autorice completar esos campos.

@@ -14,13 +14,20 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import re
+from datetime import timedelta
+from uuid import uuid4
 import zipfile
 from typing import Any
 
 import functions_framework
+import google.auth
 import pandas as pd
 from flask import Response
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.cloud import storage
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 import address_parser
@@ -30,17 +37,27 @@ from catalog import (
     lookup_currency_code,
     lookup_direction_code,
     lookup_location,
+    lookup_location_from_text,
     lookup_property_codes,
 )
 from pdf_extractor import extract_pdf
 
 
 MAX_PDFS_PER_BATCH = 300
+# El endpoint HTTP/1 de Cloud Run solo recibe hasta 32 MiB. Este valor conserva
+# margen para que Power Automate use el camino directo sin recibir un 413.
+MAX_DIRECT_ZIP_BYTES = 30 * 1024 * 1024
 MAX_ZIP_BYTES = 75 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 # Gemini admite PDFs inline de hasta 50 MB. Los mayores deben pasar por el
 # mecanismo corporativo aprobado (por ejemplo, OCR o File API), nunca forzarse.
 MAX_INLINE_AI_PDF_BYTES = 50 * 1024 * 1024
+ZIP_CONTENT_TYPE = "application/zip"
+GCS_UPLOAD_BUCKET_ENV = "GCS_UPLOAD_BUCKET"
+GCS_SIGNING_SERVICE_ACCOUNT_ENV = "GCS_SIGNING_SERVICE_ACCOUNT"
+GCS_UPLOAD_PREFIX = "ingresos"
+GCS_UPLOAD_TTL_SECONDS = 15 * 60
+_SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 PARA_PROCESAR_SHEET = "PARA_PROCESAR"
 REVISION_IA_SHEET = "REVISION_IA"
@@ -57,10 +74,11 @@ MACRO_COLUMNS = [
 # de IBM 3270 contra CONTROL.
 PARA_PROCESAR_COLUMNS = [*MACRO_COLUMNS, "ID_CASO"]
 
-# PRESTAMO se obtiene después de la operación en IBM 3270. Las columnas COL_*
-# son reservadas. Los demás campos son el mínimo codificado para operar.
+# PRESTAMO se obtiene después de la operación en IBM 3270. VALOR DEL BIEN se
+# conserva vacío por compatibilidad histórica; IMPORTE contiene el valor PEN.
+# Las columnas COL_* son reservadas.
 REQUIRED_MACRO_COLUMNS = (
-    "TIPO DE INMUEBLE", "VALOR DEL BIEN", "MONEDA", "IMPORTE",
+    "TIPO DE INMUEBLE", "MONEDA", "IMPORTE",
     "DIRECCION", "DIRECCION1", "MUNICIPIO", "DIST_COD", "PROV_COD",
     "DEPT_COD", "CLASE", "PISOS", "SOTANOS", "AÑO",
 )
@@ -87,7 +105,6 @@ REVIEW_COLUMNS = [
 
 AI_TARGETS_BY_MACRO_FIELD = {
     "TIPO DE INMUEBLE": ("Tipo inmueble",),
-    "VALOR DEL BIEN": ("Valor elegido US$", "Valor elegido S/"),
     "MONEDA": ("Valor elegido US$", "Valor elegido S/"),
     "IMPORTE": ("Valor elegido US$", "Valor elegido S/"),
     "DIRECCION": ("Direccion extraida",),
@@ -105,7 +122,7 @@ AI_TARGETS_BY_MACRO_FIELD = {
 TRANSIENT_EXTRACTION_OBSERVATIONS = (
     "Dirección no encontrada", "Tipo de inmueble no determinado", "Valor comercial no encontrado",
     "Valor de reconstrucción no encontrado", "Año de construcción", "Número de pisos no encontrado",
-    "Número de sótanos no encontrado", "Préstamo de 20 dígitos no encontrado",
+    "Número de sótanos no encontrado",
 )
 RULES_PATH = Path(__file__).parent / "reference-data" / "reglas_operativas.json"
 
@@ -133,8 +150,14 @@ def json_cell(value: object) -> str:
 
 
 def build_case_id(filename: str, content: bytes) -> str:
-    """Identificador técnico estable para trazar el PDF sin alterar MASIVO."""
-    return f"TAS-{hashlib.sha256(content).hexdigest()[:16].upper()}"
+    """Identificador estable por entrada para conciliar una fila con 3270.
+
+    Dos PDFs distintos pueden tener el mismo contenido (por ejemplo, una
+    copia de un informe con nombres D04 y D05). El nombre dentro del ZIP forma
+    parte de la identidad técnica para que cada fila conserve una llave única.
+    """
+    identity = str(filename or "").encode("utf-8") + b"\0" + content
+    return f"TAS-{hashlib.sha256(identity).hexdigest()[:16].upper()}"
 
 
 def load_approved_rules() -> list[str]:
@@ -149,14 +172,28 @@ def load_approved_rules() -> list[str]:
     return [str(rule).strip() for rule in rules if str(rule).strip()]
 
 
-def choose_value(extracted: dict[str, Any]) -> tuple[Any, str]:
+def choose_importe(extracted: dict[str, Any]) -> tuple[Any, str]:
+    """Prioriza el importe en PEN, como en la salida histórica de MASIVO."""
     usd = extracted.get("Valor elegido US$")
     pen = extracted.get("Valor elegido S/")
-    if not is_blank(usd):
-        return usd, "USD"
     if not is_blank(pen):
         return pen, "PEN"
+    if not is_blank(usd):
+        return usd, "USD"
     return "", ""
+
+
+def format_importe(value: Any) -> str:
+    """Emite el importe en el formato textual heredado de MASIVO.
+
+    La macro histórica consume, por ejemplo, ``735,096.00``. Se entrega como
+    texto para conservar los separadores al guardar o exportar el Excel a CSV,
+    sin depender de la configuración regional del equipo que lo abra.
+    """
+    try:
+        return f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return ""
 
 
 def parse_address(extracted: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -172,6 +209,11 @@ def parse_address(extracted: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
     parsed.update(lookup_location(
         parsed.get("DEPARTAMENTO", ""), parsed.get("PROVINCIA", ""), parsed.get("DISTRITO", ""),
     ))
+    if not all(parsed.get(field) for field in ("DISTRITO_COD", "PROVINCIA_COD", "DEPARTAMENTO_COD")):
+        textual_location = lookup_location_from_text(raw_address)
+        for field, value in textual_location.items():
+            if value:
+                parsed[field] = value
     for field, label in (
         ("DISTRITO_COD", "código de distrito"),
         ("PROVINCIA_COD", "código de provincia"),
@@ -185,7 +227,7 @@ def parse_address(extracted: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
 def to_macro_row(extracted: dict[str, Any]) -> tuple[list[Any], list[str]]:
     """Crea una fila compatible con Power Automate sin clasificarla aún."""
     parsed, observations = parse_address(extracted)
-    value, currency = choose_value(extracted)
+    importe, currency = choose_importe(extracted)
     pisos = extracted.get("Nro pisos edificio", "")
     tipo = str(extracted.get("Tipo inmueble") or "")
     property_codes = lookup_property_codes(tipo)
@@ -202,22 +244,21 @@ def to_macro_row(extracted: dict[str, Any]) -> tuple[list[Any], list[str]]:
         observations.append("Moneda sin código autorizado en DATOS")
     if parsed.get("TIPO VIA 1") and not via_code:
         observations.append("Tipo de vía sin abreviatura autorizada en DATOS")
-    if parsed.get("UBICACION TIPO") and not ubicacion_code:
-        observations.append("Ubicación sin abreviatura autorizada en DATOS")
-
     row = [""] * len(MACRO_COLUMNS)
-    row[0] = extracted.get("PRESTAMO", "")
-    row[1] = property_codes["masivo"]
-    row[2] = as_excel_value(value)
+    row[0] = ""
+    # La hoja operativa conserva las etiquetas completas que usaba MASIVO;
+    # los códigos del catálogo permanecen auditables en CONTROL.
+    row[1] = tipo
+    row[2] = ""
     row[3] = currency_code
-    row[4] = as_excel_value(value)
-    row[6] = via_code
+    row[4] = format_importe(importe)
+    row[6] = parsed.get("TIPO VIA 1", "") if via_code else ""
     row[7] = parsed.get("DOMICILIO 1", "")
     row[8] = parsed.get("N. EXTERIOR", "")
     row[9] = parsed.get("N. INTERIOR", "")
     row[10] = parsed.get("REFERENCIA", "")
-    row[12] = ubicacion_code
-    row[13] = parsed.get("UBICACION 1", "")
+    row[12] = parsed.get("UBICACION TIPO", "") if ubicacion_code else ""
+    row[13] = parsed.get("UBICACION 1", "") if ubicacion_code else ""
     row[14] = parsed.get("DISTRITO", "")
     row[15] = parsed.get("DISTRITO_COD", "")
     row[17] = parsed.get("PROVINCIA_COD", "")
@@ -376,6 +417,100 @@ def validate_zip(raw_data: bytes) -> list[zipfile.ZipInfo]:
         return entries
 
 
+def upload_bucket_name() -> str:
+    bucket = os.getenv(GCS_UPLOAD_BUCKET_ENV, "").strip()
+    if not bucket:
+        raise ValueError("La carga mediante Cloud Storage no está configurada")
+    return bucket
+
+
+def safe_zip_filename(value: Any) -> str:
+    filename = Path(str(value or "")).name.strip()
+    filename = _SAFE_FILENAME.sub("_", filename)
+    if not filename or not filename.lower().endswith(".zip"):
+        raise ValueError("El nombre de carga debe terminar en .zip")
+    return filename[:120]
+
+
+def declared_zip_size(value: Any) -> int:
+    try:
+        size = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("tamano_bytes debe ser un entero válido") from error
+    if size <= 0:
+        raise ValueError("tamano_bytes debe ser mayor que cero")
+    if size > MAX_ZIP_BYTES:
+        raise ValueError("El ZIP excede el tamaño máximo permitido")
+    return size
+
+
+def build_upload_ticket(payload: dict[str, Any]) -> dict[str, Any]:
+    """Crea una URL PUT temporal sin exponer el bucket al público.
+
+    Power Automate usa el URL para subir el ZIP directamente a Cloud Storage y
+    luego invoca la operación ``procesar_carga`` con el nombre retornado.
+    """
+    filename = safe_zip_filename(payload.get("nombre_archivo"))
+    declared_zip_size(payload.get("tamano_bytes"))
+    bucket_name = upload_bucket_name()
+    object_name = f"{GCS_UPLOAD_PREFIX}/{uuid4().hex}/{filename}"
+    blob = storage.Client().bucket(bucket_name).blob(object_name)
+
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    credentials.refresh(GoogleAuthRequest())
+    service_account_email = os.getenv(GCS_SIGNING_SERVICE_ACCOUNT_ENV, "").strip()
+    if not service_account_email:
+        raise ValueError("La cuenta de firma de Cloud Storage no está configurada")
+
+    upload_url = blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(seconds=GCS_UPLOAD_TTL_SECONDS),
+        method="PUT",
+        content_type=ZIP_CONTENT_TYPE,
+        query_parameters={"ifGenerationMatch": "0"},
+        service_account_email=service_account_email,
+        access_token=credentials.token,
+    )
+    return {
+        "status": "ok",
+        "operacion": "subir_zip",
+        "bucket": bucket_name,
+        "objeto": object_name,
+        "url_carga": upload_url,
+        "encabezados_carga": {"Content-Type": ZIP_CONTENT_TYPE},
+        "vence_en_segundos": GCS_UPLOAD_TTL_SECONDS,
+        "solicitud_proceso": {"operacion": "procesar_carga", "objeto": object_name},
+    }
+
+
+def staged_object_name(value: Any) -> str:
+    object_name = str(value or "").strip()
+    prefix = f"{GCS_UPLOAD_PREFIX}/"
+    if not object_name.startswith(prefix) or ".." in object_name or not object_name.lower().endswith(".zip"):
+        raise ValueError("El objeto de carga no es válido")
+    return object_name
+
+
+def download_staged_zip(value: Any) -> bytes:
+    """Descarga solo objetos creados para esta ruta de carga temporal."""
+    object_name = staged_object_name(value)
+    blob = storage.Client().bucket(upload_bucket_name()).blob(object_name)
+    if not blob.exists():
+        raise ValueError("El ZIP temporal no existe o ya venció")
+    # exists() solo confirma presencia; reload() obtiene size y el resto de
+    # metadatos antes de decidir si el objeto puede descargarse.
+    blob.reload()
+    size = int(blob.size or 0)
+    if not size:
+        raise ValueError("El ZIP temporal está vacío")
+    if size > MAX_ZIP_BYTES:
+        raise ValueError("El ZIP excede el tamaño máximo permitido")
+    raw_data = blob.download_as_bytes()
+    if len(raw_data) != size:
+        raise ValueError("No fue posible leer el ZIP temporal completo")
+    return raw_data
+
+
 def process_zip(
     raw_data: bytes,
     reviewer: CaseReviewer | None = None,
@@ -423,18 +558,15 @@ def process_zip(
             rejected: list[str] = []
 
             if not route:
-                if has_business_conflict(issues) and not approved_rules:
+                if has_business_conflict(issues):
                     route = "REGLA_NEGOCIO_PENDIENTE"
-                    ai_reason = "Existe un conflicto entre fuentes sin una regla de negocio aprobada"
+                    ai_reason = "Existe un conflicto entre fuentes que no cubre una regla operativa activa"
                 elif len(content) > MAX_INLINE_AI_PDF_BYTES:
                     route = "PENDIENTE_IA"
                     ai_reason = "El PDF excede el límite de revisión IA inline y requiere una ruta aprobada"
                 elif reviewer is None:
                     route = "PENDIENTE_IA"
                     ai_reason = reviewer_error or "La revisión IA no está habilitada"
-                elif not requested_fields and has_business_conflict(issues):
-                    route = "REGLA_NEGOCIO_PENDIENTE"
-                    ai_reason = "Existe un conflicto entre fuentes sin una regla de negocio aprobada"
                 elif not requested_fields:
                     route = "REVISION_HUMANA"
                     ai_reason = "No existe un campo autorizable para revisión IA"
@@ -553,6 +685,23 @@ def json_error(message: str, status: int) -> Response:
     return response
 
 
+def json_response(payload: dict[str, Any], status: int = 200) -> Response:
+    response = Response(json.dumps(payload, ensure_ascii=False), status=status, mimetype="application/json")
+    response.headers.update(CORS_HEADERS)
+    return response
+
+
+def xlsx_response(raw_data: bytes) -> Response:
+    ready_rows, review_rows, control_rows = process_zip(raw_data)
+    response = Response(
+        build_workbook(ready_rows, review_rows, control_rows).getvalue(), status=200,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response.headers["Content-Disposition"] = 'attachment; filename="Resultado_Final.xlsx"'
+    response.headers.update(CORS_HEADERS)
+    return response
+
+
 @functions_framework.http
 def procesar_tasaciones(request):
     if request.method == "OPTIONS":
@@ -560,14 +709,23 @@ def procesar_tasaciones(request):
     if request.method != "POST":
         return json_error("Método no permitido", 405)
     try:
-        ready_rows, review_rows, control_rows = process_zip(request.get_data(cache=False))
-        response = Response(
-            build_workbook(ready_rows, review_rows, control_rows).getvalue(), status=200,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        response.headers["Content-Disposition"] = 'attachment; filename="Resultado_Final.xlsx"'
-        response.headers.update(CORS_HEADERS)
-        return response
+        if request.mimetype == "application/json":
+            payload = request.get_json(silent=False)
+            if not isinstance(payload, dict):
+                raise ValueError("El cuerpo JSON debe ser un objeto")
+            operation = str(payload.get("operacion", "")).strip()
+            if operation == "iniciar_carga":
+                return json_response(build_upload_ticket(payload), 201)
+            if operation == "procesar_carga":
+                return xlsx_response(download_staged_zip(payload.get("objeto")))
+            raise ValueError("operacion debe ser iniciar_carga o procesar_carga")
+
+        raw_data = request.get_data(cache=False)
+        if len(raw_data) > MAX_DIRECT_ZIP_BYTES:
+            raise ValueError(
+                "El ZIP supera 30 MiB para POST directo; use iniciar_carga y procesar_carga mediante Cloud Storage"
+            )
+        return xlsx_response(raw_data)
     except ValueError as error:
         return json_error(str(error), 400)
     except Exception:
