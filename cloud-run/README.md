@@ -8,11 +8,24 @@ devuelve `Resultado_Final.xlsx`.
 - Método: `POST`
 - Encabezado: `Content-Type: application/zip`
 - Cuerpo: ZIP con hasta 300 archivos PDF.
-- Respuesta exitosa: XLSX con las hojas `MASIVO` y `CONTROL_EXTRACCION`.
+- Respuesta exitosa: XLSX con las hojas `PARA_PROCESAR`, `REVISION_IA` y
+  `CONTROL`.
 
-`MASIVO` conserva exactamente las 24 columnas usadas por la macro. La hoja
-`CONTROL_EXTRACCION` mantiene los campos extraídos, páginas de evidencia y
-observaciones. Un dato vacío significa que no hubo evidencia suficiente.
+La respuesta contiene estas tablas de Excel:
+
+- `PARA_PROCESAR` / `tblParaProcesar`: conserva las 24 columnas de integración
+  y añade al final `ID_CASO` para la trazabilidad de Power Automate. Solo
+  contiene filas completas y validadas.
+- `REVISION_IA` / `tblRevisionIa`: excepciones que no pudieron entrar a la
+  cola operable, con faltantes, evidencia y siguiente acción.
+- `CONTROL` / `tblControl`: una fila por PDF, con evidencias, ruta final y
+  correcciones aceptadas.
+
+La primera validación es determinista y se basa en el flujo de Colab. Los
+códigos de tipo de inmueble, moneda, dirección y clase se leen del catálogo
+versionado de la hoja `DATOS`. Cuando se habilita, Gemini recibe solo PDFs de
+casos excepcionales y debe devolver valor, página y evidencia en JSON. La fila
+solo pasa a `PARA_PROCESAR` después de una segunda validación determinista.
 
 ## Ejecutar localmente
 
@@ -24,6 +37,22 @@ pip install -r requirements.txt
 python -m unittest discover -s tests -v
 functions-framework --target procesar_tasaciones --source main.py --debug
 ```
+
+## Revisión IA
+
+Por defecto está desactivada. No pongas la clave en `.env`, código o Git. En
+Cloud Run, entrega `GEMINI_API_KEY` mediante Secret Manager y configura:
+
+```text
+AI_REVIEW_ENABLED=true
+GEMINI_MODEL=<modelo Gemini aprobado>
+```
+
+Antes de activarla, Seguridad debe aprobar el envío de PDFs y Operaciones debe
+convertir las decisiones aprobadas del archivo
+`docs/REGLAS_NEGOCIO_PENDIENTES.txt` en reglas versionadas dentro de
+`reference-data/reglas_operativas.json`. Un conflicto sin regla aprobada queda
+en `REVISION_IA` y nunca se completa automáticamente.
 
 En otra terminal, envía un ZIP de prueba:
 

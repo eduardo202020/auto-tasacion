@@ -5,6 +5,7 @@ IA: conserva evidencia por página y deja vacío todo dato sin evidencia.
 """
 from __future__ import annotations
 
+import difflib
 import re
 import unicodedata
 from typing import Any, Optional
@@ -20,6 +21,10 @@ VALOR_RECONSTRUCCION_RE = re.compile(
     re.I,
 )
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+DATE_YEAR_RE = re.compile(
+    r"\b(?:\d{1,2}\s*(?:[-/]\s*(?:\d{1,2}|[A-Z]{3,12})\s*[-/]\s*|\s+DE\s+[A-Z]{3,12}\s+DE\s+))(19\d{2}|20\d{2})\b",
+    re.I,
+)
 LOAN_LABEL_RE = re.compile(
     r"(?:N(?:RO|ÚMERO|UMERO)?\.?\s*(?:DE\s*)?)?(?:PR[EÉ]STAMO|OPERACI[OÓ]N|CR[EÉ]DITO)\D{0,35}((?:\d[\s-]*){20})",
     re.I,
@@ -73,6 +78,20 @@ def get_blocks(page: fitz.Page) -> list[dict[str, Any]]:
     return sorted(blocks, key=lambda item: (round(item["y0"], 1), round(item["x0"], 1)))
 
 
+def get_words(page: fitz.Page) -> list[dict[str, Any]]:
+    """Obtiene palabras con coordenadas para leer tablas de tasación.
+
+    Varios formatos ubican el número de pisos debajo del encabezado, no a su
+    derecha. Leer solo el texto lineal desplaza los valores de esas tablas.
+    """
+    words = []
+    for x0, y0, x1, y1, text, *_ in page.get_text("words"):
+        value = collapse_spaces(text)
+        if value:
+            words.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": value, "up": norm_up(value)})
+    return words
+
+
 def clean_address(value: str) -> str:
     value = re.sub(
         r"^(?:DIRECCI[OÓ]N(?:\s+DEL\s+INMUEBLE)?|UBICACI[OÓ]N\s+DEL\s+PREDIO|INMUEBLE\s+UBICADO)\s*[:\-]?\s*",
@@ -111,6 +130,50 @@ def extract_address(doc: fitz.Document) -> tuple[str, Optional[int]]:
     return "", None
 
 
+def detect_address_conflict(doc: fitz.Document, selected_address: str) -> str:
+    """Marca direcciones documentales contradictorias sin exponerlas en el log.
+
+    Una tasación puede reproducir la dirección de minuta y otra de inspección.
+    El extractor conserva su prioridad histórica, pero no debe elegir una de
+    esas fuentes silenciosamente cuando ambas son materialmente diferentes.
+    """
+    labels = ("DIRECCION", "UBICACION DEL PREDIO", "INMUEBLE UBICADO", "DIRECCION DEL INMUEBLE")
+    candidates: list[str] = []
+    has_minuta_address = False
+    has_inspection_address = False
+    for page_index in range(min(len(doc), 6)):
+        blocks = get_blocks(doc[page_index])
+        for index, block in enumerate(blocks):
+            if not any(label in block["up"] for label in labels):
+                continue
+            has_minuta_address = has_minuta_address or "DIRECCION SEGUN MINUTA" in block["up"]
+            has_inspection_address = has_inspection_address or "DIRECCION SEGUN INSPECCION" in block["up"]
+            candidate = clean_address(block["text"])
+            if not looks_like_address(candidate) and index + 1 < len(blocks):
+                candidate = clean_address(candidate + " " + blocks[index + 1]["text"])
+            if looks_like_address(candidate):
+                fingerprint = re.sub(r"[^A-Z0-9]", "", norm_up(candidate))
+                if fingerprint:
+                    candidates.append(fingerprint)
+    selected = re.sub(r"[^A-Z0-9]", "", norm_up(selected_address))
+    if selected:
+        candidates.append(selected)
+    unique_candidates = list(dict.fromkeys(candidates))
+    for index, candidate in enumerate(unique_candidates):
+        for other in unique_candidates[index + 1:]:
+            # Un mismo domicilio suele venir acompañado de distintos textos
+            # administrativos. Solo se marca conflicto cuando el contenido
+            # documental realmente difiere, no por esos sufijos.
+            if difflib.SequenceMatcher(None, candidate, other).ratio() < 0.85:
+                return "Conflicto de dirección entre fuentes del PDF"
+    # Algunos formatos colocan las direcciones en celdas cuyo texto no se
+    # extrae con una coordenada útil. La coexistencia de minuta e inspección
+    # ocular se deriva a regla de negocio, en vez de elegir una silenciosamente.
+    if has_minuta_address and has_inspection_address:
+        return "Conflicto de dirección entre minuta e inspección ocular"
+    return ""
+
+
 def extract_tipo_inmueble(doc: fitz.Document, direccion: str) -> tuple[str, str, Optional[int]]:
     labelled = re.compile(r"TIPO\s+(?:DE\s+)?INMUEBLE\D{0,50}(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT|CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR)", re.I)
     for page_index in range(min(len(doc), 6)):
@@ -132,21 +195,44 @@ def extract_tipo_inmueble(doc: fitz.Document, direccion: str) -> tuple[str, str,
 
 
 def first_amount_after_currency(text: str, currency_pattern: str) -> Optional[float]:
-    match = re.search(currency_pattern + r"\s*([0-9][0-9,. ]*)", text, re.I)
+    # Una tabla puede continuar con otros importes en la misma fila. Capturar
+    # espacios aquí uniría, por ejemplo, el total y sus componentes en un
+    # único número inválido.
+    match = re.search(
+        currency_pattern + r"\s*([0-9]+(?:[,.][0-9]{3})*(?:[,.][0-9]{1,2})?)",
+        text,
+        re.I,
+    )
     return parse_amount(match.group(1)) if match else None
 
 
 def extract_values_by_anchor(doc: fitz.Document, anchor_re: re.Pattern[str]) -> tuple[Optional[float], Optional[float], Optional[int]]:
     for page_index in range(min(len(doc), 10)):
-        page_text = doc[page_index].get_text("text")
-        match = anchor_re.search(page_text)
-        if not match:
-            continue
-        section = page_text[match.start():match.start() + 900]
-        usd = first_amount_after_currency(section, r"(?:US\$|USD\$?|U\.?S\.?\$)")
-        pen = first_amount_after_currency(section, r"(?:S/\.?|SOLES?)")
-        if usd is not None or pen is not None:
-            return usd, pen, page_index + 1
+        page = doc[page_index]
+        blocks = get_blocks(page)
+        for block in blocks:
+            if not anchor_re.search(block["up"]):
+                continue
+            related = [
+                item for item in blocks
+                if block["y0"] - 3 <= item["y0"] <= block["y1"] + 42
+                and item["x0"] >= max(0, block["x0"] - 40)
+            ]
+            related.sort(key=lambda item: (item["y0"], item["x0"]))
+            section = " ".join(item["text"] for item in related)
+            usd = first_amount_after_currency(section, r"(?:US\$|USD\$?|U\.?S\.?\$)")
+            pen = first_amount_after_currency(section, r"(?:S/\.?|SOLES?)")
+            if usd is not None or pen is not None:
+                return usd, pen, page_index + 1
+
+        page_text = page.get_text("text")
+        match = anchor_re.search(norm_up(page_text))
+        if match:
+            section = page_text[match.start():match.start() + 1200]
+            usd = first_amount_after_currency(section, r"(?:US\$|USD\$?|U\.?S\.?\$)")
+            pen = first_amount_after_currency(section, r"(?:S/\.?|SOLES?)")
+            if usd is not None or pen is not None:
+                return usd, pen, page_index + 1
     return None, None, None
 
 
@@ -154,6 +240,26 @@ def extract_anio_construccion(doc: fitz.Document) -> tuple[Optional[int], Option
     labels = ("ANO DE CONSTRUCCION", "ANO DE EDIFICACION", "ANTIGUEDAD DEL INMUEBLE", "ANTIGUEDAD")
     excluded = re.compile(r"(FECHA\s+DE\s+INSPECCION|FECHA\s+DE\s+EXPEDICION|FECHA\s+DE\s+CADUCIDAD|MINUTA|COMPRAVENTA)", re.I)
     for page_index, page in enumerate(doc):
+        # En algunos formatos el valor está en una celda a la derecha de la
+        # etiqueta. El orden lineal del texto PDF no conserva necesariamente
+        # esa relación, por lo que se prioriza la geometría de la misma fila.
+        blocks = get_blocks(page)
+        for label in blocks:
+            if not any(item in label["up"] for item in labels):
+                continue
+            direct = excluded.sub("", label["up"])
+            if match := YEAR_RE.search(direct):
+                return int(match.group(1)), page_index + 1
+            same_row = [
+                item for item in blocks
+                if item is not label
+                and label["y0"] - 5 <= item["y0"] <= label["y1"] + 12
+                and item["x0"] >= label["x1"] - 5
+            ]
+            for item in sorted(same_row, key=lambda entry: (entry["y0"], entry["x0"])):
+                if match := YEAR_RE.search(item["up"]):
+                    return int(match.group(1)), page_index + 1
+
         lines = page.get_text("text").splitlines()
         for line_index, line in enumerate(lines):
             if not any(label in norm_up(line) for label in labels):
@@ -165,9 +271,141 @@ def extract_anio_construccion(doc: fitz.Document) -> tuple[Optional[int], Option
     return None, None
 
 
-def extract_pisos_sotanos(doc: fitz.Document) -> tuple[Optional[int], Optional[int], Optional[int]]:
+def extract_edad_efectiva(doc: fitz.Document) -> tuple[Optional[int], Optional[int]]:
+    """Lee la edad efectiva de la tabla de construcciones, con su evidencia.
+
+    El valor suele estar debajo del encabezado ``Edad Efectiva (años)``. Se
+    usan palabras y coordenadas de la columna, no bloques de texto amplios:
+    algunos motores PDF agrupan toda la tabla y podrían confundir los pisos
+    del edificio con la edad.
+    """
+    for page_index, page in enumerate(doc):
+        words = get_words(page)
+        for header_word in words:
+            if header_word["up"] != "EDAD":
+                continue
+            header_line = [
+                item for item in words
+                if abs(item["y0"] - header_word["y0"]) <= 3
+            ]
+            header_line.sort(key=lambda item: item["x0"])
+            try:
+                edad_index = header_line.index(header_word)
+            except ValueError:
+                continue
+            effective = next(
+                (item for item in header_line[edad_index + 1:] if item["up"].startswith("EFECTIVA")),
+                None,
+            )
+            if effective is None:
+                continue
+            column_end = next(
+                (item for item in header_line if item["x0"] >= effective["x1"] and "ANO" in item["up"]),
+                effective,
+            )
+            candidates = [
+                item for item in words
+                if header_word["y1"] - 2 <= item["y0"] <= header_word["y1"] + 36
+                and header_word["x0"] - 5 <= (item["x0"] + item["x1"]) / 2 <= column_end["x1"] + 8
+                and re.fullmatch(r"0|[1-9]\d?|1[0-4]\d|150", item["text"])
+            ]
+            if candidates:
+                candidates.sort(key=lambda item: (item["y0"], item["x0"]))
+                return int(candidates[0]["text"]), page_index + 1
+    return None, None
+
+
+def extract_anio_expedicion(doc: fitz.Document) -> tuple[Optional[int], Optional[int]]:
+    """Extrae el año de la fecha de expedición, nunca otra fecha del informe."""
+    for page_index, page in enumerate(doc):
+        blocks = get_blocks(page)
+        for header in blocks:
+            if "FECHA DE EXPEDICION" not in header["up"]:
+                continue
+            nearby = [header]
+            nearby.extend(
+                item for item in blocks
+                if item is not header
+                and header["y0"] - 5 <= item["y0"] <= header["y1"] + 45
+                and item["x0"] >= header["x0"] - 20
+            )
+            nearby.sort(key=lambda item: (item["y0"], item["x0"]))
+            for item in nearby:
+                if match := DATE_YEAR_RE.search(item["up"]):
+                    return int(match.group(1)), page_index + 1
+    return None, None
+
+
+def extract_pisos_sotanos_tabla(page: fitz.Page) -> tuple[Optional[int], Optional[int]]:
+    """Extrae pisos y sótanos cuando ambos aparecen como columnas de tabla."""
+    words = get_words(page)
+    lines: list[list[dict[str, Any]]] = []
+    for word in words:
+        for line in lines:
+            if abs(line[0]["y0"] - word["y0"]) <= 3:
+                line.append(word)
+                break
+        else:
+            lines.append([word])
+
+    candidates: dict[str, tuple[float, float, float]] = {}
+    for line in lines:
+        line.sort(key=lambda word: word["x0"])
+        line_up = " ".join(word["up"] for word in line)
+        if "PISOS" in line_up and "EDIFIC" in line_up:
+            floor_words = [word for word in line if "PISOS" in word["up"] or "EDIFIC" in word["up"]]
+            candidates.setdefault(
+                "pisos",
+                (min(word["x0"] for word in floor_words), max(word["x1"] for word in floor_words), max(word["y1"] for word in floor_words)),
+            )
+        for word in line:
+            if "SOTANO" in word["up"]:
+                candidates.setdefault("sotanos", (word["x0"], word["x1"], word["y1"]))
+
+    values: dict[str, Optional[int]] = {"pisos": None, "sotanos": None}
+    for key, (x0, x1, y1) in candidates.items():
+        below = [
+            word for word in words
+            if y1 - 2 <= word["y0"] <= y1 + 52
+            and x0 - 5 <= (word["x0"] + word["x1"]) / 2 <= x1 + 20
+            and re.fullmatch(r"\d{1,3}", word["text"])
+        ]
+        if below:
+            below.sort(key=lambda word: (word["y0"], word["x0"]))
+            values[key] = int(below[0]["text"])
+    return values["pisos"], values["sotanos"]
+
+
+def extract_pisos_sotanos_descripcion(doc: fitz.Document) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """Prioriza la descripción del edificio cuando declara ambos totales.
+
+    En informes con tablas, la fila puede referirse a una torre o a un nivel
+    distinto. La regla del Colab toma la descripción explícita ``consta de`` /
+    ``constará de`` cuando está disponible.
+    """
+    pattern = re.compile(
+        r"\bCONSTA(?:RA)?\s+DE\b.{0,100}?\b(\d{1,3})\s+PISOS?\b.{0,100}?\b(\d{1,2})\s+SOTANOS?\b",
+        re.I,
+    )
     for page_index in range(min(len(doc), 10)):
-        text = norm_up(doc[page_index].get_text("text"))
+        match = pattern.search(norm_up(doc[page_index].get_text("text")))
+        if match:
+            return int(match.group(1)), int(match.group(2)), page_index + 1
+    return None, None, None
+
+
+def extract_pisos_sotanos(doc: fitz.Document) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    pisos_descripcion, sotanos_descripcion, page_descripcion = extract_pisos_sotanos_descripcion(doc)
+    if pisos_descripcion is not None:
+        return pisos_descripcion, sotanos_descripcion, page_descripcion
+
+    for page_index in range(min(len(doc), 10)):
+        page = doc[page_index]
+        pisos_tabla, sotanos_tabla = extract_pisos_sotanos_tabla(page)
+        if pisos_tabla is not None:
+            return pisos_tabla, sotanos_tabla if sotanos_tabla is not None else 0, page_index + 1
+
+        text = norm_up(page.get_text("text"))
         patterns = (
             r"\b(\d{1,2})\s+PISOS?.{0,100}?(\d{1,2})\s+SOTANOS?\b",
             r"\b(\d{1,2})\s+SOTANOS?.{0,100}?(\d{1,2})\s+PISOS?\b",
@@ -181,6 +419,22 @@ def extract_pisos_sotanos(doc: fitz.Document) -> tuple[Optional[int], Optional[i
             basement = re.search(r"(?:NRO\.?\s*DE\s*)?SOTANOS?(?:\s+Y/O\s+SEMISOTANOS)?\s*[:\-]?\s*(\d{1,2})\b", text)
             return int(floor.group(1)), int(basement.group(1)) if basement else 0, page_index + 1
     return None, None, None
+
+
+def detect_pisos_sotanos_conflict(doc: fitz.Document) -> str:
+    """Detecta la discrepancia tabla/descripción que requiere regla de negocio."""
+    pisos_descripcion, sotanos_descripcion, _ = extract_pisos_sotanos_descripcion(doc)
+    if pisos_descripcion is None:
+        return ""
+    for page_index in range(min(len(doc), 10)):
+        pisos_tabla, sotanos_tabla = extract_pisos_sotanos_tabla(doc[page_index])
+        if pisos_tabla is None:
+            continue
+        if pisos_tabla != pisos_descripcion or (
+            sotanos_descripcion is not None and sotanos_tabla is not None and sotanos_tabla != sotanos_descripcion
+        ):
+            return "Conflicto pisos/sótanos entre descripción y tabla del PDF"
+    return ""
 
 
 def extract_loan_number(doc: fitz.Document, filename: str) -> str:
@@ -217,6 +471,11 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Pagina valor reconstruccion": "",
         "Año construccion": "",
         "Pagina año construccion": "",
+        "Origen año construccion": "",
+        "Edad efectiva": "",
+        "Pagina edad efectiva": "",
+        "Año expedicion": "",
+        "Pagina año expedicion": "",
         "Nro pisos edificio": "",
         "Nro sotanos edificio": "",
         "Pagina pisos/sotanos": "",
@@ -231,8 +490,12 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             commercial_usd, commercial_pen, page_commercial = extract_values_by_anchor(doc, VALOR_COMERCIAL_RE)
             reconstruction_usd, reconstruction_pen, page_reconstruction = extract_values_by_anchor(doc, VALOR_RECONSTRUCCION_RE)
             anio, page_anio = extract_anio_construccion(doc)
+            edad_efectiva, page_edad_efectiva = extract_edad_efectiva(doc)
+            anio_expedicion, page_anio_expedicion = extract_anio_expedicion(doc)
             pisos, sotanos, page_pisos = extract_pisos_sotanos(doc)
             prestamo = extract_loan_number(doc, filename)
+            address_conflict = detect_address_conflict(doc, direccion)
+            floors_conflict = detect_pisos_sotanos_conflict(doc)
     except Exception as error:
         result["Observacion extraccion"] = f"Error procesando PDF: {error}"
         return result
@@ -243,6 +506,16 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         chosen_type, chosen_usd, chosen_pen = "VALOR DE RECONSTRUCCION", reconstruction_usd, reconstruction_pen
     else:
         chosen_type, chosen_usd, chosen_pen = "", None, None
+
+    origen_anio = "AÑO DE CONSTRUCCIÓN" if anio is not None else ""
+    if anio is None and edad_efectiva is not None and anio_expedicion is not None:
+        calculated_year = anio_expedicion - edad_efectiva
+        # No se rellena con una inferencia temporal imposible o fuera de un
+        # intervalo razonable de construcción.
+        if 1900 <= calculated_year <= anio_expedicion:
+            anio = calculated_year
+            page_anio = page_edad_efectiva
+            origen_anio = "EDAD EFECTIVA"
 
     result.update({
         "Direccion extraida": direccion,
@@ -261,6 +534,11 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Pagina valor reconstruccion": page_reconstruction or "",
         "Año construccion": anio or "",
         "Pagina año construccion": page_anio or "",
+        "Origen año construccion": origen_anio,
+        "Edad efectiva": edad_efectiva if edad_efectiva is not None else "",
+        "Pagina edad efectiva": page_edad_efectiva or "",
+        "Año expedicion": anio_expedicion or "",
+        "Pagina año expedicion": page_anio_expedicion or "",
         "Nro pisos edificio": pisos if pisos is not None else "",
         "Nro sotanos edificio": sotanos if sotanos is not None else "",
         "Pagina pisos/sotanos": page_pisos or "",
@@ -275,12 +553,21 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     if tipo == "CASA" and chosen_usd is None and chosen_pen is None:
         observations.append("Valor de reconstrucción no encontrado")
     if not anio:
-        observations.append("Año de construcción no encontrado")
+        if edad_efectiva is None:
+            observations.append("Año de construcción y edad efectiva no encontrados")
+        elif anio_expedicion is None:
+            observations.append("Año de construcción no encontrado: falta año de expedición")
+        else:
+            observations.append("Año de construcción no válido tras calcular edad efectiva")
     if pisos is None:
         observations.append("Número de pisos no encontrado")
     if sotanos is None:
         observations.append("Número de sótanos no encontrado")
     if not prestamo:
         observations.append("Préstamo de 20 dígitos no encontrado")
+    if address_conflict:
+        observations.append(address_conflict)
+    if floors_conflict:
+        observations.append(floors_conflict)
     result["Observacion extraccion"] = "; ".join(observations)
     return result

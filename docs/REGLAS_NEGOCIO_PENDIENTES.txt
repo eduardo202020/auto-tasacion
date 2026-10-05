@@ -1,0 +1,169 @@
+REGLAS DE NEGOCIO PENDIENTES - TASACIONES
+Estado: BORRADOR PARA VALIDACION OPERATIVA
+Fecha: 2026-10-04
+
+Objetivo
+---------
+Este documento registra decisiones que la evidencia del PDF no resuelve de
+forma unica. No es una especificacion ejecutable ni autoriza que Cloud Run
+rellene un valor por inferencia. Cada regla debe ser validada por Operaciones y
+su decision debe indicar responsable, fecha, ejemplos y excepciones.
+Una vez aprobada, cada regla debe convertirse en una entrada versionada de
+cloud-run/reference-data/reglas_operativas.json y en pruebas automáticas antes
+de habilitar su uso en PARA_PROCESAR.
+
+Como validar cada regla
+-----------------------
+1. Marcar una sola decision aprobada.
+2. Indicar el sistema o documento que tiene prioridad cuando las fuentes se
+   contradicen.
+3. Definir que debe hacer el flujo si faltan datos o persiste el conflicto:
+   detener para revision, dejar en blanco o aplicar una regla explicita.
+4. Conservar al menos dos PDFs anonimizados que cubran el caso normal y la
+   excepcion. Esos casos se convertiran en pruebas automaticas antes de cambiar
+   el codigo.
+
+1. PISOS, SOTANOS Y AZOTEA
+--------------------------
+Campos afectados: PISOS y, de manera indirecta, CLASE.
+
+Evidencia observada en D03 y D04:
+- La tabla del informe indica 6 pisos y 2 sotanos.
+- La descripcion narrativa indica 5 pisos, mas azotea y 2 sotanos.
+- El Colab de origen y el codigo actual toman 5 desde la descripcion narrativa.
+
+Preguntas para Operaciones:
+- La azotea cuenta como un piso para el campo PISOS de PARA_PROCESAR?
+- Debe prevalecer la tabla, la descripcion o una fuente distinta?
+- Si la tabla y la descripcion discrepan, se debe bloquear la fila para
+  revision o se puede usar una prioridad fija?
+- Los sotanos se excluyen siempre de PISOS? Como se representan los
+  semisotanos, mezanines y duplex?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+2. DIRECCION CANONICA PARA LA OPERACION
+---------------------------------------
+Campo afectado: DIRECCION.
+
+Un informe puede contener una direccion en la minuta, otra en la inspeccion
+ocular y ninguna direccion disponible en la consulta municipal. D02 contiene
+ese tipo de discrepancia. El extractor actual usa su prioridad tecnica; esa
+prioridad no debe considerarse una regla operativa aprobada.
+
+Preguntas para Operaciones:
+- Que fuente alimenta IBM 3270: minuta, inspeccion ocular, partida, municipal
+  u otra?
+- Que hacer cuando dos fuentes difieren: detener, elegir una fuente o corregir
+  manualmente con evidencia?
+- Se debe conservar la direccion alternativa y la pagina de evidencia para
+  auditoria?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+3. UBICACION Y CODIGO DE UBICACION
+----------------------------------
+Campos afectados: UBICACION y UBICACION_COD.
+
+El catalogo DATOS de integración acepta un conjunto cerrado de valores. En D02 el
+PDF no presenta una ubicacion homologable al catalogo; por ello el flujo deja
+UBICACION y UBICACION_COD vacios de forma intencional. No debe inventarse un
+codigo.
+
+Preguntas para Operaciones:
+- Torre, condominio, sin numero (SN) u otras denominaciones deben quedar en
+  blanco, homologarse a un valor existente o requerir un nuevo codigo oficial?
+- Quien aprueba y mantiene el catalogo DATOS?
+- Una ubicacion sin codigo invalida la fila para IBM 3270 o puede completarse
+  antes de que Power Automate la envíe?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+4. TIPO DE INMUEBLE Y VALOR A REPORTAR
+--------------------------------------
+Campos afectados: TIPO_INMUEBLE, TIPO_INMUEBLE_COD, MONEDA_COD y VALOR.
+
+El catalogo actual contempla CASA y DEPARTAMENTO. Los informes pueden incluir
+cocheras, depositos u otros componentes junto con el inmueble principal. Para
+un departamento el extractor prioriza el valor comercial. Para una casa toma
+el valor de reconstruccion, mientras que el catalogo de integración denomina la
+opcion de casa como "VALOR NUEVO". Esta equivalencia requiere confirmacion
+formal antes de usarse en casos productivos de casas.
+
+Preguntas para Operaciones:
+- Que tipo y valor se reportan si un mismo PDF incluye departamento, cochera y
+  deposito?
+- Debe generarse una fila por unidad o solo por la garantia principal?
+- "Valor de reconstruccion" satisface el campo que el catálogo denomina
+  "VALOR NUEVO" para una casa?
+- Que hacer con tipos no presentes en el catalogo?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+5. ANO DE CONSTRUCCION Y EDAD EFECTIVA
+--------------------------------------
+Campos afectados: ANO, EDAD_EFECTIVA y ORIGEN_ANO.
+
+Regla tecnica vigente: se usa el ano de construccion explicito. Solo si no se
+encuentra, se calcula ANO = ano de expedicion - edad efectiva numerica. Si la
+edad indica "En construccion" u otro texto no numerico, no se realiza una
+resta inventada.
+
+Preguntas para Operaciones:
+- Esta regla coincide con la operativa en todos los tipos de tasacion?
+- Como se debe tratar edad 0, "En construccion", rangos de edad o anos de
+remodelacion?
+- Si el calculo genera un ano improbable, se bloquea la fila o se solicita
+correccion manual?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+6. PRESTAMO Y ESTADO DE LA FILA
+-------------------------------
+Campos afectados: PRESTAMO y control de procesamiento.
+
+PRESTAMO se completa despues, mediante Power Automate Desktop e IBM 3270. Por
+ello queda vacio en la salida de Cloud Run. Debe definirse como se relaciona
+sin ambiguedad cada fila PARA_PROCESAR con la transaccion resultante y que ocurre si
+la consulta de IBM devuelve mas de una coincidencia o ninguna.
+
+Preguntas para Operaciones:
+- Cual es la llave de consulta y de conciliacion autorizada en IBM 3270?
+- Que datos se deben comparar antes de grabar?
+- Que estado recibe una fila con cero, una o varias coincidencias?
+- Quien puede reintentar, corregir o aprobar una excepcion?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+7. PDFs ESCANEADOS O SIN TEXTO EXTRAIBLE
+----------------------------------------
+Campos afectados: todos los campos extraidos.
+
+El procesamiento determinista utiliza texto y coordenadas del PDF. Si el PDF
+es una imagen escaneada o su texto esta corrupto, el dato puede no existir para
+el extractor aunque sea visible para una persona.
+
+Preguntas para Operaciones:
+- A partir de que senal se deriva una fila a OCR o a revision manual?
+- Que solucion corporativa de OCR esta aprobada para estos documentos?
+- Que campos son obligatorios para que una fila pueda continuar a IBM 3270?
+
+Decision aprobada:
+Responsable y fecha:
+Ejemplos de prueba aprobados:
+
+REGISTRO DE APROBACIONES
+------------------------
+Regla | Decision | Responsable | Fecha | Version de codigo | Casos de prueba
