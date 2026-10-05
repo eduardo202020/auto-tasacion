@@ -54,6 +54,27 @@ Consulta [cloud-run/README.md](cloud-run/README.md) para instalar dependencias,
 ejecutar las pruebas y desplegar una versión validada. Antes de publicar, usa
 el contrato de [contracts/masivo.md](contracts/masivo.md).
 
+## Harness de desarrollo
+
+El repositorio incluye instrucciones y controles para que personas y agentes
+de IA trabajen con el mismo contexto sin redescubrir el flujo en cada sesión:
+
+- [AGENTS.md](AGENTS.md): límites de seguridad e invariantes de desarrollo.
+- [Contexto operativo para IA](docs/AI_CONTEXT.md): arquitectura, estados y
+  responsables.
+- [Entorno local](docs/DEVELOPMENT_ENVIRONMENT.md): preparación, tareas VS
+  Code y pruebas sin dependencias corporativas.
+- [Puertas de calidad](docs/QUALITY_GATES.md) y
+  [runbook de cambio/despliegue](docs/runbooks/CHANGE_AND_DEPLOY.md).
+- [Skills locales](skills/README.md): instrucciones especializadas para Cloud
+  Run y para el contrato Excel.
+
+Para comprobar un Excel generado fuera de la suite de pruebas:
+
+```bash
+./cloud-run/.venv/bin/python tools/verify_workbook.py /ruta/Resultado_Final.xlsx
+```
+
 ## Seguridad
 
 - No agregues claves, datos de clientes o capturas productivas al repositorio.

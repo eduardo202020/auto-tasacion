@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Tasaciones: pruebas",
+      "type": "shell",
+      "command": "./cloud-run/.venv/bin/python",
+      "args": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "cloud-run/tests",
+        "-v"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Tasaciones: comprobar sintaxis",
+      "type": "shell",
+      "command": "./cloud-run/.venv/bin/python",
+      "args": [
+        "-m",
+        "compileall",
+        "-q",
+        "cloud-run"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Tasaciones: servidor local",
+      "type": "shell",
+      "command": "${workspaceFolder}/cloud-run/.venv/bin/functions-framework",
+      "args": [
+        "--target",
+        "procesar_tasaciones",
+        "--source",
+        "main.py",
+        "--debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/cloud-run"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
