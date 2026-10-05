@@ -1,0 +1,14 @@
+{
+  "id": "generic-v1",
+  "version": "1",
+  "description": "Extractor general para informes sin una firma de plantilla registrada.",
+  "default": true,
+  "priority": 0,
+  "match": {
+    "all_terms": [],
+    "any_terms": []
+  },
+  "extraction": {
+    "anchor_aliases": {}
+  }
+}

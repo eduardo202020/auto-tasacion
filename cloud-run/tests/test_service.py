@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+import tempfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from flask import Flask, request
 from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from catalog import (
     lookup_class_code,
@@ -21,10 +23,12 @@ from catalog import (
     lookup_property_codes,
 )
 from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
+from profile_registry import detect_document_profile
 from service import (
-    MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, build_upload_ticket, build_workbook,
+    CONTROL_COLUMNS, MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket, build_workbook,
     download_staged_zip, procesar_tasaciones, process_zip, to_macro_row,
 )
+from tools.validate_correcciones_operador import validate as validate_corrections
 
 
 def build_pdf() -> bytes:
@@ -157,6 +161,23 @@ Se trata de una vivienda unifamiliar.""",
     return content
 
 
+def build_pdf_with_opd_construyo_profile() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        """OP-D
+Solicitud Construyo
+Tipo de inmueble: Casa
+Valor de reposicion
+S/ 350,000.00""",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
 def build_zip(name: str = "D01.pdf", content: bytes | None = None) -> bytes:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -219,6 +240,30 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(result["Año construccion"], 2018)
         self.assertEqual(result["Nro pisos edificio"], 8)
         self.assertNotIn("Préstamo", result["Observacion extraccion"])
+        self.assertEqual(result["Perfil plantilla"], "generic-v1")
+        self.assertEqual(result["Confianza perfil"], 0.0)
+
+    def test_detects_profile_and_uses_its_declared_anchor_alias(self):
+        result = extract_pdf(build_pdf_with_opd_construyo_profile(), "D11.pdf")
+        self.assertEqual(result["Perfil plantilla"], "opd-construyo-v1")
+        self.assertEqual(result["Version perfil"], "1")
+        self.assertGreater(result["Confianza perfil"], 0.0)
+        self.assertIn("OP-D", result["Coincidencias perfil"])
+        self.assertEqual(result["Valor elegido tipo"], "VALOR DE RECONSTRUCCION")
+        self.assertEqual(result["Valor elegido S/"], 350000.0)
+
+    def test_unknown_text_keeps_generic_profile(self):
+        profile = detect_document_profile(["Informe independiente sin firma de plantilla"])
+        self.assertEqual(profile.profile_id, "generic-v1")
+        self.assertEqual(profile.confidence, 0.0)
+
+    def test_identifies_registered_provider_without_changing_generic_profile(self):
+        providers = {"tasadora-ejemplo": ("Tasadora Ejemplo", ("TASACIONES EJEMPLO S.A.C.",))}
+        with patch("profile_registry.load_providers", return_value=providers):
+            profile = detect_document_profile(["Informe de TASACIONES EJEMPLO S.A.C."])
+        self.assertEqual(profile.profile_id, "generic-v1")
+        self.assertEqual(profile.provider_id, "tasadora-ejemplo")
+        self.assertEqual(profile.provider_name, "Tasadora Ejemplo")
 
     def test_prioritizes_minuta_and_characteristics_table(self):
         content = build_pdf_with_minuta_and_table()
@@ -332,6 +377,23 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(control_rows[0]["Ruta final"], "PENDIENTE_IA")
         self.assertEqual(control_rows[0]["Revision IA ejecutada"], "NO")
 
+    def test_records_profile_metadata_in_control_and_revision(self):
+        ready_rows, review_rows, control_rows = process_zip(
+            build_zip("D11.pdf", build_pdf_with_opd_construyo_profile()), use_environment_reviewer=False,
+        )
+        self.assertEqual(ready_rows, [])
+        self.assertEqual(review_rows[0]["Perfil plantilla"], "opd-construyo-v1")
+        self.assertEqual(control_rows[0]["Perfil plantilla"], "opd-construyo-v1")
+        workbook = load_workbook(io.BytesIO(build_workbook(ready_rows, review_rows, control_rows).read()), data_only=True)
+        self.assertEqual(
+            [cell.value for cell in workbook["REVISION_IA"][1]],
+            REVIEW_COLUMNS,
+        )
+        self.assertEqual(
+            [cell.value for cell in workbook["CONTROL"][1]],
+            CONTROL_COLUMNS,
+        )
+
     def test_assigns_distinct_case_ids_to_duplicate_pdf_content(self):
         archive = io.BytesIO()
         content = build_pdf_with_effective_age()
@@ -442,6 +504,20 @@ class TasacionesServiceTests(unittest.TestCase):
             content = download_staged_zip("ingresos/prueba/auto-10.zip")
         self.assertEqual(content, raw_zip)
         blob.reload.assert_called_once()
+
+    def test_validates_operator_correction_ledger_and_skips_blank_rows(self):
+        ledger = (
+            "ID_CASO;PDF_Archivo;Tasadora id;Perfil plantilla;Campo;Valor extraido;Valor final;Pagina;Evidencia;Motivo;Operador;Fecha\n"
+            "TAS-123;D11.pdf;;opd-construyo-v1;Valor elegido S/;350000;350000;1;Valor de reposicion;Etiqueta alternativa;operador.prueba;2026-10-05\n"
+            ";;;;;;;;;;;\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "correcciones.csv"
+            path.write_text(ledger, encoding="utf-8")
+            summary, issues = validate_corrections(path)
+        self.assertEqual(issues, [])
+        self.assertEqual(summary["filas_validas"], 1)
+        self.assertEqual(summary["por_perfil"], {"opd-construyo-v1": 1})
 
 
 if __name__ == "__main__":

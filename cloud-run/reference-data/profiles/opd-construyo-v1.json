@@ -1,0 +1,17 @@
+{
+  "id": "opd-construyo-v1",
+  "version": "1",
+  "description": "Variante técnica identificada por la firma OP-D y el anexo Construyo.",
+  "default": false,
+  "priority": 100,
+  "match": {
+    "all_terms": ["OP-D"],
+    "any_terms": ["SOLICITUD CONSTRUYO", "PRIMER CONSTRUYO"]
+  },
+  "extraction": {
+    "anchor_aliases": {
+      "commercial_value": ["VALOR COMERCIAL PROYECTADO"],
+      "reconstruction_value": ["VALOR DE REPOSICION"]
+    }
+  }
+}

@@ -24,4 +24,6 @@ para cargar datos contra IBM 3270.
 Las columnas F, L, Q y S se reservan para el formato heredado de integración.
 Las excepciones no llegan a `PARA_PROCESAR`: se registran en `REVISION_IA`.
 La evidencia por página, el origen del año, los códigos usados, el resultado
-de IA y la ruta final se registran en `CONTROL`.
+de IA, el perfil y la empresa de tasación identificados por firma, y la ruta
+final se registran en `CONTROL`. `REVISION_IA` replica esos metadatos de perfil
+para revisar las excepciones. Ninguno modifica las columnas de `PARA_PROCESAR`.

@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 import fitz
 
+from profile_registry import detect_document_profile, profile_anchor_aliases
+
 
 RAW_CASA_RE = re.compile(r"\b(CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR|VIVIENDA)\b", re.I)
 RAW_DEPTO_RE = re.compile(r"\b(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT)\b", re.I)
@@ -268,12 +270,24 @@ def first_amount_after_currency(text: str, currency_pattern: str) -> Optional[fl
     return parse_amount(match.group(1)) if match else None
 
 
-def extract_values_by_anchor(doc: fitz.Document, anchor_re: re.Pattern[str]) -> tuple[Optional[float], Optional[float], Optional[int]]:
+def anchor_position(text: str, anchor_re: re.Pattern[str], aliases: tuple[str, ...] = ()) -> int:
+    """Encuentra la ancla base o una variante declarada por el perfil."""
+    positions = [match.start() for match in anchor_re.finditer(text)]
+    positions.extend(position for alias in aliases if (position := text.find(alias)) >= 0)
+    return min(positions) if positions else -1
+
+
+def extract_values_by_anchor(
+    doc: fitz.Document,
+    anchor_re: re.Pattern[str],
+    *,
+    aliases: tuple[str, ...] = (),
+) -> tuple[Optional[float], Optional[float], Optional[int]]:
     for page_index in range(min(len(doc), 10)):
         page = doc[page_index]
         blocks = get_blocks(page)
         for block in blocks:
-            if not anchor_re.search(block["up"]):
+            if anchor_position(block["up"], anchor_re, aliases) < 0:
                 continue
             related = [
                 item for item in blocks
@@ -288,9 +302,9 @@ def extract_values_by_anchor(doc: fitz.Document, anchor_re: re.Pattern[str]) -> 
                 return usd, pen, page_index + 1
 
         page_text = page.get_text("text")
-        match = anchor_re.search(norm_up(page_text))
-        if match:
-            section = page_text[match.start():match.start() + 1200]
+        position = anchor_position(norm_up(page_text), anchor_re, aliases)
+        if position >= 0:
+            section = page_text[position:position + 1200]
             usd = first_amount_after_currency(section, r"(?:US\$|USD\$?|U\.?S\.?\$)")
             pen = first_amount_after_currency(section, r"(?:S/\.?|SOLES?)")
             if usd is not None or pen is not None:
@@ -597,6 +611,12 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "ID / Codigo PDF": clean_pdf_id(filename),
         "PDF_Archivo": filename,
+        "Tasadora id": "",
+        "Tasadora detectada": "",
+        "Perfil plantilla": "generic-v1",
+        "Version perfil": "1",
+        "Confianza perfil": 0.0,
+        "Coincidencias perfil": "",
         "Direccion extraida": "",
         "Pagina direccion": "",
         "Tipo inmueble": "",
@@ -627,13 +647,22 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     observations: list[str] = []
     try:
         with fitz.open(stream=content, filetype="pdf") as doc:
+            profile = detect_document_profile(page.get_text("text") for page in doc)
             direccion, page_direccion = extract_address(doc)
             solicitud_direccion, solicitud_page = extract_solicitud_construyo_address(doc)
             if solicitud_direccion and not has_complete_administrative_location(direccion):
                 direccion, page_direccion = solicitud_direccion, solicitud_page
             tipo, tipo_texto, page_tipo = extract_tipo_inmueble(doc, direccion)
-            commercial_usd, commercial_pen, page_commercial = extract_values_by_anchor(doc, VALOR_COMERCIAL_RE)
-            reconstruction_usd, reconstruction_pen, page_reconstruction = extract_values_by_anchor(doc, VALOR_RECONSTRUCCION_RE)
+            commercial_usd, commercial_pen, page_commercial = extract_values_by_anchor(
+                doc,
+                VALOR_COMERCIAL_RE,
+                aliases=profile_anchor_aliases(profile, "commercial_value"),
+            )
+            reconstruction_usd, reconstruction_pen, page_reconstruction = extract_values_by_anchor(
+                doc,
+                VALOR_RECONSTRUCCION_RE,
+                aliases=profile_anchor_aliases(profile, "reconstruction_value"),
+            )
             anio, page_anio = extract_anio_construccion(doc)
             edad_efectiva, page_edad_efectiva = extract_edad_efectiva(doc)
             anio_expedicion, page_anio_expedicion = extract_anio_expedicion(doc)
@@ -665,6 +694,12 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             origen_anio = "EDAD EFECTIVA"
 
     result.update({
+        "Tasadora id": profile.provider_id,
+        "Tasadora detectada": profile.provider_name,
+        "Perfil plantilla": profile.profile_id,
+        "Version perfil": profile.version,
+        "Confianza perfil": profile.confidence,
+        "Coincidencias perfil": "; ".join(profile.matched_terms),
         "Direccion extraida": direccion,
         "Pagina direccion": page_direccion or "",
         "Tipo inmueble": tipo,

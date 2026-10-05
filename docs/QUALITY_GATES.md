@@ -21,6 +21,7 @@
 | IA | Corrección con página/evidencia que se revalide y corrección insegura rechazada. |
 | Excel | Hojas, tablas, columnas, `ID_CASO` y ruta correcta. |
 | HTTP | ZIP binario con nombre variable y respuesta XLSX válida. |
+| Perfil de plantilla | PDF sintético con firma y alias; caso sin firma que mantenga `generic-v1`; trazabilidad en `CONTROL` y `REVISION_IA`. |
 
 ## Condiciones de bloqueo
 
@@ -32,6 +33,7 @@ No considerar listo ni publicar un cambio si ocurre alguno de estos casos:
 - una corrección IA no tiene página y evidencia;
 - se modifica la interfaz de Power Automate sin actualizar el contrato;
 - se depende de un nombre fijo para el ZIP de entrada.
+- un perfil sin firma inequívoca cambia la extracción o altera una decisión de negocio;
 
 ## Antes del despliegue
 

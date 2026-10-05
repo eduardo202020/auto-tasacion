@@ -19,13 +19,27 @@ La respuesta contiene estas tablas de Excel:
 - `REVISION_IA` / `tblRevisionIa`: excepciones que no pudieron entrar a la
   cola operable, con faltantes, evidencia y siguiente acción.
 - `CONTROL` / `tblControl`: una fila por PDF, con evidencias, ruta final y
-  correcciones aceptadas.
+  correcciones aceptadas. Incluye el perfil de plantilla detectado y sus
+  coincidencias para auditar diferencias de formato entre tasadoras.
 
 La primera validación es determinista y se basa en el flujo de Colab. Los
 códigos de tipo de inmueble, moneda, dirección y clase se leen del catálogo
 versionado de la hoja `DATOS`. Cuando se habilita, Gemini recibe solo PDFs de
 casos excepcionales y debe devolver valor, página y evidencia en JSON. La fila
 solo pasa a `PARA_PROCESAR` después de una segunda validación determinista.
+
+## Perfiles de plantilla
+
+El extractor comienza con las reglas generales y busca una firma explícita de
+plantilla en el PDF. Los perfiles declarativos están en
+`reference-data/profiles/`; pueden aportar alias de etiquetas que varían por
+formato. `generic-v1` es el respaldo cuando no hay una coincidencia conocida.
+
+El catálogo `reference-data/tasadoras.json` está separado de los perfiles:
+una empresa solo se identifica cuando existe un alias aprobado. Ningún PDF
+desconocido crea una empresa, un perfil o una regla automáticamente. Consulta
+[`docs/operacion/perfiles-tasadoras.md`](../docs/operacion/perfiles-tasadoras.md)
+para registrar y validar correcciones humanas.
 
 ## Ejecutar localmente
 

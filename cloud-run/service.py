@@ -84,7 +84,9 @@ REQUIRED_MACRO_COLUMNS = (
 )
 
 CONTROL_COLUMNS = [
-    "ID_CASO", "ID / Codigo PDF", "PDF_Archivo", "PRESTAMO", "Direccion extraida", "Pagina direccion",
+    "ID_CASO", "ID / Codigo PDF", "PDF_Archivo", "Tasadora id", "Tasadora detectada",
+    "Perfil plantilla", "Version perfil", "Confianza perfil", "Coincidencias perfil",
+    "PRESTAMO", "Direccion extraida", "Pagina direccion",
     "Tipo inmueble", "Tipo inmueble texto", "Pagina tipo inmueble", "Valor elegido tipo",
     "Valor elegido US$", "Valor elegido S/", "Valor comercial US$", "Valor comercial S/",
     "Pagina valor comercial", "Valor reconstruccion US$", "Valor reconstruccion S/",
@@ -98,7 +100,8 @@ CONTROL_COLUMNS = [
 ]
 
 REVIEW_COLUMNS = [
-    "ID_CASO", "PDF_Archivo", "Estado", "Campos faltantes", "Incidencias de validacion",
+    "ID_CASO", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Perfil plantilla",
+    "Version perfil", "Confianza perfil", "Coincidencias perfil", "Estado", "Campos faltantes", "Incidencias de validacion",
     "Campos enviados a IA", "Motivo IA", "Correcciones IA", "Evidencia IA", "Modelo IA",
     "Siguiente accion",
 ]
@@ -539,6 +542,12 @@ def process_zip(
                 extracted: dict[str, Any] = {
                     "ID / Codigo PDF": filename.rsplit(".", 1)[0],
                     "PDF_Archivo": entry.filename,
+                    "Tasadora id": "",
+                    "Tasadora detectada": "",
+                    "Perfil plantilla": "generic-v1",
+                    "Version perfil": "1",
+                    "Confianza perfil": 0.0,
+                    "Coincidencias perfil": "",
                     "Observacion extraccion": "El archivo no tiene una firma PDF válida",
                 }
             else:
@@ -602,7 +611,14 @@ def process_zip(
                 ready_row_number = len(ready_rows)
             else:
                 review_rows.append({
-                    "ID_CASO": case_id, "PDF_Archivo": entry.filename, "Estado": route,
+                    "ID_CASO": case_id, "PDF_Archivo": entry.filename,
+                    "Tasadora id": deterministic.get("Tasadora id", ""),
+                    "Tasadora detectada": deterministic.get("Tasadora detectada", ""),
+                    "Perfil plantilla": deterministic.get("Perfil plantilla", "generic-v1"),
+                    "Version perfil": deterministic.get("Version perfil", "1"),
+                    "Confianza perfil": deterministic.get("Confianza perfil", 0.0),
+                    "Coincidencias perfil": deterministic.get("Coincidencias perfil", ""),
+                    "Estado": route,
                     "Campos faltantes": "; ".join(missing_fields),
                     "Incidencias de validacion": "; ".join(issues),
                     "Campos enviados a IA": "; ".join(requested_fields), "Motivo IA": ai_reason,
