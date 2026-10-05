@@ -387,10 +387,27 @@ def extract_edad_efectiva(doc: fitz.Document) -> tuple[Optional[int], Optional[i
 def extract_anio_expedicion(doc: fitz.Document) -> tuple[Optional[int], Optional[int]]:
     """Extrae el año de la fecha de expedición, nunca otra fecha del informe."""
     for page_index, page in enumerate(doc):
+        # En los formatos OP-D la lectura lineal puede ordenar primero el
+        # encabezado y luego la fecha de caducidad. Se asocia el valor con la
+        # etiqueta por su misma línea y por su posición a la derecha.
+        words = get_words(page)
+        for header in get_blocks(page):
+            if "FECHA DE EXPEDICION" not in header["up"]:
+                continue
+            candidates = [
+                word for word in words
+                if abs(word["y0"] - header["y0"]) <= 3
+                and word["x0"] >= header["x1"] - 5
+                and DATE_YEAR_RE.search(word["up"])
+            ]
+            if candidates:
+                candidates.sort(key=lambda word: (abs(word["y0"] - header["y0"]), word["x0"]))
+                match = DATE_YEAR_RE.search(candidates[0]["up"])
+                return int(match.group(1)), page_index + 1
+
         text = norm_up(page.get_text("text"))
-        # El encabezado y ambas fechas pueden venir en el mismo bloque. Se
-        # toma el primer año posterior a Expedición, antes de revisar celdas
-        # cercanas que podrían pertenecer a Caducidad.
+        # Respaldo para documentos cuyo valor aparece en el mismo flujo de
+        # texto que la etiqueta y no como una palabra posicionada aparte.
         if match := re.search(r"FECHA\s+DE\s+EXPEDICION.{0,45}?(19\d{2}|20\d{2})", text, re.S):
             return int(match.group(1)), page_index + 1
         blocks = get_blocks(page)

@@ -131,6 +131,18 @@ Fecha de Caducidad 29-May-2027""",
     return content
 
 
+def build_pdf_with_positioned_expedition_date() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "Fecha de Expedición", fontsize=10)
+    page.insert_text((250, 72), "29-May-2026", fontsize=10)
+    page.insert_text((72, 90), "Fecha de Caducidad", fontsize=10)
+    page.insert_text((250, 90), "29-May-2027", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
 def build_pdf_with_geographic_department() -> bytes:
     document = fitz.open()
     page = document.new_page()
@@ -236,6 +248,11 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(result["Edad efectiva"], 0)
         self.assertEqual(result["Año expedicion"], 2026)
         self.assertEqual(result["Año construccion"], 2026)
+
+    def test_uses_date_aligned_with_expedition_not_caducidad(self):
+        result = extract_pdf(build_pdf_with_positioned_expedition_date(), "D03.pdf")
+        self.assertEqual(result["Año expedicion"], 2026)
+        self.assertEqual(result["Pagina año expedicion"], 1)
 
     def test_ignores_geographic_department_when_resolving_property_type(self):
         result = extract_pdf(build_pdf_with_geographic_department(), "D04.pdf")
