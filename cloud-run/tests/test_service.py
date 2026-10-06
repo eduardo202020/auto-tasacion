@@ -23,7 +23,7 @@ from catalog import (
     lookup_property_codes,
 )
 from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
-from profile_registry import detect_document_profile
+from profile_registry import detect_document_profile, validate_reference_data
 from service import (
     CONTROL_COLUMNS, MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket, build_workbook,
     download_staged_zip, procesar_tasaciones, process_zip, to_macro_row,
@@ -264,6 +264,43 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(profile.profile_id, "generic-v1")
         self.assertEqual(profile.provider_id, "tasadora-ejemplo")
         self.assertEqual(profile.provider_name, "Tasadora Ejemplo")
+
+    def test_known_provider_signatures_keep_generic_extraction_until_a_profile_is_needed(self):
+        cases = (
+            ("Braschi Tasaciones", "braschi-tasaciones"),
+            ("Layseca Asociados", "layseca-asociados"),
+            ("Tinsa", "tinsa-peru"),
+            ("Valortec", "valortec-tasaciones"),
+            ("IMAX Ingeniería Máxima", "imax-ingenieria-maxima"),
+        )
+        for signature, provider_id in cases:
+            with self.subTest(provider_id=provider_id):
+                profile = detect_document_profile([signature])
+                self.assertEqual(profile.profile_id, "generic-v1")
+                self.assertEqual(profile.provider_id, provider_id)
+
+    def test_profile_and_provider_catalog_pass_reference_data_validation(self):
+        self.assertEqual(validate_reference_data(), [])
+
+    def test_reference_data_validator_rejects_a_shared_provider_signature(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            reference = Path(temporary_directory)
+            profiles = reference / "profiles"
+            profiles.mkdir()
+            (profiles / "generic-v1.json").write_text(
+                '{"id":"generic-v1","version":"1","default":true,"match":{},"extraction":{}}',
+                encoding="utf-8",
+            )
+            providers = reference / "tasadoras.json"
+            providers.write_text(
+                '{"providers":['
+                '{"id":"tasadora-a","name":"Tasadora A","aliases":["FIRMA MUESTRA"]},'
+                '{"id":"tasadora-b","name":"Tasadora B","aliases":["FIRMA MUESTRA"]}'
+                ']}',
+                encoding="utf-8",
+            )
+            issues = validate_reference_data(profiles, providers)
+        self.assertTrue(any("más de una tasadora" in issue for issue in issues))
 
     def test_prioritizes_minuta_and_characteristics_table(self):
         content = build_pdf_with_minuta_and_table()

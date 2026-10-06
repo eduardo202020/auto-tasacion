@@ -117,6 +117,94 @@ def _load_profile(path: Path) -> ProfileDefinition:
     )
 
 
+def validate_reference_data(
+    profiles_dir: Path = PROFILES_DIR,
+    providers_file: Path = PROVIDERS_FILE,
+) -> list[str]:
+    """Valida perfiles y proveedores antes de incluirlos en una revisión.
+
+    La carga de ejecución conserva un respaldo seguro (``generic-v1``) ante
+    una configuración inválida. Esta validación complementaria convierte los
+    errores de configuración en fallos visibles durante el desarrollo, sin
+    depender de PDFs reales ni de servicios externos.
+    """
+    issues: list[str] = []
+    provider_ids: set[str] = set()
+    alias_owners: dict[str, str] = {}
+
+    try:
+        raw_providers = json.loads(providers_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        issues.append(f"No se pudo leer el catálogo de tasadoras: {error}")
+        raw_providers = {}
+
+    providers = raw_providers.get("providers") if isinstance(raw_providers, dict) else None
+    if providers is None:
+        issues.append("El catálogo de tasadoras debe contener providers")
+        providers = []
+    if not isinstance(providers, list):
+        issues.append("providers debe ser una lista")
+        providers = []
+
+    for index, provider in enumerate(providers, start=1):
+        label = f"providers[{index}]"
+        if not isinstance(provider, dict):
+            issues.append(f"{label} debe ser un objeto")
+            continue
+        provider_id = str(provider.get("id", "")).strip()
+        name = str(provider.get("name", "")).strip()
+        aliases = provider.get("aliases")
+        if not provider_id or not name:
+            issues.append(f"{label} requiere id y name")
+            continue
+        if provider_id in provider_ids:
+            issues.append(f"ID de tasadora duplicado: {provider_id}")
+            continue
+        provider_ids.add(provider_id)
+        if not isinstance(aliases, list) or not aliases:
+            issues.append(f"{label}.aliases debe tener al menos una firma textual")
+            continue
+        for alias in aliases:
+            if not isinstance(alias, str) or not normalize(alias):
+                issues.append(f"{label}.aliases contiene un valor inválido")
+                continue
+            normalized_alias = normalize(alias)
+            if len(normalized_alias) < 4:
+                issues.append(f"{label}.aliases contiene una firma demasiado corta: {alias}")
+                continue
+            owner = alias_owners.get(normalized_alias)
+            if owner and owner != provider_id:
+                issues.append(f"La firma {alias!r} está asignada a más de una tasadora")
+                continue
+            alias_owners[normalized_alias] = provider_id
+
+    profiles: list[ProfileDefinition] = []
+    seen_profile_ids: set[str] = set()
+    paths = sorted(profiles_dir.glob("*.json")) if profiles_dir.is_dir() else []
+    if not paths:
+        issues.append("No se encontraron perfiles JSON")
+    for path in paths:
+        try:
+            profile = _load_profile(path)
+        except ValueError as error:
+            issues.append(str(error))
+            continue
+        if profile.profile_id in seen_profile_ids:
+            issues.append(f"ID de perfil duplicado: {profile.profile_id}")
+            continue
+        seen_profile_ids.add(profile.profile_id)
+        profiles.append(profile)
+        if profile.provider_id and profile.provider_id not in provider_ids:
+            issues.append(
+                f"{path.name}: provider_id {profile.provider_id!r} no existe en tasadoras.json"
+            )
+
+    defaults = [profile.profile_id for profile in profiles if profile.is_default]
+    if len(defaults) != 1:
+        issues.append("Debe existir exactamente un perfil default")
+    return issues
+
+
 @lru_cache(maxsize=1)
 def load_profiles() -> tuple[ProfileDefinition, ...]:
     """Carga perfiles declarativos y confirma un único respaldo genérico."""
@@ -134,7 +222,11 @@ def load_profiles() -> tuple[ProfileDefinition, ...]:
 
 @lru_cache(maxsize=1)
 def load_providers() -> dict[str, tuple[str, tuple[str, ...]]]:
-    """Carga la lista aprobada de tasadoras, vacía hasta contar con altas."""
+    """Carga las firmas técnicas versionadas de empresas tasadoras.
+
+    El catálogo identifica metadatos en CONTROL; no autoriza reglas de negocio
+    ni altera la extracción cuando no existe un perfil técnico específico.
+    """
     try:
         raw = json.loads(PROVIDERS_FILE.read_text(encoding="utf-8"))
         providers = raw.get("providers", []) if isinstance(raw, dict) else []

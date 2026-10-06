@@ -7,9 +7,9 @@ justifican en `CONTROL` y `REVISION_IA`. La hoja `PARA_PROCESAR` no cambia.
 
 ## Configuración vigente
 
-- `cloud-run/reference-data/tasadoras.json`: catálogo de empresas aprobadas.
-  Inicia vacío para no atribuir documentos históricos a una empresa sin una
-  evidencia confirmada.
+- `cloud-run/reference-data/tasadoras.json`: catálogo versionado de firmas
+  textuales de empresas. Solo agrega metadatos de trazabilidad; no concede
+  prioridades de negocio ni activa alias de extracción por sí mismo.
 - `cloud-run/reference-data/profiles/*.json`: una firma técnica y los alias
   de etiquetas propios de una plantilla. `generic-v1` es el respaldo fijo.
 - `opd-construyo-v1`: primer perfil técnico, identificado solo por `OP-D` y
@@ -19,6 +19,12 @@ justifican en `CONTROL` y `REVISION_IA`. La hoja `PARA_PROCESAR` no cambia.
 Un perfil puede ampliar nombres de etiquetas, por ejemplo el texto que rotula
 un valor comercial. No puede convertir un dato sin evidencia, elegir entre
 fuentes contradictorias, cambiar catálogos ni enviar una excepción a IBM.
+
+Una tasadora y una plantilla no son equivalentes: la misma empresa puede
+emitir múltiples formatos, y un formato puede incluir anexos de otra plantilla.
+Por ello, la empresa se identifica con firmas propias y el perfil se selecciona
+con una firma técnica independiente. Si solo se conoce la empresa, se conserva
+`generic-v1` hasta que exista una variación de extracción repetida y probada.
 
 ## Alta de una tasadora o plantilla
 
@@ -34,7 +40,9 @@ fuentes contradictorias, cambiar catálogos ni enviar una excepción a IBM.
 3. Con un patrón repetido y PDFs autorizados fuera de Git, se redacta un perfil
    JSON con una firma que no sea ambigua y solo los alias necesarios.
 4. Se agrega una prueba con un PDF sintético que pruebe la firma y el alias.
-5. Operaciones revisa si el cambio altera una regla de negocio. Si la altera,
+5. Se ejecuta `python tools/validate_profile_catalog.py` para comprobar IDs,
+   firmas duplicadas y referencias entre perfiles y tasadoras.
+6. Operaciones revisa si el cambio altera una regla de negocio. Si la altera,
    debe aprobarse y versionarse en `reglas_operativas.json` antes del despliegue.
 
 Las correcciones del operador son evidencia de mejora, no instrucciones que

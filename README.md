@@ -66,6 +66,8 @@ de IA trabajen con el mismo contexto sin redescubrir el flujo en cada sesión:
   Code y pruebas sin dependencias corporativas.
 - [Puertas de calidad](docs/QUALITY_GATES.md) y
   [runbook de cambio/despliegue](docs/runbooks/CHANGE_AND_DEPLOY.md).
+- [Registro de features de perfiles](docs/FEATURES.md): alcance, estado y
+  criterios de aceptación para la adaptación a tasadoras.
 - [Skills locales](skills/README.md): instrucciones especializadas para Cloud
   Run y para el contrato Excel.
 

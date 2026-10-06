@@ -36,10 +36,20 @@ plantilla en el PDF. Los perfiles declarativos están en
 formato. `generic-v1` es el respaldo cuando no hay una coincidencia conocida.
 
 El catálogo `reference-data/tasadoras.json` está separado de los perfiles:
-una empresa solo se identifica cuando existe un alias aprobado. Ningún PDF
+una empresa solo se identifica cuando existe un alias versionado. Ningún PDF
 desconocido crea una empresa, un perfil o una regla automáticamente. Consulta
 [`docs/operacion/perfiles-tasadoras.md`](../docs/operacion/perfiles-tasadoras.md)
 para registrar y validar correcciones humanas.
+
+Antes de incorporar una tasadora o un perfil, valida la configuración local:
+
+```bash
+python tools/validate_profile_catalog.py
+```
+
+La empresa detectada solo agrega trazabilidad. Los alias de extracción se
+incorporan únicamente en perfiles técnicos con evidencia repetida y pruebas
+sintéticas.
 
 ## Ejecutar localmente
 

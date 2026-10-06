@@ -1,4 +1,35 @@
 {
-  "version": "1",
-  "providers": []
+  "version": "2026-10-06",
+  "providers": [
+    {
+      "id": "braschi-tasaciones",
+      "name": "Braschi Tasaciones",
+      "aliases": ["BRASCHI TASACIONES"],
+      "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "layseca-asociados",
+      "name": "Layseca Asociados",
+      "aliases": ["LAYSECA ASOCIADOS"],
+      "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "tinsa-peru",
+      "name": "Tinsa",
+      "aliases": ["TINSA"],
+      "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "valortec-tasaciones",
+      "name": "Valortec Tasaciones",
+      "aliases": ["VALORTEC"],
+      "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "imax-ingenieria-maxima",
+      "name": "IMAX Ingeniería Máxima",
+      "aliases": ["IMAX INGENIERIA MAXIMA"],
+      "evidence_status": "observed_local_samples"
+    }
+  ]
 }

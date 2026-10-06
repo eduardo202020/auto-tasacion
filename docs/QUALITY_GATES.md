@@ -2,7 +2,7 @@
 
 ## Antes de aceptar un cambio local
 
-1. Ejecutar la suite de `unittest` completa.
+1. Ejecutar `python tools/validate_profile_catalog.py` y la suite de `unittest` completa.
 2. Ejecutar `compileall` para detectar errores de importación/sintaxis.
 3. Si el cambio toca la salida, generar un XLSX de prueba y ejecutar
    `tools/verify_workbook.py`.
@@ -21,7 +21,7 @@
 | IA | Corrección con página/evidencia que se revalide y corrección insegura rechazada. |
 | Excel | Hojas, tablas, columnas, `ID_CASO` y ruta correcta. |
 | HTTP | ZIP binario con nombre variable y respuesta XLSX válida. |
-| Perfil de plantilla | PDF sintético con firma y alias; caso sin firma que mantenga `generic-v1`; trazabilidad en `CONTROL` y `REVISION_IA`. |
+| Perfil de plantilla | Catálogo válido; PDF sintético con firma y alias; caso sin firma que mantenga `generic-v1`; trazabilidad en `CONTROL` y `REVISION_IA`. |
 
 ## Condiciones de bloqueo
 
