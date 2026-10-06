@@ -23,7 +23,8 @@ from catalog import (
     lookup_property_codes,
 )
 from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
-from profile_registry import detect_document_profile, validate_reference_data
+from profile_registry import detect_document_profile, profile_uses_strategy, validate_reference_data
+from provider_ocr import extract_braschi_floor_table_ocr
 from service import (
     CONTROL_COLUMNS, MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket, build_workbook,
     download_staged_zip, procesar_tasaciones, process_zip, to_macro_row,
@@ -191,6 +192,36 @@ S/ 350,000.00""",
     return content
 
 
+def build_pdf_with_braschi_construyo_floor_table() -> bytes:
+    """Plantilla sintética con celdas vacías para ejercitar el OCR local."""
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        """Braschi Tasaciones
+Solicitud Construyo
+N° de pisos en el edificio
+N° de sótanos y/o semisótanos""",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_text_braschi_construyo_floor_table() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "Braschi Tasaciones\nSolicitud Construyo", fontsize=10)
+    page.insert_text((72, 150), "N° de pisos en el edificio", fontsize=10)
+    page.insert_text((340, 150), "N° de sótanos y/o semisótanos", fontsize=10)
+    page.insert_text((90, 168), "6", fontsize=10)
+    page.insert_text((370, 168), "2", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
 def build_zip(name: str = "D01.pdf", content: bytes | None = None) -> bytes:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -265,6 +296,46 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(result["Valor elegido tipo"], "VALOR DE RECONSTRUCCION")
         self.assertEqual(result["Valor elegido S/"], 350000.0)
 
+    def test_detects_braschi_construyo_profile_and_its_technical_strategy(self):
+        profile = detect_document_profile([
+            "Braschi Tasaciones", "Solicitud Construyo",
+            "N° de pisos en el edificio", "N° de sótanos y/o semisótanos",
+        ])
+        self.assertEqual(profile.profile_id, "braschi-construyo-v1")
+        self.assertEqual(profile.provider_id, "braschi-tasaciones")
+        self.assertEqual(profile.provider_source, "PERFIL_TECNICO")
+        self.assertTrue(profile_uses_strategy(profile, "braschi_floor_table_ocr"))
+
+    def test_braschi_profile_uses_local_ocr_only_when_text_table_is_missing(self):
+        with patch("pdf_extractor.extract_braschi_floor_table_ocr", return_value=(6, 2, 1)) as ocr:
+            result = extract_pdf(build_pdf_with_braschi_construyo_floor_table(), "D14.pdf")
+        ocr.assert_called_once()
+        self.assertEqual(result["Perfil plantilla"], "braschi-construyo-v1")
+        self.assertEqual(result["Nro pisos edificio"], 6)
+        self.assertEqual(result["Nro sotanos edificio"], 2)
+        self.assertEqual(result["Pagina pisos/sotanos"], 1)
+
+    def test_braschi_profile_skips_ocr_when_text_table_is_already_readable(self):
+        with patch("pdf_extractor.extract_braschi_floor_table_ocr") as ocr:
+            result = extract_pdf(build_pdf_with_text_braschi_construyo_floor_table(), "D15.pdf")
+        ocr.assert_not_called()
+        self.assertEqual(result["Nro pisos edificio"], 6)
+        self.assertEqual(result["Nro sotanos edificio"], 2)
+
+    def test_braschi_table_ocr_requires_one_valid_integer_per_cell(self):
+        content = build_pdf_with_braschi_construyo_floor_table()
+        with patch("provider_ocr.pytesseract") as tesseract, patch("provider_ocr.Image") as image:
+            image.frombytes.return_value = MagicMock()
+            tesseract.image_to_string.side_effect = ["6", "2"]
+            with fitz.open(stream=content, filetype="pdf") as document:
+                self.assertEqual(extract_braschi_floor_table_ocr(document), (6, 2, 1))
+
+        with patch("provider_ocr.pytesseract") as tesseract, patch("provider_ocr.Image") as image:
+            image.frombytes.return_value = MagicMock()
+            tesseract.image_to_string.side_effect = ["6 7", "2"]
+            with fitz.open(stream=content, filetype="pdf") as document:
+                self.assertIsNone(extract_braschi_floor_table_ocr(document))
+
     def test_unknown_text_keeps_generic_profile(self):
         profile = detect_document_profile(["Informe independiente sin firma de plantilla"])
         self.assertEqual(profile.profile_id, "generic-v1")
@@ -278,6 +349,28 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(profile.provider_id, "tasadora-ejemplo")
         self.assertEqual(profile.provider_name, "Tasadora Ejemplo")
 
+    def test_uses_the_earliest_unambiguous_provider_signature_by_page(self):
+        providers = {
+            "tasadora-a": ("Tasadora A", ("TASADORA A S.A.C.",)),
+            "tasadora-b": ("Tasadora B", ("TASADORA B S.A.C.",)),
+        }
+        with patch("profile_registry.load_providers", return_value=providers):
+            profile = detect_document_profile([
+                "Informe de TASADORA A S.A.C.",
+                "Anexo que cita TASADORA B S.A.C.",
+            ])
+        self.assertEqual(profile.provider_id, "tasadora-a")
+
+    def test_keeps_provider_empty_when_the_first_matching_page_has_two_companies(self):
+        providers = {
+            "tasadora-a": ("Tasadora A", ("TASADORA A S.A.C.",)),
+            "tasadora-b": ("Tasadora B", ("TASADORA B S.A.C.",)),
+        }
+        with patch("profile_registry.load_providers", return_value=providers):
+            profile = detect_document_profile(["TASADORA A S.A.C. / TASADORA B S.A.C."])
+        self.assertEqual(profile.provider_id, "")
+        self.assertEqual(profile.profile_id, "generic-v1")
+
     def test_known_provider_signatures_keep_generic_extraction_until_a_profile_is_needed(self):
         cases = (
             ("Braschi Tasaciones", "braschi-tasaciones"),
@@ -286,6 +379,10 @@ class TasacionesServiceTests(unittest.TestCase):
             ("Valortec", "valortec-tasaciones"),
             ("IMAX", "imax-ingenieria-maxima"),
             ("IMAX Ingeniería Máxima", "imax-ingenieria-maxima"),
+            ("Ingeniería Máxima E.I.R.L.", "imax-ingenieria-maxima"),
+            ("EV Inmobiliaria Barrenechea S.A.C.", "ev-inmobiliaria-barrenechea"),
+            ("EV Inmobiliaria Barrenechea Sociedad Anónima Cerrada", "ev-inmobiliaria-barrenechea"),
+            ("Quantum Valuaciones S.A.C.", "quantum-valuaciones"),
         )
         for signature, provider_id in cases:
             with self.subTest(provider_id=provider_id):

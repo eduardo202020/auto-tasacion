@@ -1,0 +1,24 @@
+{
+  "id": "braschi-construyo-v1",
+  "version": "1",
+  "description": "Informe Braschi con anexo Construyo y tabla estructurada de pisos y sótanos.",
+  "default": false,
+  "priority": 120,
+  "provider_id": "braschi-tasaciones",
+  "match": {
+    "all_terms": [
+      "BRASCHI TASACIONES",
+      "PISOS EN EL EDIFICIO",
+      "SOTANOS Y/O SEMISOTANOS"
+    ],
+    "any_terms": [
+      "SOLICITUD CONSTRUYO"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {},
+    "strategies": [
+      "braschi_floor_table_ocr"
+    ]
+  }
+}

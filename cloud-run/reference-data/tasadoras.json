@@ -28,7 +28,22 @@
     {
       "id": "imax-ingenieria-maxima",
       "name": "IMAX Ingeniería Máxima",
-      "aliases": ["IMAX INGENIERIA MAXIMA", "IMAX"],
+      "aliases": ["IMAX INGENIERIA MAXIMA", "INGENIERIA MAXIMA E.I.R.L.", "IMAX"],
+      "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "ev-inmobiliaria-barrenechea",
+      "name": "EV Inmobiliaria Barrenechea",
+      "aliases": [
+        "EV INMOBILIARIA BARRENECHEA S.A.C.",
+        "EV INMOBILIARIA BARRENECHEA SOCIEDAD ANONIMA CERRADA"
+      ],
+      "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "quantum-valuaciones",
+      "name": "Quantum Valuaciones",
+      "aliases": ["QUANTUM VALUACIONES S.A.C."],
       "evidence_status": "observed_local_samples"
     }
   ]

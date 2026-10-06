@@ -19,6 +19,7 @@ from typing import Any, Iterable
 REFERENCE_DATA = Path(__file__).parent / "reference-data"
 PROFILES_DIR = REFERENCE_DATA / "profiles"
 PROVIDERS_FILE = REFERENCE_DATA / "tasadoras.json"
+ALLOWED_EXTRACTION_STRATEGIES = frozenset({"braschi_floor_table_ocr"})
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class ProfileDefinition:
     all_terms: tuple[str, ...]
     any_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
+    strategies: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class DocumentProfile:
     confidence: float
     matched_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
+    strategies: tuple[str, ...]
 
 
 GENERIC_PROFILE = DocumentProfile(
@@ -56,6 +59,7 @@ GENERIC_PROFILE = DocumentProfile(
     confidence=0.0,
     matched_terms=(),
     anchor_aliases={},
+    strategies=(),
 )
 
 
@@ -73,6 +77,18 @@ def _as_terms(value: object, field: str, profile_path: Path) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{profile_path.name}: {field} debe ser una lista de textos")
     return tuple(term for term in (normalize(item) for item in value) if term)
+
+
+def _as_strategies(value: object, profile_path: Path) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{profile_path.name}: extraction.strategies debe ser una lista de textos")
+    strategies = tuple(item.strip() for item in value if item.strip())
+    invalid = sorted(set(strategies) - ALLOWED_EXTRACTION_STRATEGIES)
+    if invalid:
+        raise ValueError(f"{profile_path.name}: estrategia de extraccion no permitida: {', '.join(invalid)}")
+    return strategies
 
 
 def _load_profile(path: Path) -> ProfileDefinition:
@@ -100,6 +116,7 @@ def _load_profile(path: Path) -> ProfileDefinition:
         if not isinstance(field, str) or not field.strip():
             raise ValueError(f"{path.name}: cada alias debe indicar un campo")
         normalized_aliases[field.strip()] = _as_terms(values, f"anchor_aliases.{field}", path)
+    strategies = _as_strategies(extraction.get("strategies"), path)
 
     all_terms = _as_terms(match.get("all_terms"), "match.all_terms", path)
     any_terms = _as_terms(match.get("any_terms"), "match.any_terms", path)
@@ -116,6 +133,7 @@ def _load_profile(path: Path) -> ProfileDefinition:
         all_terms=all_terms,
         any_terms=any_terms,
         anchor_aliases=normalized_aliases,
+        strategies=strategies,
     )
 
 
@@ -251,26 +269,40 @@ def load_providers() -> dict[str, tuple[str, tuple[str, ...]]]:
         return {}
 
 
+def _contains_provider_signature(text: str, alias: str) -> bool:
+    """Comprueba una firma completa y evita coincidencias dentro de otra palabra."""
+    return f" {alias} " in f" {text} "
+
+
 def _provider_for(
-    text: str,
+    page_texts: tuple[str, ...],
     preferred_id: str,
     provider_ocr_text: str = "",
 ) -> tuple[str, str, str]:
     providers = load_providers()
     if preferred_id and preferred_id in providers:
         return preferred_id, providers[preferred_id][0], "PERFIL_TECNICO"
-    matches = [
-        (provider_id, name)
-        for provider_id, (name, aliases) in providers.items()
-        if any(alias in text for alias in aliases)
-    ]
-    if len(matches) == 1:
-        provider_id, name = matches[0]
-        return provider_id, name, "TEXTO_PDF"
+
+    # Un informe puede citar a otra tasadora en anexos o comparables. La
+    # primera firma única por página es la evidencia más próxima a la portada;
+    # dos firmas distintas en esa misma página se consideran ambiguas.
+    for page_text in page_texts:
+        normalized_page = normalize(page_text)
+        matches = [
+            (provider_id, name)
+            for provider_id, (name, aliases) in providers.items()
+            if any(_contains_provider_signature(normalized_page, alias) for alias in aliases)
+        ]
+        if len(matches) == 1:
+            provider_id, name = matches[0]
+            return provider_id, name, "TEXTO_PDF"
+        if len(matches) > 1:
+            return "", "", ""
+
     ocr_matches = [
         (provider_id, name)
         for provider_id, (name, aliases) in providers.items()
-        if any(alias in provider_ocr_text for alias in aliases)
+        if any(_contains_provider_signature(provider_ocr_text, alias) for alias in aliases)
     ]
     if len(ocr_matches) == 1:
         provider_id, name = ocr_matches[0]
@@ -296,7 +328,8 @@ def detect_document_profile(
     El puntaje solo resuelve perfiles técnicos que ya declararon su firma.
     No se infiere una tasadora ni se crean reglas desde el contenido del PDF.
     """
-    text = normalize(" ".join(page_texts))
+    pages = tuple(str(page_text or "") for page_text in page_texts)
+    text = normalize(" ".join(pages))
     provider_ocr_text = normalize(" ".join(provider_ocr_texts))
     profiles = load_profiles()
     if not profiles:
@@ -312,7 +345,7 @@ def detect_document_profile(
         return GENERIC_PROFILE
     score, _, selected, matched = max(candidates, key=lambda item: (item[0], item[1], item[2].profile_id))
     if selected.is_default and score == 0:
-        provider_id, provider_name, provider_source = _provider_for(text, "", provider_ocr_text)
+        provider_id, provider_name, provider_source = _provider_for(pages, "", provider_ocr_text)
         return DocumentProfile(
             profile_id=GENERIC_PROFILE.profile_id,
             version=GENERIC_PROFILE.version,
@@ -322,9 +355,10 @@ def detect_document_profile(
             confidence=GENERIC_PROFILE.confidence,
             matched_terms=GENERIC_PROFILE.matched_terms,
             anchor_aliases=GENERIC_PROFILE.anchor_aliases,
+            strategies=GENERIC_PROFILE.strategies,
         )
     provider_id, provider_name, provider_source = _provider_for(
-        text,
+        pages,
         selected.provider_id,
         provider_ocr_text,
     )
@@ -338,9 +372,15 @@ def detect_document_profile(
         confidence=confidence,
         matched_terms=matched,
         anchor_aliases=selected.anchor_aliases,
+        strategies=selected.strategies,
     )
 
 
 def profile_anchor_aliases(profile: DocumentProfile, field: str) -> tuple[str, ...]:
     """Devuelve aliases normalizados para un ancla sin cambiar la regla base."""
     return profile.anchor_aliases.get(field, ())
+
+
+def profile_uses_strategy(profile: DocumentProfile, strategy: str) -> bool:
+    """Indica si un perfil técnico autorizó una estrategia de extracción."""
+    return strategy in profile.strategies

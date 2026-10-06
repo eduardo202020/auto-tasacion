@@ -6,15 +6,16 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 
 | ID | Feature | Estado | Criterio de aceptación |
 | --- | --- | --- | --- |
-| F01 | Catálogo versionado de tasadoras | Implementado | Cada empresa tiene un ID estable y firmas textuales no ambiguas, o permanece en respaldo genérico si su marca no está disponible como texto; la detección solo agrega metadatos. |
+| F01 | Catálogo versionado de tasadoras | Implementado | Cada empresa tiene un ID estable y firmas textuales no ambiguas, o permanece en respaldo genérico si su marca no está disponible como texto; la detección solo agrega metadatos. El catálogo cubre Braschi, Layseca, Tinsa, Valortec, IMAX, EV Inmobiliaria Barrenechea y Quantum Valuaciones. |
 | F02 | Detección de plantilla | Implementado | Una firma inequívoca selecciona un perfil; si no existe, se mantiene `generic-v1`. |
-| F03 | Extracción específica por perfil | Implementado de forma acotada | `opd-construyo-v1` aporta alias técnicos para valores. Las demás empresas continúan con el extractor general hasta contar con una variación repetida y probada. |
+| F03 | Extracción específica por perfil | Implementado de forma acotada | `opd-construyo-v1` aporta alias técnicos para valores y `braschi-construyo-v1` habilita OCR local de una tabla técnica cuando el texto extraíble no contiene ambos valores. Las demás empresas continúan con el extractor general hasta contar con una variación repetida y probada. |
 | F04 | Trazabilidad de perfil | Implementado | `CONTROL` y `REVISION_IA` registran tasadora, perfil, versión, confianza y coincidencias. |
 | F05 | Bitácora de correcciones del operador | Implementado | El CSV exige `ID_CASO`, campo, valor final, página, evidencia, motivo, operador y fecha. |
 | F06 | Propuesta de perfil mediante Gemini | Pendiente de aprobación | La IA debe generar un borrador con evidencia; nunca crea ni publica perfiles por sí sola. Requiere Seguridad y Operaciones. |
 | F07 | Aprobación y publicación de perfiles | Proceso definido | Un perfil pasa por validación del catálogo, prueba sintética, revisión funcional y despliegue autorizado. |
 | F08 | Métricas por perfil | Pendiente | Medir proporción de revisión, campos faltantes y correcciones por perfil sin guardar PDFs productivos. |
 | F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. Si falla o no hay firma única, se conserva `generic-v1`. Desplegado en Cloud Run el 2026-10-06. |
+| F10 | OCR de campo por perfil técnico | Desplegado en Cloud Run el 2026-10-06 | `braschi-construyo-v1` recorta solo las celdas de pisos y sótanos cuando ambos encabezados coinciden y el parser textual falla. Cada lectura debe ser un entero único y válido; cualquier ambigüedad mantiene el caso en revisión. |
 
 ## Ciclo de alta seguro
 

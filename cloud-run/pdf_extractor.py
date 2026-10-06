@@ -11,8 +11,8 @@ from typing import Any, Optional
 
 import fitz
 
-from profile_registry import detect_document_profile, profile_anchor_aliases
-from provider_ocr import iter_provider_ocr_texts
+from profile_registry import detect_document_profile, profile_anchor_aliases, profile_uses_strategy
+from provider_ocr import extract_braschi_floor_table_ocr, iter_provider_ocr_texts
 
 
 RAW_CASA_RE = re.compile(r"\b(CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR|VIVIENDA)\b", re.I)
@@ -676,6 +676,10 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             edad_efectiva, page_edad_efectiva = extract_edad_efectiva(doc)
             anio_expedicion, page_anio_expedicion = extract_anio_expedicion(doc)
             pisos, sotanos, page_pisos = extract_pisos_sotanos(doc)
+            if pisos is None and profile_uses_strategy(profile, "braschi_floor_table_ocr"):
+                ocr_floors = extract_braschi_floor_table_ocr(doc)
+                if ocr_floors is not None:
+                    pisos, sotanos, page_pisos = ocr_floors
             # PRESTAMO y SEGURO INMUEBLE se obtienen después en PAD/IBM 3270.
             # Cloud Run no toma ni infiere esos identificadores desde el PDF.
             prestamo = ""

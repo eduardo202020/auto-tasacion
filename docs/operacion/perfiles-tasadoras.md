@@ -16,15 +16,28 @@ justifican en `CONTROL` y `REVISION_IA`. La hoja `PARA_PROCESAR` no cambia.
   `Solicitud Construyo` o `Primer Construyo`. Sus alias complementan las
   anclas existentes; no cambian ninguna prioridad de negocio.
 
-Un perfil puede ampliar nombres de etiquetas, por ejemplo el texto que rotula
-un valor comercial. No puede convertir un dato sin evidencia, elegir entre
+Un perfil puede ampliar nombres de etiquetas, por ejemplo el texto que rotula+un valor comercial, o habilitar una estrategia técnica limitada a una firma de+plantilla. La estrategia debe conservar la misma fuente documental y exigir
+evidencia inequívoca. No puede convertir un dato sin evidencia, elegir entre
 fuentes contradictorias, cambiar catálogos ni enviar una excepción a IBM.
+
+`braschi-construyo-v1` identifica el informe Braschi que contiene el anexo
+Construyo y la tabla ``Nº de pisos en el edificio`` / ``Nº de sótanos y/o
+semisótanos``. Cuando el texto del PDF no contiene ambos valores, aplica OCR
+local solo a las dos celdas de esa tabla. El resultado se acepta únicamente si
+cada celda produce un único entero dentro de los límites operativos; de lo
+contrario el caso continúa en revisión.
 
 Una tasadora y una plantilla no son equivalentes: la misma empresa puede
 emitir múltiples formatos, y un formato puede incluir anexos de otra plantilla.
 Por ello, la empresa se identifica con firmas propias y el perfil se selecciona
 con una firma técnica independiente. Si solo se conoce la empresa, se conserva
 `generic-v1` hasta que exista una variación de extracción repetida y probada.
+
+La detección textual recorre las páginas en orden y toma la primera página que
+contiene una sola firma registrada. Así, una tasadora citada posteriormente en
+un anexo o comparable no sustituye a la empresa del informe. Si la primera
+página con firmas contiene más de una empresa, el caso queda sin tasadora
+asignada hasta contar con evidencia adicional.
 
 Si la firma de empresa está solo en un logo, el servicio usa OCR local de los
 encabezados y pies de las primeras páginas. La coincidencia se conserva como
