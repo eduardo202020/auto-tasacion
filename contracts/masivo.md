@@ -17,13 +17,14 @@ para cargar datos contra IBM 3270.
 | M:O | Ubicación | Dirección del inmueble | Tipo, nombre de ubicación y distrito. El tipo conserva la etiqueta completa, por ejemplo `URBANIZACION`. Si no está homologado, UBICACION y UBICACION1 quedan vacíos; la geografía válida se conserva. |
 | P, R, T | Códigos geográficos | Catálogo | Solo se informa una coincidencia explícita. |
 | U | CLASE | Pisos | 1: hasta 4; 2: de 5 a 10; 3: más de 10. Se toma del bloque `CLASE INMUEBLE` de `DATOS`. |
-| V:W | PISOS, SOTANOS | PDF | Prioriza la tabla de características del inmueble; usa la descripción solo si no existe una tabla legible. |
+| V:W | PISOS, SOTANOS | PDF | Prioriza la tabla de características del inmueble; usa la descripción solo si no existe una tabla legible. La azotea no cuenta como piso ni incrementa PISOS. |
 | X | AÑO | PDF | Año explícito de construcción/edificación. Si no existe, es `año de expedición − edad efectiva`, solo con ambas evidencias y si el resultado está entre 1900 y el año de expedición. |
 | Y | ID_CASO | Servicio | Llave técnica inmutable, derivada del nombre interno del PDF y su contenido, para que Power Automate actualice el resultado de IBM 3270 en CONTROL. PDFs con el mismo contenido y distinto nombre reciben llaves distintas. No es un dato de negocio para el Mainframe. |
 
 Las columnas F, L, Q y S se reservan para el formato heredado de integración.
 Las excepciones no llegan a `PARA_PROCESAR`: se registran en `REVISION_IA`.
 La evidencia por página, el origen del año, los códigos usados, el resultado
-de IA, el perfil y la empresa de tasación identificados por firma, y la ruta
+de IA, el perfil, la empresa de tasación identificada por firma, el origen de
+esa identificación (`TEXTO_PDF`, `OCR_LOCAL` o `PERFIL_TECNICO`) y la ruta
 final se registran en `CONTROL`. `REVISION_IA` replica esos metadatos de perfil
 para revisar las excepciones. Ninguno modifica las columnas de `PARA_PROCESAR`.

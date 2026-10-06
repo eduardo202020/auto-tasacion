@@ -1,8 +1,8 @@
 {
-  "version": "2026-10-05-auto10",
+  "version": "2026-10-06-azotea",
   "rules": [
     "Dirección: priorizar la dirección según minuta de la unidad tasada; usar inspección ocular solo si no existe minuta y dirección municipal/matriz como último respaldo.",
-    "Pisos y sótanos: priorizar la tabla de características del inmueble sobre la descripción narrativa; la azotea no se suma por inferencia. La celda conjunta 'N° de Pisos/Sótanos del edificio' se interpreta como pisos/sótanos, por ejemplo 3/0.",
+    "Pisos y sotanos: priorizar la tabla de caracteristicas del inmueble sobre la descripcion narrativa. La azotea es una cobertura y no cuenta como piso ni incrementa PISOS. La celda conjunta 'N de Pisos/Sotanos del edificio' se interpreta como pisos/sotanos, por ejemplo 3/0.",
     "Primer construyo: cuando el informe declara simultáneamente primer construyo, terreno sin construcciones y una edificación proyectada a N pisos y azotea, usar N pisos, 0 sótanos y edad efectiva 0; el año se deriva de la fecha de expedición documentada.",
     "Fecha de expedición: tomar el primer año que sigue a la etiqueta 'Fecha de Expedición'; la fecha de caducidad no puede sustituirla.",
     "Dirección de Solicitud Construyo: solo respalda la ubicación territorial si la dirección prioritaria no contiene distrito, provincia y departamento. Se admiten etiquetas abreviadas y el sufijo explícito distrito-provincia-departamento, siempre que la terna esté en DATOS.",

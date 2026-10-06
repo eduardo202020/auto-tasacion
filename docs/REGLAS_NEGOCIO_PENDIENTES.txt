@@ -32,17 +32,14 @@ Evidencia observada en D03 y D04:
 - La descripcion narrativa indica 5 pisos, mas azotea y 2 sotanos.
 - El Colab de origen y el codigo actual toman 5 desde la descripcion narrativa.
 
-Preguntas para Operaciones:
-- La azotea cuenta como un piso para el campo PISOS de PARA_PROCESAR?
-- Debe prevalecer la tabla, la descripcion o una fuente distinta?
-- Si la tabla y la descripcion discrepan, se debe bloquear la fila para
-  revision o se puede usar una prioridad fija?
-- Los sotanos se excluyen siempre de PISOS? Como se representan los
-  semisotanos, mezanines y duplex?
-
 Decision aprobada:
-Responsable y fecha:
-Ejemplos de prueba aprobados:
+- La azotea es una cobertura: no cuenta como piso ni incrementa PISOS.
+- La tabla de caracteristicas prevalece sobre la descripcion narrativa.
+- Los sotanos se informan por separado y no incrementan PISOS.
+
+Responsable y fecha: Operacion hipotecaria, 2026-10-06.
+Ejemplos de prueba aprobados: informe con ``5 pisos, mas azotea y 2 sotanos``
+emite PISOS=5 y SOTANOS=2; D03 y D04 mantienen la prioridad de tabla.
 
 2. DIRECCION CANONICA PARA LA OPERACION
 ---------------------------------------
@@ -176,7 +173,7 @@ cloud-run/reference-data/reglas_operativas.json y se prueban con PDFs
 sinteticos.
 
 Regla | Decision implementada | Casos de referencia
-Pisos/sotanos | La tabla de caracteristicas prevalece sobre la descripcion; la azotea no se suma por inferencia. | D03, D04: 6 pisos y 2 sotanos.
+Pisos/sotanos | La tabla de caracteristicas prevalece sobre la descripcion. La azotea no cuenta como piso ni incrementa PISOS. | D03, D04: 6 pisos y 2 sotanos; prueba sintetica: 5 pisos, mas azotea y 2 sotanos.
 Direccion | Minuta de la unidad; inspeccion ocular como respaldo; matriz municipal como ultimo respaldo. | D01, D02.
 Ubicacion | Una ubicacion no homologable queda vacia y no bloquea la fila si la geografia obligatoria es valida. | D02.
 Salida MASIVO | Se emiten etiquetas completas para tipo de inmueble, via y ubicacion; los codigos del catalogo se conservan en CONTROL. | D01-D04.

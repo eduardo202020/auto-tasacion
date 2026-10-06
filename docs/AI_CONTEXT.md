@@ -38,6 +38,7 @@ Todos los casos, incluso los listos, se registran en `CONTROL`.
 | `cloud-run/service.py` | Recibir ZIP, clasificar casos y construir el XLSX. | Depender del nombre o de una ruta del ZIP. |
 | `cloud-run/pdf_extractor.py` | Extraer evidencia determinista de PDF. | Inventar campos o silenciar conflictos. |
 | `cloud-run/profile_registry.py` + `reference-data/profiles/` | Identificar una plantilla por firma explícita y aportar alias técnicos de etiquetas. | Inferir una tasadora, cambiar reglas de negocio o publicar perfiles desde correcciones. |
+| `cloud-run/provider_ocr.py` | Reconocer localmente una firma gráfica de tasadora en encabezado o pie y registrar su origen. | Enviar PDFs o fragmentos OCR a un servicio externo, alterar campos extraídos o sustituir una firma ambigua. |
 | `cloud-run/catalog.py` + `reference-data/` | Traducir exclusivamente valores autorizados de `DATOS`. | Aplicar equivalencias no aprobadas. |
 | `cloud-run/ai_reviewer.py` | Consultar IA solo para excepciones permitidas. | Enviar casos directamente a la cola operable. |
 | `contracts/masivo.md` | Definir el contrato de salida estable. | Ser reinterpretado por cada consumidor. |
@@ -65,8 +66,8 @@ Todos los casos, incluso los listos, se registran en `CONTROL`.
 - El histórico Google Sheets está archivado en `legacy/` y no comparte el
   contrato activo.
 - Los perfiles de plantilla solo explican variaciones de formato. Su versión,
-  coincidencias y confianza se registran en `CONTROL` y `REVISION_IA`; no
-  cambian el contrato de `PARA_PROCESAR`.
+  coincidencias, confianza y origen de la tasadora se registran en `CONTROL` y
+  `REVISION_IA`; no cambian el contrato de `PARA_PROCESAR`.
 
 ## Lectura por tipo de tarea
 

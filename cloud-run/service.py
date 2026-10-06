@@ -84,7 +84,7 @@ REQUIRED_MACRO_COLUMNS = (
 )
 
 CONTROL_COLUMNS = [
-    "ID_CASO", "ID / Codigo PDF", "PDF_Archivo", "Tasadora id", "Tasadora detectada",
+    "ID_CASO", "ID / Codigo PDF", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Origen tasadora",
     "Perfil plantilla", "Version perfil", "Confianza perfil", "Coincidencias perfil",
     "PRESTAMO", "Direccion extraida", "Pagina direccion",
     "Tipo inmueble", "Tipo inmueble texto", "Pagina tipo inmueble", "Valor elegido tipo",
@@ -100,7 +100,7 @@ CONTROL_COLUMNS = [
 ]
 
 REVIEW_COLUMNS = [
-    "ID_CASO", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Perfil plantilla",
+    "ID_CASO", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Origen tasadora", "Perfil plantilla",
     "Version perfil", "Confianza perfil", "Coincidencias perfil", "Estado", "Campos faltantes", "Incidencias de validacion",
     "Campos enviados a IA", "Motivo IA", "Correcciones IA", "Evidencia IA", "Modelo IA",
     "Siguiente accion",
@@ -544,6 +544,7 @@ def process_zip(
                     "PDF_Archivo": entry.filename,
                     "Tasadora id": "",
                     "Tasadora detectada": "",
+                    "Origen tasadora": "",
                     "Perfil plantilla": "generic-v1",
                     "Version perfil": "1",
                     "Confianza perfil": 0.0,
@@ -614,6 +615,7 @@ def process_zip(
                     "ID_CASO": case_id, "PDF_Archivo": entry.filename,
                     "Tasadora id": deterministic.get("Tasadora id", ""),
                     "Tasadora detectada": deterministic.get("Tasadora detectada", ""),
+                    "Origen tasadora": deterministic.get("Origen tasadora", ""),
                     "Perfil plantilla": deterministic.get("Perfil plantilla", "generic-v1"),
                     "Version perfil": deterministic.get("Version perfil", "1"),
                     "Confianza perfil": deterministic.get("Confianza perfil", 0.0),

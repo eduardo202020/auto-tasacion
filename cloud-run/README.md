@@ -51,6 +51,17 @@ La empresa detectada solo agrega trazabilidad. Los alias de extracción se
 incorporan únicamente en perfiles técnicos con evidencia repetida y pruebas
 sintéticas.
 
+## Detección local de logos
+
+Cuando una tasadora solo aparece como imagen o logo, el servicio aplica OCR
+local a las franjas de encabezado y pie de las primeras tres páginas. El texto
+resultante se compara únicamente con las firmas de `tasadoras.json`; no se
+registra ni se envía a Gemini u otro servicio externo. Si OCR no está
+disponible o no identifica una firma única, el caso conserva `generic-v1`.
+
+La imagen de Cloud Run instala Tesseract mediante el `Dockerfile`. El origen
+se despliega con ese Dockerfile cuando está presente.
+
 ## Ejecutar localmente
 
 ```bash
@@ -96,7 +107,6 @@ desde la raíz del repositorio:
 gcloud run deploy demo-tasaciones-ia \
   --source cloud-run \
   --function procesar_tasaciones \
-  --base-image python311 \
   --region northamerica-northeast1
 ```
 

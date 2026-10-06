@@ -22,6 +22,7 @@
 | Excel | Hojas, tablas, columnas, `ID_CASO` y ruta correcta. |
 | HTTP | ZIP binario con nombre variable y respuesta XLSX válida. |
 | Perfil de plantilla | Catálogo válido; PDF sintético con firma y alias; caso sin firma que mantenga `generic-v1`; trazabilidad en `CONTROL` y `REVISION_IA`. |
+| Firma gráfica / OCR | Prueba sintética o simulada que atribuya una firma única como `OCR_LOCAL`; fallo de OCR o firma ambigua que conserve `generic-v1`. |
 
 ## Condiciones de bloqueo
 

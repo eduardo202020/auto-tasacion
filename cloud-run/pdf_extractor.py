@@ -12,6 +12,7 @@ from typing import Any, Optional
 import fitz
 
 from profile_registry import detect_document_profile, profile_anchor_aliases
+from provider_ocr import iter_provider_ocr_texts
 
 
 RAW_CASA_RE = re.compile(r"\b(CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR|VIVIENDA)\b", re.I)
@@ -563,6 +564,9 @@ def extract_pisos_sotanos_descripcion(doc: fitz.Document) -> tuple[Optional[int]
         text = norm_up(doc[page_index].get_text("text"))
         match = pattern.search(text)
         if match:
+            # Una azotea puede aparecer entre ambos valores, por ejemplo,
+            # "5 pisos, mas azotea y 2 sotanos". Es una cobertura y no
+            # incrementa el total declarado de pisos.
             return int(match.group(1)), int(match.group(2)), page_index + 1
         project = re.search(
             r"\bPRIMER\s+CONSTRUYO\b.{0,180}?\b(?:PROYECTAD[AO]\s+A\s+)?(\d{1,3})\s+PISOS?\b.{0,40}?\bAZOTEA\b",
@@ -613,6 +617,7 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "PDF_Archivo": filename,
         "Tasadora id": "",
         "Tasadora detectada": "",
+        "Origen tasadora": "",
         "Perfil plantilla": "generic-v1",
         "Version perfil": "1",
         "Confianza perfil": 0.0,
@@ -647,7 +652,11 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     observations: list[str] = []
     try:
         with fitz.open(stream=content, filetype="pdf") as doc:
-            profile = detect_document_profile(page.get_text("text") for page in doc)
+            page_texts = tuple(page.get_text("text") for page in doc)
+            profile = detect_document_profile(page_texts)
+            if not profile.provider_id:
+                ocr_texts = tuple(iter_provider_ocr_texts(doc))
+                profile = detect_document_profile(page_texts, ocr_texts)
             direccion, page_direccion = extract_address(doc)
             solicitud_direccion, solicitud_page = extract_solicitud_construyo_address(doc)
             if solicitud_direccion and not has_complete_administrative_location(direccion):
@@ -696,6 +705,7 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     result.update({
         "Tasadora id": profile.provider_id,
         "Tasadora detectada": profile.provider_name,
+        "Origen tasadora": profile.provider_source,
         "Perfil plantilla": profile.profile_id,
         "Version perfil": profile.version,
         "Confianza perfil": profile.confidence,

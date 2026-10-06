@@ -26,6 +26,11 @@ Por ello, la empresa se identifica con firmas propias y el perfil se selecciona
 con una firma técnica independiente. Si solo se conoce la empresa, se conserva
 `generic-v1` hasta que exista una variación de extracción repetida y probada.
 
+Si la firma de empresa está solo en un logo, el servicio usa OCR local de los
+encabezados y pies de las primeras páginas. La coincidencia se conserva como
+`Origen tasadora = OCR_LOCAL`; no se guardan los fragmentos OCR ni se envían
+a servicios externos. Si la firma no es única, no se atribuye una tasadora.
+
 ## Alta de una tasadora o plantilla
 
 1. El operador registra cada corrección del lote en

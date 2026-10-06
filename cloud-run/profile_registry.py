@@ -41,6 +41,7 @@ class DocumentProfile:
     version: str
     provider_id: str
     provider_name: str
+    provider_source: str
     confidence: float
     matched_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
@@ -51,6 +52,7 @@ GENERIC_PROFILE = DocumentProfile(
     version="1",
     provider_id="",
     provider_name="",
+    provider_source="",
     confidence=0.0,
     matched_terms=(),
     anchor_aliases={},
@@ -249,16 +251,31 @@ def load_providers() -> dict[str, tuple[str, tuple[str, ...]]]:
         return {}
 
 
-def _provider_for(text: str, preferred_id: str) -> tuple[str, str]:
+def _provider_for(
+    text: str,
+    preferred_id: str,
+    provider_ocr_text: str = "",
+) -> tuple[str, str, str]:
     providers = load_providers()
     if preferred_id and preferred_id in providers:
-        return preferred_id, providers[preferred_id][0]
+        return preferred_id, providers[preferred_id][0], "PERFIL_TECNICO"
     matches = [
         (provider_id, name)
         for provider_id, (name, aliases) in providers.items()
         if any(alias in text for alias in aliases)
     ]
-    return matches[0] if len(matches) == 1 else ("", "")
+    if len(matches) == 1:
+        provider_id, name = matches[0]
+        return provider_id, name, "TEXTO_PDF"
+    ocr_matches = [
+        (provider_id, name)
+        for provider_id, (name, aliases) in providers.items()
+        if any(alias in provider_ocr_text for alias in aliases)
+    ]
+    if len(ocr_matches) == 1:
+        provider_id, name = ocr_matches[0]
+        return provider_id, name, "OCR_LOCAL"
+    return "", "", ""
 
 
 def _matching_terms(profile: ProfileDefinition, text: str) -> tuple[str, ...] | None:
@@ -270,13 +287,17 @@ def _matching_terms(profile: ProfileDefinition, text: str) -> tuple[str, ...] | 
     return (*profile.all_terms, *matched_any)
 
 
-def detect_document_profile(page_texts: Iterable[str]) -> DocumentProfile:
+def detect_document_profile(
+    page_texts: Iterable[str],
+    provider_ocr_texts: Iterable[str] = (),
+) -> DocumentProfile:
     """Selecciona el perfil con firma explícita; sin firma devuelve genérico.
 
     El puntaje solo resuelve perfiles técnicos que ya declararon su firma.
     No se infiere una tasadora ni se crean reglas desde el contenido del PDF.
     """
     text = normalize(" ".join(page_texts))
+    provider_ocr_text = normalize(" ".join(provider_ocr_texts))
     profiles = load_profiles()
     if not profiles:
         return GENERIC_PROFILE
@@ -291,23 +312,29 @@ def detect_document_profile(page_texts: Iterable[str]) -> DocumentProfile:
         return GENERIC_PROFILE
     score, _, selected, matched = max(candidates, key=lambda item: (item[0], item[1], item[2].profile_id))
     if selected.is_default and score == 0:
-        provider_id, provider_name = _provider_for(text, "")
+        provider_id, provider_name, provider_source = _provider_for(text, "", provider_ocr_text)
         return DocumentProfile(
             profile_id=GENERIC_PROFILE.profile_id,
             version=GENERIC_PROFILE.version,
             provider_id=provider_id,
             provider_name=provider_name,
+            provider_source=provider_source,
             confidence=GENERIC_PROFILE.confidence,
             matched_terms=GENERIC_PROFILE.matched_terms,
             anchor_aliases=GENERIC_PROFILE.anchor_aliases,
         )
-    provider_id, provider_name = _provider_for(text, selected.provider_id)
+    provider_id, provider_name, provider_source = _provider_for(
+        text,
+        selected.provider_id,
+        provider_ocr_text,
+    )
     confidence = min(0.95, round(0.6 + (0.15 * score), 2))
     return DocumentProfile(
         profile_id=selected.profile_id,
         version=selected.version,
         provider_id=provider_id,
         provider_name=provider_name,
+        provider_source=provider_source,
         confidence=confidence,
         matched_terms=matched,
         anchor_aliases=selected.anchor_aliases,

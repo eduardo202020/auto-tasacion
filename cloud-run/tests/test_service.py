@@ -101,6 +101,19 @@ def build_pdf_with_pisos_sotanos_pair() -> bytes:
     return content
 
 
+def build_pdf_with_azotea_not_counted_as_floor() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        "El edificio consta de 5 pisos, mas azotea y 2 sotanos.",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
 def build_pdf_with_solicitud_construyo_address() -> bytes:
     document = fitz.open()
     primary = document.new_page()
@@ -279,6 +292,21 @@ class TasacionesServiceTests(unittest.TestCase):
                 self.assertEqual(profile.profile_id, "generic-v1")
                 self.assertEqual(profile.provider_id, provider_id)
 
+    def test_provider_ocr_identification_is_local_metadata_only(self):
+        with patch("pdf_extractor.iter_provider_ocr_texts", return_value=("Tinsa",)):
+            result = extract_pdf(build_pdf(), "D12.pdf")
+        self.assertEqual(result["Tasadora id"], "tinsa-peru")
+        self.assertEqual(result["Tasadora detectada"], "Tinsa")
+        self.assertEqual(result["Origen tasadora"], "OCR_LOCAL")
+        self.assertEqual(result["Perfil plantilla"], "generic-v1")
+
+    def test_ambiguous_provider_ocr_keeps_generic_profile(self):
+        with patch("pdf_extractor.iter_provider_ocr_texts", return_value=("Tinsa", "Valortec")):
+            result = extract_pdf(build_pdf(), "D13.pdf")
+        self.assertEqual(result["Tasadora id"], "")
+        self.assertEqual(result["Origen tasadora"], "")
+        self.assertEqual(result["Perfil plantilla"], "generic-v1")
+
     def test_profile_and_provider_catalog_pass_reference_data_validation(self):
         self.assertEqual(validate_reference_data(), [])
 
@@ -314,6 +342,10 @@ class TasacionesServiceTests(unittest.TestCase):
     def test_extracts_pisos_and_sotanos_from_single_pair_cell(self):
         with fitz.open(stream=build_pdf_with_pisos_sotanos_pair(), filetype="pdf") as document:
             self.assertEqual(extract_pisos_sotanos(document), (3, 0, 1))
+
+    def test_does_not_count_azotea_as_an_additional_floor(self):
+        with fitz.open(stream=build_pdf_with_azotea_not_counted_as_floor(), filetype="pdf") as document:
+            self.assertEqual(extract_pisos_sotanos(document), (5, 2, 1))
 
     def test_uses_solicitud_construyo_only_for_missing_administrative_location(self):
         result = extract_pdf(build_pdf_with_solicitud_construyo_address(), "D01.pdf")

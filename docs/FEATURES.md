@@ -14,7 +14,7 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F06 | Propuesta de perfil mediante Gemini | Pendiente de aprobación | La IA debe generar un borrador con evidencia; nunca crea ni publica perfiles por sí sola. Requiere Seguridad y Operaciones. |
 | F07 | Aprobación y publicación de perfiles | Proceso definido | Un perfil pasa por validación del catálogo, prueba sintética, revisión funcional y despliegue autorizado. |
 | F08 | Métricas por perfil | Pendiente | Medir proporción de revisión, campos faltantes y correcciones por perfil sin guardar PDFs productivos. |
-| F09 | Detección de firmas gráficas u OCR | Pendiente | Identificar una tasadora cuando el PDF contiene el logo como imagen y no expone una firma textual. Requiere evaluar una solución OCR aprobada. |
+| F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. Si falla o no hay firma única, se conserva `generic-v1`. Pendiente de despliegue autorizado. |
 
 ## Ciclo de alta seguro
 
