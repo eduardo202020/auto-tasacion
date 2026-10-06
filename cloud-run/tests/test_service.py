@@ -284,6 +284,7 @@ class TasacionesServiceTests(unittest.TestCase):
             ("Layseca Asociados", "layseca-asociados"),
             ("Tinsa", "tinsa-peru"),
             ("Valortec", "valortec-tasaciones"),
+            ("IMAX", "imax-ingenieria-maxima"),
             ("IMAX Ingeniería Máxima", "imax-ingenieria-maxima"),
         )
         for signature, provider_id in cases:

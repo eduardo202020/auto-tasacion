@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 .env
 tests/
+test-output/
 *.xlsx
 !reference-data/catalogos_tasaciones.xlsx

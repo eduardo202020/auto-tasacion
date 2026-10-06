@@ -28,7 +28,7 @@
     {
       "id": "imax-ingenieria-maxima",
       "name": "IMAX Ingeniería Máxima",
-      "aliases": ["IMAX INGENIERIA MAXIMA"],
+      "aliases": ["IMAX INGENIERIA MAXIMA", "IMAX"],
       "evidence_status": "observed_local_samples"
     }
   ]
