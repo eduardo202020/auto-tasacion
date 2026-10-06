@@ -26,7 +26,8 @@ from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
 from profile_registry import detect_document_profile, profile_uses_strategy, validate_reference_data
 from provider_ocr import extract_braschi_floor_table_ocr
 from service import (
-    CONTROL_COLUMNS, MACRO_COLUMNS, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket, build_workbook,
+    CONTROL_COLUMNS, MACRO_COLUMNS, MAX_ZIP_BYTES, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket,
+    build_workbook, declared_zip_size,
     download_staged_zip, procesar_tasaciones, process_zip, to_macro_row,
 )
 from tools.validate_correcciones_operador import validate as validate_corrections
@@ -646,6 +647,15 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertTrue(ticket["objeto"].endswith("/auto-10.zip"))
         self.assertEqual(ticket["encabezados_carga"], {"Content-Type": "application/zip"})
         blob.generate_signed_url.assert_called_once()
+
+    def test_accepts_staged_zip_up_to_ninety_megabytes(self):
+        supported_size = 86_955_661
+        self.assertLess(supported_size, MAX_ZIP_BYTES)
+        self.assertEqual(declared_zip_size(supported_size), supported_size)
+
+    def test_rejects_staged_zip_above_ninety_megabytes(self):
+        with self.assertRaisesRegex(ValueError, "tamaño máximo"):
+            declared_zip_size(MAX_ZIP_BYTES + 1)
 
     def test_endpoint_processes_staged_zip(self):
         app = Flask(__name__)

@@ -90,4 +90,10 @@ Para comprobar un Excel generado fuera de la suite de pruebas:
 
 ## ZIP mayores a 30 MiB
 
-Cloud Run rechaza solicitudes HTTP/1 mayores a 32 MiB antes de ejecutar el servicio. Para ZIP de hasta 75 MiB, Power Automate solicita una URL temporal, carga el binario en Cloud Storage privado y env?a a Cloud Run el identificador del objeto. El bucket elimina esos objetos al d?a siguiente.
+Cloud Run rechaza solicitudes HTTP/1 mayores a 32 MiB antes de ejecutar el servicio. Para ZIP de hasta 90 MB, Power Automate solicita una URL temporal, carga el binario en Cloud Storage privado y envía a Cloud Run el identificador del objeto. El bucket elimina esos objetos al día siguiente.
+
+Los ZIP grandes se cargan directamente en la carpeta autorizada de OneDrive,
+por el navegador o por el cliente de sincronización. Power Apps solo entrega
+la ruta del ZIP al flujo: no debe enviar el adjunto a un flujo con
+`PowerApps.Run`, porque esa vía serializa el archivo en Base64 y supera el
+límite de mensaje de Power Automate antes de llegar a OneDrive.

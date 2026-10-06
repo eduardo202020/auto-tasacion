@@ -116,7 +116,7 @@ solo con aprobación del entorno corporativo.
 
 ## Carga temporal mediante Cloud Storage
 
-El POST binario directo se conserva para ZIP de hasta 30 MiB. Para ZIP de hasta 75 MiB:
+El POST binario directo se conserva para ZIP de hasta 30 MiB. Para ZIP de hasta 90 MB:
 
 1. Enviar `POST` JSON al endpoint: `{"operacion":"iniciar_carga","nombre_archivo":"auto-10.zip","tamano_bytes":49810784}`.
 2. La respuesta `201` contiene `url_carga`, `objeto` y el encabezado `Content-Type: application/zip`. Hacer `PUT` del ZIP a esa URL en los siguientes 15 minutos.

@@ -47,7 +47,10 @@ MAX_PDFS_PER_BATCH = 300
 # El endpoint HTTP/1 de Cloud Run solo recibe hasta 32 MiB. Este valor conserva
 # margen para que Power Automate use el camino directo sin recibir un 413.
 MAX_DIRECT_ZIP_BYTES = 30 * 1024 * 1024
-MAX_ZIP_BYTES = 75 * 1024 * 1024
+# Los conectores de Power Automate admiten mensajes de hasta 100 MB. El límite
+# de 90 MB deja margen para los encabezados y permite procesar lotes grandes
+# que llegan desde OneDrive mediante la URL firmada de Cloud Storage.
+MAX_ZIP_BYTES = 90 * 1_000_000
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 # Gemini admite PDFs inline de hasta 50 MB. Los mayores deben pasar por el
 # mecanismo corporativo aprobado (por ejemplo, OCR o File API), nunca forzarse.

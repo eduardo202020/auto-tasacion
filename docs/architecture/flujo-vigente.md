@@ -26,3 +26,9 @@ en `legacy/google-sheets`. No comparte endpoint ni contrato con Power Platform.
 ## Ruta para lotes grandes
 
 Cuando el ZIP supera 30 MiB, Power Automate obtiene una URL firmada de Cloud Run, carga el ZIP en el bucket privado y solicita `procesar_carga`. Cloud Run descarga solo el objeto indicado bajo `ingresos/`, mantiene las mismas validaciones y devuelve el mismo XLSX contractual.
+
+El operador debe cargar los ZIP grandes directamente en OneDrive y Power Apps
+debe enviar solo `RutaZip` al flujo. Un adjunto pasado por `PowerApps.Run`
+crece al codificarse en Base64 y rebasa el límite de mensajes de Power
+Automate antes de que se ejecute esta ruta. La capacidad vigente es 90 MB por
+lote comprimido.
