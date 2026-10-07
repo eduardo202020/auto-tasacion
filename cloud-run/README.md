@@ -123,3 +123,21 @@ El POST binario directo se conserva para ZIP de hasta 30 MiB. Para ZIP de hasta 
 3. Enviar `POST` JSON: `{"operacion":"procesar_carga","objeto":"<objeto devuelto>"}`. La respuesta es `Resultado_Final.xlsx`.
 
 Configurar `GCS_UPLOAD_BUCKET` y `GCS_SIGNING_SERVICE_ACCOUNT` en Cloud Run. El bucket debe ser privado, con acceso uniforme y ciclo de vida de un d?a para `ingresos/`.
+
+## Worker para lotes masivos
+
+`batch_worker.py` es el ejecutable preparado para un Cloud Run Job. Recibe un
+ZIP como archivo seekable, por ejemplo desde un volumen Cloud Storage FUSE, y
+produce el mismo `Resultado_Final.xlsx` que el endpoint HTTP. No descarga el
+ZIP completo a `bytes`: inspecciona el índice del archivo y lee un PDF por vez.
+
+```bash
+python batch_worker.py \
+  --input-zip /mnt/tasaciones/ingresos/ID_LOTE/lote.zip \
+  --output-xlsx /mnt/tasaciones/resultados/ID_LOTE/Resultado_Final.xlsx
+```
+
+Sus límites técnicos son: ZIP de hasta 2 GiB, contenido descomprimido de hasta
+6 GiB, 300 PDFs y 100 MiB por PDF. El worker aún no se invoca desde el endpoint
+HTTP: requiere el Job, la identidad Microsoft Entra y la API de control
+autenticada descritos en `docs/architecture/lotes-masivos.md`.

@@ -118,3 +118,21 @@ Power Automate confirme su copia a OneDrive, con un máximo de tres días.
 
 No se usan PDFs productivos como datos de prueba ni se registran URLs firmadas,
 contenido del ZIP o evidencias documentales en logs.
+
+## Avance de implementación
+
+Se implementó el núcleo del worker en `cloud-run/batch_worker.py`. Este abre
+el ZIP desde un path seekable y comparte la lógica de extracción y el contrato
+XLSX con el endpoint actual. El ZIP no se descarga con `download_as_bytes()`;
+la memoria contiene solo el PDF en procesamiento y el XLSX final.
+
+Todavía no se creó ni desplegó un Cloud Run Job. Tampoco se incorporó la
+descarga Microsoft Graph ni la API de control: ambas dependen de la identidad
+Entra con permisos Selected, de la protección de la API y de las decisiones de
+retención especificadas arriba. La ruta vigente de hasta 90 MB no cambia.
+
+## Flujo de interfaz y orquestación
+
+El detalle de la selección de ZIP desde Power Apps, los parámetros del flujo,
+la consulta de estado y la migración desde el flujo binario vigente se define en
+[`flujo-power-platform-lotes-masivos.md`](flujo-power-platform-lotes-masivos.md).

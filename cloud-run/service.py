@@ -52,6 +52,11 @@ MAX_DIRECT_ZIP_BYTES = 30 * 1024 * 1024
 # que llegan desde OneDrive mediante la URL firmada de Cloud Storage.
 MAX_ZIP_BYTES = 90 * 1_000_000
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
+# Límites exclusivos del Cloud Run Job de lotes masivos. No se aplican al
+# endpoint HTTP ni a la ruta de carga temporal de 90 MB.
+MAX_BATCH_ZIP_BYTES = 2 * 1024 * 1024 * 1024
+MAX_BATCH_UNCOMPRESSED_BYTES = 6 * 1024 * 1024 * 1024
+MAX_BATCH_PDF_BYTES = 100 * 1024 * 1024
 # Gemini admite PDFs inline de hasta 50 MB. Los mayores deben pasar por el
 # mecanismo corporativo aprobado (por ejemplo, OCR o File API), nunca forzarse.
 MAX_INLINE_AI_PDF_BYTES = 50 * 1024 * 1024
@@ -405,22 +410,77 @@ def next_action(route: str) -> str:
     }.get(route, "")
 
 
+def validate_zip_archive(
+    archive: zipfile.ZipFile,
+    *,
+    archive_size: int,
+    max_archive_bytes: int,
+    max_uncompressed_bytes: int,
+    max_pdf_bytes: int | None = None,
+) -> list[zipfile.ZipInfo]:
+    """Valida el índice de un ZIP ya abierto sin cargarlo completo en memoria.
+
+    ``ZipFile`` solo lee el directorio central para obtener ``infolist``. Esto
+    permite reutilizar la validación tanto en el endpoint pequeño como en el
+    Cloud Run Job que abre un objeto montado desde Cloud Storage.
+    """
+    if archive_size <= 0:
+        raise ValueError("El ZIP está vacío")
+    if archive_size > max_archive_bytes:
+        raise ValueError("El ZIP excede el tamaño máximo permitido")
+
+    entries = [
+        entry for entry in archive.infolist()
+        if not entry.is_dir() and entry.filename.lower().endswith(".pdf")
+    ]
+    if not entries:
+        raise ValueError("El ZIP no contiene archivos PDF")
+    if len(entries) > MAX_PDFS_PER_BATCH:
+        raise ValueError(f"El ZIP supera el máximo de {MAX_PDFS_PER_BATCH} PDFs")
+    if sum(entry.file_size for entry in entries) > max_uncompressed_bytes:
+        raise ValueError("El contenido descomprimido excede el tamaño máximo permitido")
+    if max_pdf_bytes is not None and any(entry.file_size > max_pdf_bytes for entry in entries):
+        raise ValueError("El ZIP contiene un PDF que excede el tamaño máximo permitido")
+    if any(entry.flag_bits & 0x1 for entry in entries):
+        raise ValueError("El ZIP contiene PDFs cifrados y no puede procesarse")
+    return entries
+
+
 def validate_zip(raw_data: bytes) -> list[zipfile.ZipInfo]:
+    """Valida el cuerpo en memoria usado por las rutas HTTP de hasta 90 MB."""
     if not raw_data.startswith(b"PK"):
         raise ValueError("El cuerpo debe ser un archivo ZIP válido")
-    if len(raw_data) > MAX_ZIP_BYTES:
-        raise ValueError("El ZIP excede el tamaño máximo permitido")
     with zipfile.ZipFile(io.BytesIO(raw_data)) as archive:
-        entries = [entry for entry in archive.infolist() if not entry.is_dir() and entry.filename.lower().endswith(".pdf")]
-        if not entries:
-            raise ValueError("El ZIP no contiene archivos PDF")
-        if len(entries) > MAX_PDFS_PER_BATCH:
-            raise ValueError(f"El ZIP supera el máximo de {MAX_PDFS_PER_BATCH} PDFs")
-        if sum(entry.file_size for entry in entries) > MAX_UNCOMPRESSED_BYTES:
-            raise ValueError("El contenido descomprimido excede el tamaño máximo permitido")
-        if any(entry.flag_bits & 0x1 for entry in entries):
-            raise ValueError("El ZIP contiene PDFs cifrados y no puede procesarse")
-        return entries
+        return validate_zip_archive(
+            archive,
+            archive_size=len(raw_data),
+            max_archive_bytes=MAX_ZIP_BYTES,
+            max_uncompressed_bytes=MAX_UNCOMPRESSED_BYTES,
+        )
+
+
+def validate_zip_file(
+    zip_path: str | Path,
+    *,
+    max_archive_bytes: int = MAX_BATCH_ZIP_BYTES,
+    max_uncompressed_bytes: int = MAX_BATCH_UNCOMPRESSED_BYTES,
+    max_pdf_bytes: int = MAX_BATCH_PDF_BYTES,
+) -> list[zipfile.ZipInfo]:
+    """Valida un ZIP almacenado como archivo, por ejemplo en un volumen GCS FUSE."""
+    path = Path(zip_path)
+    if not path.is_file():
+        raise ValueError("El ZIP de lote no existe")
+    with path.open("rb") as source:
+        if source.read(2) != b"PK":
+            raise ValueError("El archivo de lote no es un ZIP válido")
+    with zipfile.ZipFile(path) as archive:
+        return validate_zip_archive(
+            archive,
+            archive_size=path.stat().st_size,
+            max_archive_bytes=max_archive_bytes,
+            max_uncompressed_bytes=max_uncompressed_bytes,
+            max_pdf_bytes=max_pdf_bytes,
+        )
 
 
 def upload_bucket_name() -> str:
@@ -518,13 +578,34 @@ def download_staged_zip(value: Any) -> bytes:
 
 
 def process_zip(
-    raw_data: bytes,
+    zip_source: bytes | str | Path,
     reviewer: CaseReviewer | None = None,
     *,
     use_environment_reviewer: bool = True,
+    max_archive_bytes: int = MAX_ZIP_BYTES,
+    max_uncompressed_bytes: int = MAX_UNCOMPRESSED_BYTES,
+    max_pdf_bytes: int | None = None,
 ) -> tuple[list[list[Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Clasifica el lote en cola operable, excepciones IA y control."""
-    entries = validate_zip(raw_data)
+    """Clasifica un ZIP en cola operable, excepciones IA y control.
+
+    Las rutas HTTP siguen entregando ``bytes``. El worker masivo entrega una
+    ruta a un ZIP montado desde Cloud Storage; ambas rutas comparten las mismas
+    reglas y solo leen el contenido de un PDF por iteración.
+    """
+    if isinstance(zip_source, bytes):
+        if not zip_source.startswith(b"PK"):
+            raise ValueError("El cuerpo debe ser un archivo ZIP válido")
+        archive_input: io.BytesIO | Path = io.BytesIO(zip_source)
+        archive_size = len(zip_source)
+    else:
+        archive_input = Path(zip_source)
+        if not archive_input.is_file():
+            raise ValueError("El ZIP de lote no existe")
+        with archive_input.open("rb") as source:
+            if source.read(2) != b"PK":
+                raise ValueError("El archivo de lote no es un ZIP válido")
+        archive_size = archive_input.stat().st_size
+
     ready_rows: list[list[Any]] = []
     review_rows: list[dict[str, Any]] = []
     control_rows: list[dict[str, Any]] = []
@@ -536,8 +617,18 @@ def process_zip(
             reviewer_error = str(error)
     approved_rules = load_approved_rules()
 
-    with zipfile.ZipFile(io.BytesIO(raw_data)) as archive:
+    with zipfile.ZipFile(archive_input) as archive:
+        entries = validate_zip_archive(
+            archive,
+            archive_size=archive_size,
+            max_archive_bytes=max_archive_bytes,
+            max_uncompressed_bytes=max_uncompressed_bytes,
+            max_pdf_bytes=max_pdf_bytes,
+        )
         for entry in entries:
+            # ``ZipFile.read`` descomprime una sola entrada. Nunca carga el
+            # archivo ZIP entero, incluso cuando ``archive_input`` es un path
+            # montado desde Cloud Storage.
             content = archive.read(entry)
             filename = entry.filename.rsplit("/", 1)[-1]
             case_id = build_case_id(entry.filename, content)
@@ -654,6 +745,30 @@ def process_zip(
             ]))
             control_rows.append(control)
     return ready_rows, review_rows, control_rows
+
+
+def process_zip_file(
+    zip_path: str | Path,
+    reviewer: CaseReviewer | None = None,
+    *,
+    use_environment_reviewer: bool = True,
+    max_archive_bytes: int = MAX_BATCH_ZIP_BYTES,
+    max_uncompressed_bytes: int = MAX_BATCH_UNCOMPRESSED_BYTES,
+    max_pdf_bytes: int = MAX_BATCH_PDF_BYTES,
+) -> tuple[list[list[Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Procesa un ZIP de lote masivo desde un archivo seekable.
+
+    Cloud Run Job lo recibe como un path de GCS FUSE. El contrato XLSX y las
+    rutas de negocio son idénticos a los del endpoint existente.
+    """
+    return process_zip(
+        zip_path,
+        reviewer,
+        use_environment_reviewer=use_environment_reviewer,
+        max_archive_bytes=max_archive_bytes,
+        max_uncompressed_bytes=max_uncompressed_bytes,
+        max_pdf_bytes=max_pdf_bytes,
+    )
 
 
 def _add_excel_table(worksheet, name: str) -> None:
