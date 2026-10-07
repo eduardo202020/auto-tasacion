@@ -23,6 +23,35 @@ API de control incluyen `X-Batch-Control-Token` desde una variable de entorno o
 conexión segura; nunca se escribe su valor en la app. Power Automate es el único componente que lee OneDrive; Cloud Run no usa
 Microsoft Graph ni recibe rutas de OneDrive para descargar contenido.
 
+## Despliegue de flujos masivos
+
+El script [`scripts/deploy-mass-flows.ps1`](scripts/deploy-mass-flows.ps1)
+crea y agrega a la solución `autoTasacion` estos flujos, inicialmente en estado
+**Borrador**:
+
+1. `auto-tasacion-iniciar-lote`;
+2. `auto-tasacion-consultar-lote`;
+3. `auto-tasacion-cargar-lotes`;
+4. `auto-tasacion-entregar-lote`.
+
+El script obtiene el token de control desde Secret Manager durante su ejecución;
+no lo guarda en el repositorio. Los dos flujos programados se ejecutan cada cinco
+minutos y usan archivos de control `_autotasacion_lote_<ID_LOTE>.json` dentro de
+`/auto-tasaciones/PDFs`. La lista de PDFs de Power Apps los excluye por extensión.
+
+Ejecutar sin activar los flujos:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\power-platform\scripts\deploy-mass-flows.ps1
+```
+
+Después de conectar y publicar `autoTasacionJG`, activar los flujos con:
+
+```powershell
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate
+```
+
 ## Power Apps
 
 La pantalla nueva usa `galPdfs`, selección múltiple, **Actualizar**,

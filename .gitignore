@@ -19,3 +19,6 @@ npm-debug.log*
 # Artefactos de pruebas y ejecuciones locales de Cloud Run.
 cloud-run/test-output/
 cloud-run/.pytest_cache/
+
+# Soluciones empaquetadas localmente para Power Platform.
+power-platform/solutions/
