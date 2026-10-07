@@ -32,3 +32,9 @@ debe enviar solo `RutaZip` al flujo. Un adjunto pasado por `PowerApps.Run`
 crece al codificarse en Base64 y rebasa el límite de mensajes de Power
 Automate antes de que se ejecute esta ruta. La capacidad vigente es 90 MB por
 lote comprimido.
+
+La ampliación a más de 1 GB será una ruta asíncrona separada: Power Apps
+enviará la ruta del ZIP, un Cloud Run Job lo copiará desde OneDrive mediante
+Microsoft Graph y Power Automate guardará el resultado en la carpeta origen.
+El diseño y las aprobaciones necesarias están en
+[`lotes-masivos.md`](lotes-masivos.md).

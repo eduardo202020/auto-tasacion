@@ -47,3 +47,14 @@ responsable de Power Automate. Sigue el runbook
 ## Prueba de ingreso grande
 
 Para un cambio de transporte, comprobar una carga directa menor a 30 MiB y una carga temporal firmada mayor a 30 MiB. Ambas deben devolver un XLSX que apruebe `tools/verify_workbook.py`.
+
+Para la ruta de lotes masivos, antes de publicar se requiere además:
+
+1. una copia sintética OneDrive a GCS de 1.4 GB con 300 PDFs;
+2. interrupción durante una parte y continuación sin duplicar el objeto;
+3. rechazo de un inicio sin identidad o fuera de la carpeta autorizada;
+4. ejecución asíncrona que produzca el mismo contrato XLSX;
+5. eliminación verificada de ingresos y resultados temporales según la
+   retención aprobada.
+6. cambio de eTag durante la copia que termine en `FALLIDO_ORIGEN_CAMBIO`;
+7. dos solicitudes iguales que produzcan un unico `ID_LOTE` y un unico XLSX.

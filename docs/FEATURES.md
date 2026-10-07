@@ -16,6 +16,11 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F08 | Métricas por perfil | Pendiente | Medir proporción de revisión, campos faltantes y correcciones por perfil sin guardar PDFs productivos. |
 | F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. Si falla o no hay firma única, se conserva `generic-v1`. Desplegado en Cloud Run el 2026-10-06. |
 | F10 | OCR de campo por perfil técnico | Desplegado en Cloud Run el 2026-10-06 | `braschi-construyo-v1` recorta solo las celdas de pisos y sótanos cuando ambos encabezados coinciden y el parser textual falla. Cada lectura debe ser un entero único y válido; cualquier ambigüedad mantiene el caso en revisión. |
+| F11 | Inicio masivo autenticado | Pendiente de Seguridad | Solo un operador autenticado puede registrar un lote de OneDrive de hasta 2 GB y activar su Job. |
+| F12 | Ingesta OneDrive a GCS por rangos | Pendiente de Seguridad | Microsoft Graph limitado a la carpeta operativa descarga partes de 8 MiB hacia Cloud Storage sin pasar bytes por Power Apps ni Power Automate. |
+| F13 | Procesamiento asíncrono de lote | Pendiente | Un Cloud Run Job procesa hasta 300 PDFs desde Cloud Storage sin cargar el ZIP completo en memoria. |
+| F14 | Estado y entrega diferida | Pendiente | Power Automate consulta el estado, guarda el XLSX en la misma carpeta de OneDrive y solo entonces habilita `tblParaProcesar`. |
+| F15 | Integridad e idempotencia de lote | Pendiente | La combinacion `driveId:itemId:eTag` evita Jobs duplicados; un cambio del ZIP durante la copia se rechaza y el resultado no sobrescribe otro lote. |
 
 ## Ciclo de alta seguro
 

@@ -47,3 +47,13 @@ Para evitar el l?mite de entrada HTTP/1, reemplazar el POST binario por estas ac
 3. **Procesar carga**: `POST` JSON al mismo endpoint con `solicitud_proceso` de **Iniciar carga**. El cuerpo de esta respuesta es `Resultado_Final.xlsx`; usarlo directamente en **Crear archivo** de OneDrive.
 
 La URL de carga es temporal, solo puede escribir en un objeto privado y vence en 15 minutos. El límite del servicio para esta ruta es 90 MB. Mantener el contenido binario en el cuerpo de la acción HTTP y evitar expresiones `base64()`, `string()` o JSON.
+
+## Lotes superiores a 90 MB
+
+La ruta vigente no debe usarse para ZIP de más de 90 MB. El operador carga el
+archivo en OneDrive por el mecanismo autorizado y Power Apps envía solo su
+ruta o identificador. Un Cloud Run Job descarga el archivo desde OneDrive por
+rangos mediante Microsoft Graph, lo procesa de manera asíncrona y expone el
+XLSX final para que este flujo lo guarde en la misma carpeta. Esta capacidad
+requiere la integración Entra aprobada y está documentada en
+[`../docs/architecture/lotes-masivos.md`](../docs/architecture/lotes-masivos.md).
