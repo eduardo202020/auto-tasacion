@@ -94,7 +94,7 @@ def file_item(index, *, etag=None, size=1024, name=None):
 
 
 def payload(files):
-    return {"carpeta_origen": "/auto-tasaciones", "archivos": files}
+    return {"carpeta_origen": "/auto-tasaciones/PDFs", "archivos": files}
 
 
 class BatchManifestTests(unittest.TestCase):

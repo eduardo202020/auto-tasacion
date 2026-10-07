@@ -2,7 +2,7 @@
 
 ## Ruta masiva objetivo: PDFs individuales
 
-El operador carga PDFs individuales en `/auto-tasaciones`. Power Apps lista
+El operador carga PDFs individuales en `/auto-tasaciones/PDFs`. Power Apps lista
 metadatos y permite seleccionar uno o varios archivos. No usa adjuntos ni
 transmite `contentBytes`.
 

@@ -8,7 +8,7 @@ exceder los límites de mensajes de Power Apps y Power Automate?
 ## Decisión aprobada para implementación
 
 El lote será un manifiesto de PDFs individuales ya cargados por el operador en
-`/auto-tasaciones`. Power Automate obtiene y carga cada PDF individualmente a
+`/auto-tasaciones/PDFs`. Power Automate obtiene y carga cada PDF individualmente a
 Cloud Storage. Cloud Run Job procesa los objetos confirmados uno por uno.
 
 Esto mantiene el tamaño de cada mensaje dentro del límite individual del

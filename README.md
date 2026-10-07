@@ -11,7 +11,7 @@ alimenta la automatización IBM 3270. El contrato de salida se conserva:
 ## Arquitectura objetivo masiva
 
 ```text
-PDFs individuales en OneDrive /auto-tasaciones
+PDFs individuales en OneDrive /auto-tasaciones/PDFs
   -> Power Apps selecciona metadatos
   -> Power Automate carga cada PDF individual a GCS
   -> Cloud Run Job procesa PDFs confirmados uno por uno

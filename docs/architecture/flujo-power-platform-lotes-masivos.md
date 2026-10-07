@@ -5,7 +5,7 @@
 ## Decisión
 
 La ruta masiva no usa ZIP ni Microsoft Graph. El lote es un manifiesto de PDFs
-existentes en `/auto-tasaciones`. Power Automate es el único componente que lee
+existentes en `/auto-tasaciones/PDFs`. Power Automate es el único componente que lee
 cada PDF desde OneDrive y lo carga individualmente a Cloud Storage.
 
 ```text
@@ -25,7 +25,7 @@ convierte a Base64 ni mantiene en memoria el lote completo.
 
 ## Carpetas y resultado
 
-- Origen operativo: `/auto-tasaciones`.
+- Origen operativo: `/auto-tasaciones/PDFs`.
 - Objetos de ingreso: `ingresos/<ID_LOTE>/pdfs/<ID_ARCHIVO>_<nombre>.pdf`.
 - Resultado: `resultados/<ID_LOTE>/Resultado_Final_<ID_LOTE>.xlsx`.
 - Entrega final: `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
@@ -49,7 +49,7 @@ Recibe la selección de la app, vuelve a consultar metadatos y envía a
 
 ```json
 {
-  "carpeta_origen": "/auto-tasaciones",
+  "carpeta_origen": "/auto-tasaciones/PDFs",
   "archivos": [
     {
       "item_id": "<id de OneDrive>",

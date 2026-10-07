@@ -9,7 +9,7 @@ request HTTP.
 ## Arquitectura objetivo
 
 ```text
-OneDrive /auto-tasaciones (PDFs individuales)
+OneDrive /auto-tasaciones/PDFs (PDFs individuales)
   -> Power Apps (metadatos y selección)
   -> Power Automate (un PDF por iteración)
   -> Cloud Storage privado
