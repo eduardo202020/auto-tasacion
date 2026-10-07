@@ -277,6 +277,23 @@ def public_batch_status(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def batch_registration_status(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Respuesta de registro para que el orquestador relacione cada PDF con su ticket."""
+    status = public_batch_status(manifest)
+    status["archivos"] = [
+        {
+            "id_archivo": item["id_archivo"],
+            "item_id": item["item_id"],
+            "nombre": item["nombre"],
+            "etag": item["etag"],
+            "tamano_bytes": item["tamano_bytes"],
+            "estado": item["estado"],
+        }
+        for item in manifest.get("archivos", [])
+    ]
+    return status
+
+
 def find_file(manifest: dict[str, Any], file_id: str) -> dict[str, Any]:
     for item in manifest.get("archivos", []):
         if item.get("id_archivo") == file_id:

@@ -182,6 +182,8 @@ class BatchControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         body = response.get_json()
         self.assertTrue(body["id_lote"].startswith("TAS-"))
+        self.assertEqual(body["archivos"][0]["item_id"], "onedrive-item-1")
+        self.assertTrue(body["archivos"][0]["id_archivo"].startswith("ARC-"))
         with app.test_request_context(f"/v1/lotes/{body['id_lote']}", method="GET"):
             response = handle_request(request, self.api)
         self.assertEqual(response.status_code, 200)
@@ -207,7 +209,7 @@ class BatchControlApiTests(unittest.TestCase):
     def test_http_api_requires_configured_control_token(self):
         app = Flask(__name__)
         previous = os.environ.get("BATCH_CONTROL_API_TOKEN")
-        os.environ["BATCH_CONTROL_API_TOKEN"] = "secreto-sintetico"
+        os.environ["BATCH_CONTROL_API_TOKEN"] = "secreto-sintetico\n"
         try:
             with app.test_request_context("/v1/lotes", method="POST", json=payload([file_item(9)])):
                 denied = handle_request(request, self.api, require_authentication=True)
@@ -223,6 +225,23 @@ class BatchControlApiTests(unittest.TestCase):
                 os.environ.pop("BATCH_CONTROL_API_TOKEN", None)
             else:
                 os.environ["BATCH_CONTROL_API_TOKEN"] = previous
+
+    def test_result_ticket_is_available_only_after_completion(self):
+        manifest, _ = self._create_one_file_batch()
+        with self.assertRaisesRegex(BatchError, "resultado del lote"):
+            self.api.result_ticket(manifest["id_lote"])
+
+        result = self.storage.bucket("tasaciones-prueba").blob(manifest["resultado_objeto"])
+        result.data = b"xlsx-sintetico"
+        def mark_completed(current):
+            current["estado"] = BATCH_COMPLETED
+            current["resultado_disponible"] = True
+        update_manifest(self.store, manifest["id_lote"], mark_completed)
+
+        ticket = self.api.result_ticket(manifest["id_lote"])
+        self.assertEqual(ticket["id_lote"], manifest["id_lote"])
+        self.assertIn(manifest["resultado_objeto"], ticket["url_descarga"])
+        self.assertNotIn("objeto", ticket)
 
     def test_missing_gcs_object_marks_batch_failed(self):
         manifest, _ = self._create_one_file_batch()

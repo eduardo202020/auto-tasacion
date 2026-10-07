@@ -19,6 +19,7 @@ firmadas de un PDF por vez; no recibe contenido de PDFs en sus endpoints JSON.
 
 | Variable | Uso |
 | --- | --- |
+| `GOOGLE_CLOUD_PROJECT` | Proyecto que invoca el Cloud Run Job. |
 | `BATCH_STATE_BUCKET` | Bucket de manifiestos JSON; usa `GCS_UPLOAD_BUCKET` como respaldo. |
 | `BATCH_STORAGE_BUCKET` | Bucket de PDFs y resultados; usa `GCS_UPLOAD_BUCKET` como respaldo. |
 | `BATCH_SIGNING_SERVICE_ACCOUNT` | Cuenta que firma tickets PDF; usa `GCS_SIGNING_SERVICE_ACCOUNT` como respaldo. |

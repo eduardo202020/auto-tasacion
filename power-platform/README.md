@@ -14,8 +14,8 @@ Power Automate orquesta cinco flujos:
 3. `auto-tasacion-cargar-lotes`: por cada PDF, obtiene contenido, solicita un
    ticket de carga, hace `PUT` binario, compara eTag final y confirma.
 4. `auto-tasacion-consultar-lote`: consulta estado y progreso.
-5. `auto-tasacion-entregar-lote`: descarga solo el XLSX final, lo guarda en
-   OneDrive y confirma entrega.
+5. `auto-tasacion-entregar-lote`: solicita un ticket temporal, descarga solo el
+   XLSX final, lo guarda en OneDrive y confirma entrega.
 
 El `Apply to each` procesa cada PDF de forma independiente, con concurrencia
 inicial de 1 a 3. No se deben guardar PDFs en arrays, variables, JSON o Base64. Los HTTP hacia la

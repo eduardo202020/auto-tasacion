@@ -31,6 +31,7 @@ from batch_lotes import (
     BatchError,
     BatchLimits,
     BatchStore,
+    batch_registration_status,
     build_manifest,
     find_file,
     public_batch_status,
@@ -50,6 +51,7 @@ _LOTE_PATH = re.compile(r"^/v1/lotes/([^/]+)$")
 _TICKET_PATH = re.compile(r"^/v1/lotes/([^/]+)/archivos/([^/]+)/upload-ticket$")
 _CONFIRM_PATH = re.compile(r"^/v1/lotes/([^/]+)/archivos/([^/]+)/confirmar$")
 _START_PATH = re.compile(r"^/v1/lotes/([^/]+)/iniciar$")
+_RESULT_TICKET_PATH = re.compile(r"^/v1/lotes/([^/]+)/resultado-ticket$")
 _DELIVERY_PATH = re.compile(r"^/v1/lotes/([^/]+)/entrega$")
 
 
@@ -235,6 +237,23 @@ class BatchControlApi:
         saved, _ = update_manifest(self.store, batch_id, mark_processing)
         return public_batch_status(saved)
 
+    def result_ticket(self, batch_id: str) -> dict[str, Any]:
+        """Emite una URL temporal de solo lectura para el XLSX completado."""
+        manifest = self.get_batch(batch_id)
+        if manifest.get("estado") not in {BATCH_COMPLETED, BATCH_DELIVERED} or not manifest.get("resultado_disponible"):
+            raise BatchError("El resultado del lote a?n no est? disponible", code="RESULTADO_NO_DISPONIBLE", status=409)
+        object_name = str(manifest.get("resultado_objeto") or "")
+        if not object_name:
+            raise BatchError("El manifiesto no contiene resultado", code="ESTADO_CORRUPTO", status=500)
+        blob = self.bucket.blob(object_name)
+        if not blob.exists():
+            raise BatchError("El resultado no existe en Cloud Storage", code="RESULTADO_NO_ENCONTRADO", status=409)
+        return {
+            "id_lote": manifest["id_lote"],
+            "url_descarga": self._signed_result_download_url(object_name),
+            "vence_en_segundos": UPLOAD_TTL_SECONDS,
+        }
+
     def confirm_delivery(self, batch_id: str) -> dict[str, Any]:
         def mark_delivered(manifest: dict[str, Any]) -> None:
             if manifest.get("estado") == BATCH_DELIVERED:
@@ -272,6 +291,22 @@ class BatchControlApi:
         if isinstance(content_type, str) and content_type and content_type.lower() != PDF_CONTENT_TYPE:
             raise BatchError("El objeto cargado no tiene tipo PDF", code="OBJETO_NO_PDF", status=409)
 
+    def _signed_result_download_url(self, object_name: str) -> str:
+        if self.signed_url_factory is not None:
+            return self.signed_url_factory(object_name)
+        if not self.signer_email:
+            raise BatchError("La cuenta de firma de Cloud Storage no est? configurada", code="CONFIGURACION_INVALIDA", status=500)
+        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        credentials.refresh(GoogleAuthRequest())
+        blob = self.bucket.blob(object_name)
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=UPLOAD_TTL_SECONDS),
+            method="GET",
+            service_account_email=self.signer_email,
+            access_token=credentials.token,
+        )
+
     def _signed_pdf_upload_url(self, object_name: str) -> str:
         if self.signed_url_factory is not None:
             return self.signed_url_factory(object_name)
@@ -299,10 +334,11 @@ def controller_from_environment() -> BatchControlApi:
 
 
 def _authenticate_control_request(request) -> None:
-    expected = os.getenv("BATCH_CONTROL_API_TOKEN", "")
+    # Secret Manager puede conservar un salto de l?nea de una carga por stdin.
+    expected = os.getenv("BATCH_CONTROL_API_TOKEN", "").strip()
     if not expected:
         raise BatchError("La API de control no está habilitada", code="API_NO_HABILITADA", status=503)
-    received = request.headers.get("X-Batch-Control-Token", "")
+    received = request.headers.get("X-Batch-Control-Token", "").strip()
     if not hmac.compare_digest(received, expected):
         raise BatchError("No autorizado para operar lotes", code="NO_AUTORIZADO", status=401)
 
@@ -325,7 +361,7 @@ def handle_request(
         path = request.path.rstrip("/") or "/"
         if request.method == "POST" and path == "/v1/lotes":
             manifest, created = api.create_batch(_request_payload(request))
-            payload = public_batch_status(manifest)
+            payload = batch_registration_status(manifest)
             payload["reutilizado"] = not created
             if manifest.get("estado") == BATCH_FAILED:
                 return _json_response(payload, 422)
@@ -342,6 +378,9 @@ def handle_request(
         matched = _START_PATH.fullmatch(path)
         if request.method == "POST" and matched:
             return _json_response(api.start_batch(matched.group(1)))
+        matched = _RESULT_TICKET_PATH.fullmatch(path)
+        if request.method == "POST" and matched:
+            return _json_response(api.result_ticket(matched.group(1)))
         matched = _DELIVERY_PATH.fullmatch(path)
         if request.method == "POST" and matched:
             return _json_response(api.confirm_delivery(matched.group(1)))

@@ -63,8 +63,8 @@ de la entrega confirmada, según la retención corporativa aprobada.
 El código local incluye el manifiesto, las APIs de control y el worker. Falta:
 
 1. crear el bucket/roles y configurar `BATCH_STATE_BUCKET`,
-   `BATCH_STORAGE_BUCKET`, `BATCH_SIGNING_SERVICE_ACCOUNT`, `BATCH_JOB_NAME`
-   y `BATCH_JOB_REGION`;
+   `BATCH_STORAGE_BUCKET`, `BATCH_SIGNING_SERVICE_ACCOUNT`, `BATCH_JOB_NAME`,
+   `BATCH_JOB_REGION` y `GOOGLE_CLOUD_PROJECT`;
 2. crear el Cloud Run Job con el mismo contenedor y permisos para leer/escribir
    el bucket;
 3. proteger la API de control según el mecanismo corporativo aprobado;
