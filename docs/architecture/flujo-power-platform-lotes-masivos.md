@@ -1,213 +1,147 @@
-﻿# Flujo Power Platform para lotes masivos
+# Flujo Power Platform para lotes masivos de PDFs
 
-> **Estado:** diseño acordado para implementar. No está desplegado.
+> **Estado:** implementación local pendiente de configuración corporativa y despliegue.
 
-## Propósito
+## Decisión
 
-Permitir que el operador procese un ZIP de tasaciones de hasta 2 GiB sin que
-Power Apps ni Power Automate transmitan el archivo binario. El ZIP se deposita
-en OneDrive y el backend lo copia hacia Cloud Storage para procesarlo de forma
-asíncrona.
-
-La salida se mantiene en la misma carpeta de OneDrive que contiene el ZIP. La
-PC operativa sincroniza esa carpeta y Power Automate Desktop usa únicamente la
-tabla `tblParaProcesar` para continuar con IBM 3270.
-
-## Flujo objetivo
+La ruta masiva no usa ZIP ni Microsoft Graph. El lote es un manifiesto de PDFs
+existentes en `/auto-tasaciones`. Power Automate es el único componente que lee
+cada PDF desde OneDrive y lo carga individualmente a Cloud Storage.
 
 ```text
-Operador
-  │ carga manualmente un ZIP
-  ▼
-OneDrive /auto-tasaciones
-  │
-  │ lista y selecciona; no lee el contenido
-  ▼
-Power Apps
-  │ metadatos del ZIP seleccionado
-  ▼
-Power Automate: iniciar lote
-  │ JSON pequeño
-  ▼
-API de control Cloud Run
-  │ crea ID_LOTE y ejecuta el Job
-  ▼
-Cloud Run Job
-  │ descarga OneDrive con Microsoft Graph → GCS
-  │ procesa un PDF a la vez
-  ▼
-Cloud Storage: Resultado_Final_<ID_LOTE>.xlsx
-  │
-  │ estado y XLSX pequeño
-  ▼
-Power Automate: entrega resultado
-  │
-  ▼
-OneDrive /auto-tasaciones
-  │
-  ▼
-PC sincronizada → Power Automate Desktop → IBM 3270
+Operador carga PDFs individuales en OneDrive
+  -> Power Apps lista y selecciona metadatos
+  -> Power Automate registra el manifiesto
+  -> API de control crea ID_LOTE
+  -> Power Automate carga un PDF por vez a GCS
+  -> API confirma cada PDF y arranca Cloud Run Job
+  -> Job procesa PDFs individuales y genera XLSX
+  -> Power Automate entrega Resultado_Final_<ID_LOTE>.xlsx a OneDrive
+  -> PC sincronizada -> PAD -> IBM 3270
 ```
 
-El único componente que mueve el ZIP es el Job, desde OneDrive hacia Cloud
-Storage. Power Apps y Power Automate intercambian identificadores, metadatos,
-estado y el Excel final.
+Power Apps nunca recibe contenido de PDF. Power Automate no agrupa, concatena,
+convierte a Base64 ni mantiene en memoria el lote completo.
 
-## Carpeta operativa
+## Carpetas y resultado
 
-La carpeta operativa inicial es `/auto-tasaciones`. La galería de la app solo
-mostrará elementos con extensión `.zip`; por eso el operador no podrá elegir un
-resultado Excel anterior.
+- Origen operativo: `/auto-tasaciones`.
+- Objetos de ingreso: `ingresos/<ID_LOTE>/pdfs/<ID_ARCHIVO>_<nombre>.pdf`.
+- Resultado: `resultados/<ID_LOTE>/Resultado_Final_<ID_LOTE>.xlsx`.
+- Entrega final: `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
 
-Como mejora operativa posterior se pueden separar `entrada/` y `salida/`, pero
-no es un requisito para iniciar: el resultado se guarda en la carpeta padre del
-ZIP seleccionado y se nombra `Resultado_Final_<ID_LOTE>.xlsx`. Nunca se
-sobrescribe otro resultado en ejecución.
+La aplicación lista solamente archivos `.pdf`. Los Excel ya entregados no son
+seleccionables. El operador debe archivar lotes terminados para mantener la
+carpeta de trabajo manejable.
 
-La carpeta debe mantenerse acotada. Si en el futuro se usa el selector de
-archivos integrado del conector, este puede mostrar como máximo 200 elementos.
-La galería consultará una carpeta de trabajo y los lotes terminados se moverán o
-archivarán periódicamente.
+## Flujos de Power Automate
 
-## Aplicación Power Apps
+### 1. `auto-tasacion-listar-pdfs`
 
-La pantalla deja de cargar archivos. Se retiran el formulario de adjuntos,
-`ControlAdjuntos`, el botón **Cargar Zip** y la variable `varZipSubido`.
+Lista los `.pdf` de la carpeta autorizada y devuelve a Power Apps solamente:
+`ItemId`, nombre, tamaño y fecha. Si el conector expone eTag, se devuelve; de
+lo contrario se obtiene de metadatos antes de registrar el manifiesto.
 
-Se incorporan estos controles:
+### 2. `auto-tasacion-iniciar-lote`
+
+Recibe la selección de la app, vuelve a consultar metadatos y envía a
+`POST /v1/lotes` un JSON pequeño:
+
+```json
+{
+  "carpeta_origen": "/auto-tasaciones",
+  "archivos": [
+    {
+      "item_id": "<id de OneDrive>",
+      "nombre": "tasacion001.pdf",
+      "etag": "<versión>",
+      "tamano_bytes": 5242880
+    }
+  ]
+}
+```
+
+Responde de inmediato con `id_lote`, estado y conteos. No obtiene contenido de
+ningún PDF y no espera la transferencia ni el procesamiento.
+
+### 3. `auto-tasacion-cargar-lotes`
+
+Se ejecuta de forma separada o recurrente. Para cada archivo pendiente:
+
+1. obtiene metadatos y conserva el eTag inicial;
+2. solicita `POST /v1/lotes/{id}/archivos/{archivo}/upload-ticket`;
+3. obtiene el contenido binario de **un solo PDF** desde OneDrive;
+4. hace `PUT` binario a la URL firmada con `Content-Type: application/pdf`;
+5. consulta otra vez los metadatos de OneDrive;
+6. compara el eTag inicial y final;
+7. llama a `POST /confirmar` con el eTag final.
+
+La concurrencia inicial debe configurarse entre 1 y 3 archivos. Si el eTag
+cambia, se detiene el lote con `FALLIDO_ORIGEN_CAMBIO`. Cuando todos están
+confirmados, el flujo invoca `POST /v1/lotes/{id}/iniciar`.
+
+### 4. `auto-tasacion-consultar-lote`
+
+Consulta `GET /v1/lotes/{id_lote}` y devuelve estado, `total_pdfs`,
+`pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos` y disponibilidad del
+resultado. Power Apps lo llama mediante un temporizador mientras el lote está
+activo; no mantiene una solicitud abierta durante el Job.
+
+### 5. `auto-tasacion-entregar-lote`
+
+Cuando el estado es `COMPLETADO`, descarga únicamente el XLSX final, lo crea en
+la carpeta operativa de OneDrive y confirma `POST /entrega`. Solo después de
+`ENTREGADO` se entrega la ruta a PAD, que procesa exclusivamente
+`tblParaProcesar`.
+
+## Power Apps
+
+La pantalla nueva contiene:
 
 | Control | Responsabilidad |
 | --- | --- |
-| `galZips` | Lista los ZIP de la carpeta con nombre, tamaño y fecha de modificación. |
-| `btnActualizar` | Vuelve a consultar la carpeta de OneDrive. |
-| `btnEjecutar` | Solo se habilita cuando existe un ZIP seleccionado y registra el lote. |
-| `galLotes` o etiqueta de estado | Muestra el identificador y estado del lote enviado. |
+| `galPdfs` | Galería de PDFs existentes con nombre, tamaño, modificación y selección múltiple. |
+| `btnActualizar` | Vuelve a listar los PDFs. |
+| `btnSeleccionarTodos` | Selecciona o limpia los PDFs de la galería. |
+| `btnEjecutar` | Registra el manifiesto seleccionado. |
+| Indicador de lote | Muestra cantidad seleccionada, `ID_LOTE`, estado y progreso. |
 
-`btnEjecutar` invoca un flujo nuevo llamado provisionalmente
-`auto-tasacion-iniciar-lote`. Debe enviar el identificador del elemento
-seleccionado y sus metadatos, nunca `Value`, `contentBytes` ni ningún campo que
-contenga el ZIP.
+Se eliminan `ControlAdjuntos`, **Cargar Zip**, `contentBytes`, `varZipSubido` y
+la selección de ZIP de la ruta masiva. La ruta ZIP actual permanece en una
+pantalla o flujo de transición separado para lotes de hasta 90 MB.
 
-La fórmula exacta se configura después de agregar el origen **OneDrive for
-Business** y el flujo a la aplicación, para que Power Apps inserte los nombres
-reales de columnas y parámetros. La intención funcional es equivalente a:
+## API de control
 
-```text
-auto-tasacion-iniciar-lote.Run(
-  identificador del elemento,
-  nombre,
-  tamaño,
-  carpeta de resultado
-)
-```
-
-## Flujo `auto-tasacion-iniciar-lote`
-
-### Entrada del disparador Power Apps (V2)
-
-| Parámetro | Uso |
+| Operación | Responsabilidad |
 | --- | --- |
-| `ItemId` | Identificador del ZIP seleccionado. |
-| `Nombre` | Nombre mostrado al operador; se valida contra metadatos. |
-| `TamanoBytes` | Tamaño mostrado y validado antes de registrar el lote. |
-| `CarpetaResultadoId` | Carpeta padre en la que se entregará el Excel. |
+| `POST /v1/lotes` | Registra o reutiliza un manifiesto de hasta 300 PDFs y 2 GiB totales. |
+| `GET /v1/lotes/{id_lote}` | Devuelve estado y progreso sin contenido documental. |
+| `POST /v1/lotes/{id}/archivos/{archivo}/upload-ticket` | Emite una URL firmada para un único objeto PDF del manifiesto. |
+| `POST /v1/lotes/{id}/archivos/{archivo}/confirmar` | Comprueba eTag y tamaño del objeto GCS. |
+| `POST /v1/lotes/{id}/iniciar` | Inicia el Job únicamente si todos los PDFs están confirmados. |
+| `POST /v1/lotes/{id}/entrega` | Registra que el XLSX fue creado en OneDrive. |
 
-### Acciones
+La clave de idempotencia es `SHA256(carpeta + lista ordenada itemId:eTag)`. Un
+eTag distinto representa una versión nueva. La API no utiliza `driveId` ni
+intenta leer OneDrive.
 
-1. **Obtener metadatos de archivo** usando `ItemId`; validar extensión `.zip`,
-   tamaño máximo de 2 GiB y que pertenece a la carpeta autorizada.
-2. **Resolver referencia de Microsoft Graph**: obtener `driveId`, `itemId` y
-   `eTag` del mismo archivo. Si el conector OneDrive no expone alguno de estos
-   valores, esta resolución se hará en la API de control a partir del
-   identificador validado; no se sustituye por una URL pública ni por una ruta
-   no validada.
-3. **HTTP POST a la API de control** con JSON pequeño:
+## Estados
 
-   ```json
-   {
-     "drive_id": "<driveId>",
-     "item_id": "<itemId>",
-     "etag": "<eTag>",
-     "nombre": "lote-tasaciones.zip",
-     "tamano_bytes": 734003200,
-     "carpeta_resultado_id": "<folderId>"
-   }
-   ```
+Lote: `RECIBIDO`, `CARGANDO_PDFS`, `LISTO_PARA_PROCESAR`, `EN_PROCESO`,
+`COMPLETADO`, `ENTREGADO`, `FALLIDO`, `FALLIDO_ORIGEN_CAMBIO`.
 
-4. **Responder a Power Apps** de inmediato con `id_lote`, `estado=RECIBIDO` y
-   el nombre del ZIP. No espera a que termine la extracción.
+Archivo: `PENDIENTE`, `SUBIENDO`, `CARGADO`, `FALLIDO`,
+`FALLIDO_ORIGEN_CAMBIO`.
 
-Este flujo no debe contener **Obtener contenido de archivo**, **HTTP: Subir
-ZIP**, una URL firmada para que Power Automate cargue el ZIP, ni la acción
-actual **Procesar carga**. Esas acciones trasladan el binario por Power
-Automate y son incompatibles con el objetivo de 1 GiB o más.
+## Límites
 
-## Consulta y entrega del resultado
+- 300 PDFs por lote.
+- 2 GiB totales por lote.
+- 90 000 000 bytes por PDF, configurable mediante `BATCH_MAX_PDF_BYTES`.
+- El límite se aplica a cada PDF, no al lote completo en un solo request.
 
-La ejecución no mantiene una llamada de Power Apps abierta. Un segundo flujo,
-`auto-tasacion-consultar-lote`, recibe `id_lote`, consulta `GET
-/v1/lotes/{id_lote}` y devuelve estado, avance y mensaje seguro para el
-operador. La aplicación lo invoca mediante un temporizador mientras haya un
-lote activo.
+## Ruta ZIP heredada
 
-Al llegar a `COMPLETADO`, un flujo de entrega obtiene el XLSX desde el resultado
-privado autorizado y usa **Crear archivo** de OneDrive para escribir:
-
-```text
-<carpeta del ZIP>/Resultado_Final_<ID_LOTE>.xlsx
-```
-
-La entrega marca el lote como confirmado. Recién entonces la retención puede
-eliminar los objetos temporales de GCS. La posterior ejecución de PAD recibe la
-ruta de ese Excel y procesa solo `tblParaProcesar`.
-
-## Contrato de la API de control
-
-| Operación | Método | Respuesta mínima |
-| --- | --- | --- |
-| Crear lote | `POST /v1/lotes` | `id_lote`, `estado`, `clave_idempotencia` |
-| Consultar lote | `GET /v1/lotes/{id_lote}` | `estado`, `avance`, `mensaje`, `resultado_disponible` |
-| Confirmar entrega | `POST /v1/lotes/{id_lote}/entrega` | `estado=ENTREGADO` |
-
-La clave de idempotencia es `driveId:itemId:eTag`. Si el mismo archivo se envía
-dos veces sin cambios, se devuelve el mismo lote en vez de crear dos Jobs. El
-Job valida el `eTag` antes y después de la descarga; un cambio produce
-`FALLIDO_ORIGEN_CAMBIO` y no se procesa una versión parcial del ZIP.
-
-## Estados visibles
-
-| Estado | Significado para operación |
-| --- | --- |
-| `RECIBIDO` | El lote fue registrado. |
-| `COPIANDO_A_GCS` | El Job descarga el ZIP desde OneDrive. |
-| `EN_PROCESO` | Se extraen y validan los PDFs. |
-| `COMPLETADO` | El Excel está listo para entrega. |
-| `ENTREGADO` | El Excel fue creado en OneDrive. |
-| `FALLIDO` | Hay un error técnico recuperable o escalable. |
-| `FALLIDO_ORIGEN_CAMBIO` | El ZIP cambió mientras se copiaba; debe reenviarse. |
-
-## Migración desde el flujo vigente
-
-El flujo actual contiene estas acciones: **Obtener contenido de archivo**,
-**HTTP - Iniciar carga**, **HTTP: Subir ZIP**, **HTTP - Procesar carga** y
-**Crear archivo**. Se conserva sin cambios para el servicio vigente de hasta
-90 MB mientras se construye y valida la ruta asíncrona.
-
-La ruta de lotes masivos se publica como un flujo y botones separados. Después
-de una prueba E2E aprobada con un ZIP sintético de 1.4 GB y 300 PDFs, la
-aplicación puede dirigir todos los ZIP a la ruta nueva y el flujo binario actual
-se retira.
-
-## Dependencias antes de editar Power Platform
-
-1. Implementar y proteger la API de control y los endpoints de estado.
-2. Crear el Cloud Run Job y su estado persistente.
-3. Aprobar una aplicación Microsoft Entra con lectura limitada a la carpeta o
-   biblioteca operativa mediante permisos Selected.
-4. Configurar las identidades del Job y de la API con privilegios mínimos en
-   Cloud Storage y Cloud Run Jobs.
-5. Definir la política de retención de ZIP, resultado y estado.
-
-Hasta cumplir esas dependencias, la aplicación no debe apuntar a este nuevo
-flujo: registraría lotes que todavía no pueden procesarse.
-
+El endpoint ZIP y la carga temporal firmada de hasta 90 MB son **LEGACY /
+TRANSICIÓN**. No se eliminan hasta aprobar una prueba E2E de la nueva ruta. No
+se mezclan con los manifiestos de PDFs individuales.

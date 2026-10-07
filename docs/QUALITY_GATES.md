@@ -2,59 +2,44 @@
 
 ## Antes de aceptar un cambio local
 
-1. Ejecutar `python tools/validate_profile_catalog.py` y la suite de `unittest` completa.
-2. Ejecutar `compileall` para detectar errores de importación/sintaxis.
-3. Si el cambio toca la salida, generar un XLSX de prueba y ejecutar
+1. Ejecutar `python tools/validate_profile_catalog.py` y la suite `unittest`.
+2. Ejecutar `compileall` para detectar errores de importación y sintaxis.
+3. Si cambia la salida, generar un XLSX sintético y ejecutar
    `tools/verify_workbook.py`.
-4. Confirmar que el contrato de las 24 columnas no cambió de orden y que
-   `ID_CASO` sigue al final.
-5. Comprobar que no se añadieron secretos, PDF productivos ni resultados de
-   ejecución al control de versiones.
+4. Confirmar las 24 columnas heredadas y `ID_CASO` al final.
+5. Confirmar que no se agregaron secretos, PDFs productivos ni resultados.
 
-## Pruebas que deben acompañar cambios funcionales
+## Pruebas de la ruta masiva de PDFs
 
-| Cambio | Prueba mínima |
-|---|---|
-| Regex o extracción PDF | PDF sintético que cubra el campo y un caso negativo. |
-| Regla de negocio | Caso que la acepte y conflicto que siga bloqueado sin la regla. |
-| Catálogo | Código autorizado y valor desconocido que permanezca fuera de la cola. |
-| IA | Corrección con página/evidencia que se revalide y corrección insegura rechazada. |
-| Excel | Hojas, tablas, columnas, `ID_CASO` y ruta correcta. |
-| HTTP | ZIP binario con nombre variable y respuesta XLSX válida. |
-| Perfil de plantilla | Catálogo válido; PDF sintético con firma y alias; caso sin firma que mantenga `generic-v1`; trazabilidad en `CONTROL` y `REVISION_IA`. |
-| Firma gráfica / OCR | Prueba sintética o simulada que atribuya una firma única como `OCR_LOCAL`; fallo de OCR o firma ambigua que conserve `generic-v1`. |
+Antes de publicar se requiere un lote sintético de 300 PDFs individuales y
+aproximadamente 1.4 GiB en total que compruebe:
+
+1. los 300 PDFs se listan y el total supera 1 GiB;
+2. ningún request contiene el lote completo;
+3. cada PDF se carga independientemente;
+4. una interrupción en el PDF N permite reintentar ese PDF sin repetir los
+   ya confirmados;
+5. cambio de eTag produce `FALLIDO_ORIGEN_CAMBIO`;
+6. manifiestos idénticos devuelven el mismo lote;
+7. un PDF individual sobre el límite se rechaza sin subirlo;
+8. un archivo no PDF se rechaza;
+9. un lote parcial no inicia el Job;
+10. el Job procesa solo PDFs confirmados y su memoria no depende del tamaño
+    total del lote;
+11. `Resultado_Final_<ID_LOTE>.xlsx` pasa `tools/verify_workbook.py`;
+12. `tblParaProcesar` y el contrato Excel no cambian.
+
+El generador de carga crea datos temporales fuera de Git. No se suben PDFs de
+clientes ni lotes de prueba masivos al repositorio.
 
 ## Condiciones de bloqueo
 
-No considerar listo ni publicar un cambio si ocurre alguno de estos casos:
-
-- una fila incompleta entra a `tblParaProcesar`;
-- un conflicto documental se interpreta sin regla aprobada;
-- se emite un código que no está en el catálogo;
-- una corrección IA no tiene página y evidencia;
-- se modifica la interfaz de Power Automate sin actualizar el contrato;
-- se depende de un nombre fijo para el ZIP de entrada.
-- un perfil sin firma inequívoca cambia la extracción o altera una decisión de negocio;
+No considerar listo ni publicar si una fila incompleta entra a
+`tblParaProcesar`, un conflicto se infiere sin regla aprobada, un código no
+pertenece al catálogo, la IA no tiene evidencia, un flujo envía el lote entero,
+o el Job acepta un PDF no confirmado.
 
 ## Antes del despliegue
 
-La publicación necesita aprobación explícita, una revisión de la salida
-generada con datos autorizados y la confirmación de compatibilidad por el
-responsable de Power Automate. Sigue el runbook
-[`CHANGE_AND_DEPLOY.md`](runbooks/CHANGE_AND_DEPLOY.md).
-
-
-## Prueba de ingreso grande
-
-Para un cambio de transporte, comprobar una carga directa menor a 30 MiB y una carga temporal firmada mayor a 30 MiB. Ambas deben devolver un XLSX que apruebe `tools/verify_workbook.py`.
-
-Para la ruta de lotes masivos, antes de publicar se requiere además:
-
-1. una copia sintética OneDrive a GCS de 1.4 GB con 300 PDFs;
-2. interrupción durante una parte y continuación sin duplicar el objeto;
-3. rechazo de un inicio sin identidad o fuera de la carpeta autorizada;
-4. ejecución asíncrona que produzca el mismo contrato XLSX;
-5. eliminación verificada de ingresos y resultados temporales según la
-   retención aprobada.
-6. cambio de eTag durante la copia que termine en `FALLIDO_ORIGEN_CAMBIO`;
-7. dos solicitudes iguales que produzcan un unico `ID_LOTE` y un unico XLSX.
+La publicación requiere aprobación explícita, revisión con datos autorizados,
+validación del responsable de Power Automate y el runbook de cambio.

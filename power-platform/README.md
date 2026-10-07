@@ -1,59 +1,47 @@
 # Integración Power Platform
 
-Los artefactos de Power Apps y Power Automate se administran en el entorno
-corporativo Microsoft. Este directorio documenta el contrato que deben usar.
+## Ruta masiva objetivo: PDFs individuales
+
+El operador carga PDFs individuales en `/auto-tasaciones`. Power Apps lista
+metadatos y permite seleccionar uno o varios archivos. No usa adjuntos ni
+transmite `contentBytes`.
+
+Power Automate orquesta cinco flujos:
+
+1. `auto-tasacion-listar-pdfs`: lista solo PDFs y devuelve metadatos.
+2. `auto-tasacion-iniciar-lote`: valida metadatos, eTag y registra el
+   manifiesto mediante `POST /v1/lotes`.
+3. `auto-tasacion-cargar-lotes`: por cada PDF, obtiene contenido, solicita un
+   ticket de carga, hace `PUT` binario, compara eTag final y confirma.
+4. `auto-tasacion-consultar-lote`: consulta estado y progreso.
+5. `auto-tasacion-entregar-lote`: descarga solo el XLSX final, lo guarda en
+   OneDrive y confirma entrega.
+
+El `Apply to each` procesa cada PDF de forma independiente, con concurrencia
+inicial de 1 a 3. No se deben guardar PDFs en arrays, variables, JSON o Base64. Los HTTP hacia la
+API de control incluyen `X-Batch-Control-Token` desde una variable de entorno o
+conexión segura; nunca se escribe su valor en la app. Power Automate es el único componente que lee OneDrive; Cloud Run no usa
+Microsoft Graph ni recibe rutas de OneDrive para descargar contenido.
 
 ## Power Apps
 
-La aplicación ejecuta el flujo `auto-tasacion`. La carga del ZIP permanece en
-la carpeta autorizada de OneDrive; la aplicación no transmite secretos ni
-procesa PDFs directamente.
+La pantalla nueva usa `galPdfs`, selección múltiple, **Actualizar**,
+**Seleccionar todos**, **Ejecutar** e indicador de lote. El botón **Ejecutar**
+envía solo `ItemId`, nombre, tamaño y eTag disponible hacia
+`auto-tasacion-iniciar-lote`.
 
-Para ZIP grandes, el operador los carga en OneDrive desde el navegador o el
-cliente de sincronización y proporciona su ruta al flujo. El botón de ejecución
-debe enviar solo `RutaZip`. No se debe pasar un adjunto a
-`flujoSubirDriveTasaciones.Run`: Power Apps lo serializa en Base64 y el límite
-de mensaje de Power Automate se alcanza antes de que el archivo llegue a
-OneDrive. `MaxAttachments = 1` explica el texto visual de que se alcanzó el
-número máximo de archivos; no es el límite de tamaño.
+Eliminar de esta ruta `ControlAdjuntos`, **Cargar Zip**, `contentBytes` y
+`varZipSubido`. La consulta de estado debe usar temporizador y el `ID_LOTE`.
 
-## Power Automate
+## Resultado y PAD
 
-El flujo debe mantener esta secuencia:
+El resultado se llama `Resultado_Final_<ID_LOTE>.xlsx` y se crea en
+`/auto-tasaciones`. PAD recibe su ruta y opera exclusivamente
+`tblParaProcesar`. `PRESTAMO` y `SEGURO INMUEBLE` se completan después, en el
+proceso IBM 3270. `tblRevisionIa` y `tblControl` nunca son colas para el banco.
 
-1. Obtener el contenido del archivo ZIP indicado por `RutaZip` desde OneDrive, sin usar un nombre ni una ruta fijos.
-2. Ejecutar `POST` hacia el endpoint de Cloud Run.
-3. Enviar el contenido del archivo sin convertirlo a JSON o Base64.
-4. Definir `Content-Type: application/zip`.
-5. Crear `Resultado_Final.xlsx` en la carpeta de OneDrive usando el cuerpo de
-   la respuesta HTTP como contenido del archivo.
-6. Ejecutar PAD/IBM 3270 exclusivamente sobre las filas de la tabla Excel
-   `tblParaProcesar`. No leer `tblRevisionIa` ni `tblControl` para operar.
-7. Obtener y registrar `PRESTAMO` y `SEGURO INMUEBLE` en PAD/IBM 3270: Cloud
-   Run los entrega vacíos porque no son campos extraídos del PDF.
-8. Registrar el resultado de cada operación usando el `ID_CASO` de la misma
-   fila de `tblParaProcesar` y actualizar la fila coincidente de `tblControl`.
+## Ruta heredada ZIP
 
-No se debe usar el contrato anterior de Google Sheets, que enviaba JSON y
-esperaba una respuesta JSON.
-
-
-## Lotes mayores a 30 MiB
-
-Para evitar el l?mite de entrada HTTP/1, reemplazar el POST binario por estas acciones:
-
-1. **Iniciar carga**: `POST` con `Content-Type: application/json` y el cuerpo `{"operacion":"iniciar_carga","nombre_archivo":"<nombre del ZIP>","tamano_bytes":<tama?o del archivo>}`.
-2. **Subir ZIP**: `PUT` a `url_carga` de la respuesta anterior, con `Content-Type: application/zip` y el contenido binario devuelto por OneDrive. No usar Base64 ni JSON.
-3. **Procesar carga**: `POST` JSON al mismo endpoint con `solicitud_proceso` de **Iniciar carga**. El cuerpo de esta respuesta es `Resultado_Final.xlsx`; usarlo directamente en **Crear archivo** de OneDrive.
-
-La URL de carga es temporal, solo puede escribir en un objeto privado y vence en 15 minutos. El límite del servicio para esta ruta es 90 MB. Mantener el contenido binario en el cuerpo de la acción HTTP y evitar expresiones `base64()`, `string()` o JSON.
-
-## Lotes superiores a 90 MB
-
-La ruta vigente no debe usarse para ZIP de más de 90 MB. El operador carga el
-archivo en OneDrive por el mecanismo autorizado y Power Apps envía solo su
-ruta o identificador. Un Cloud Run Job descarga el archivo desde OneDrive por
-rangos mediante Microsoft Graph, lo procesa de manera asíncrona y expone el
-XLSX final para que este flujo lo guarde en la misma carpeta. Esta capacidad
-requiere la integración Entra aprobada y está documentada en
-[`../docs/architecture/lotes-masivos.md`](../docs/architecture/lotes-masivos.md).
+El flujo actual `auto-tasacion` conserva el POST ZIP y la carga temporal
+firmada hasta 90 MB. Es **LEGACY / TRANSICIÓN** y no se mezcla con los
+manifiestos de PDFs. Se retira solo después de aprobar el E2E masivo.

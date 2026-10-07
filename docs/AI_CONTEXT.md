@@ -1,79 +1,36 @@
 # Contexto operativo para IA
 
-## Qué resuelve el proyecto
+`auto-tasacion` convierte documentos PDF de tasación en una cola Excel fiable
+para Power Automate Desktop e IBM 3270. No opera el Mainframe directamente.
 
-`auto-tasacion` convierte un lote ZIP de informes PDF de tasación en una cola
-Excel fiable para la automatización hipotecaria. No intenta operar el
-Mainframe: entrega a Power Automate únicamente casos documentados y completos.
+## Rutas de ingreso
 
-```text
-Power Apps
-  -> Power Automate / OneDrive
-  -> HTTP POST application/zip
-  -> Cloud Run (extracción y validación)
-  -> Resultado_Final.xlsx en OneDrive
-  -> tblParaProcesar
-  -> Power Automate Desktop / IBM 3270
-```
+- **Masiva objetivo:** PDFs individuales en OneDrive, manifiesto, carga PDF por
+  PDF desde Power Automate a GCS y Cloud Run Job.
+- **ZIP heredada:** HTTP ZIP o carga temporal firmada de hasta 90 MB; se
+  conserva mientras se valida la ruta masiva.
 
-El nombre del ZIP no forma parte del contrato. Cloud Run recibe sus bytes en
-el cuerpo HTTP y procesa en memoria los PDF contenidos dentro.
+Cloud Run nunca lee OneDrive en la ruta masiva. Power Automate es el único
+componente que obtiene su contenido. No se usa Microsoft Graph.
 
-## Estados de un caso
+## Invariantes
 
-| Ruta final | Significado | Destino |
-|---|---|---|
-| `LISTO_DETERMINISTA` | La extracción y los catálogos resolvieron todos los campos exigidos. | `PARA_PROCESAR` |
-| `LISTO_IA_VERIFICADO` | Una revisión IA con evidencia corrigió una excepción y la segunda validación la aprobó. | `PARA_PROCESAR` |
-| `PENDIENTE_IA` | Hay datos faltantes que podrían verificarse, pero la IA no está disponible o no puede procesar el PDF. | `REVISION_IA` |
-| `REGLA_NEGOCIO_PENDIENTE` | Hay fuentes contradictorias sin una regla operativa aprobada que establezca prioridad. | `REVISION_IA` |
-| `REVISION_HUMANA` | No existe una corrección permitida o la evidencia no es suficiente. | `REVISION_IA` |
+- `tblParaProcesar` es la única cola para PAD/IBM.
+- `REVISION_IA` y `CONTROL` no se usan para operar el banco.
+- `PRESTAMO` puede quedar vacío antes del 3270.
+- Campos críticos sin evidencia, catálogos no autorizados o conflictos quedan
+  en revisión.
+- La IA es excepcional, aporta evidencia y se revalida.
+- El lote masivo no reúne PDFs, no usa Base64 y no carga el lote total en
+  memoria.
 
-Todos los casos, incluso los listos, se registran en `CONTROL`.
+## Componentes
 
-## Artefactos y responsabilidades
-
-| Componente | Responsabilidad | No debe hacer |
-|---|---|---|
-| `cloud-run/service.py` | Recibir ZIP, clasificar casos y construir el XLSX. | Depender del nombre o de una ruta del ZIP. |
-| `cloud-run/pdf_extractor.py` | Extraer evidencia determinista de PDF. | Inventar campos o silenciar conflictos. |
-| `cloud-run/profile_registry.py` + `reference-data/profiles/` | Identificar una plantilla por firma explícita y aportar alias técnicos de etiquetas. | Inferir una tasadora, cambiar reglas de negocio o publicar perfiles desde correcciones. |
-| `cloud-run/provider_ocr.py` | Reconocer localmente una firma gráfica de tasadora en encabezado o pie y registrar su origen. | Enviar PDFs o fragmentos OCR a un servicio externo, alterar campos extraídos o sustituir una firma ambigua. |
-| `cloud-run/catalog.py` + `reference-data/` | Traducir exclusivamente valores autorizados de `DATOS`. | Aplicar equivalencias no aprobadas. |
-| `cloud-run/ai_reviewer.py` | Consultar IA solo para excepciones permitidas. | Enviar casos directamente a la cola operable. |
-| `contracts/masivo.md` | Definir el contrato de salida estable. | Ser reinterpretado por cada consumidor. |
-| `power-platform/` | Documentar la integración del entorno Microsoft. | Reintroducir Google Sheets/App Script en el flujo activo. |
-
-## Reglas de decisión importantes
-
-- El tipo de inmueble se traduce a los códigos del catálogo de la hoja `DATOS`.
-- El año de construcción puede derivarse de `año de expedición - edad efectiva`
-  solo cuando ambos valores tienen evidencia y el resultado es razonable.
-- Piso, sótano, dirección o valores que provengan de fuentes contradictorias
-  son conflictos, no vacíos normales. Solo una regla versionada y aprobada
-  puede definir su prioridad.
-- Los campos auxiliares `COL_*` se conservan por compatibilidad de formato.
-- `PRESTAMO` se completa después, durante el proceso de IBM 3270; no impide
-  que una fila validada llegue a `PARA_PROCESAR`.
-
-## Límites del sistema
-
-- La IA está apagada por defecto y no sustituye las reglas de negocio.
-- Cloud Run no descarga archivos desde OneDrive: Power Automate entrega el
-  ZIP como bytes.
-- Los datos personales, PDFs productivos, macros originales y exportaciones
-  son referencias locales fuera de Git.
-- El histórico Google Sheets está archivado en `legacy/` y no comparte el
-  contrato activo.
-- Los perfiles de plantilla solo explican variaciones de formato. Su versión,
-  coincidencias, confianza y origen de la tasadora se registran en `CONTROL` y
-  `REVISION_IA`; no cambian el contrato de `PARA_PROCESAR`.
-
-## Lectura por tipo de tarea
-
-| Si la tarea es… | Leer primero |
-|---|---|
-| Ajustar expresiones, tablas o parsers PDF | `skills/tasaciones-cloud-run/SKILL.md`, `cloud-run/tests/test_service.py` |
-| Cambiar una columna, una tabla o el consumo PAD | `skills/tasaciones-contrato-excel/SKILL.md`, `contracts/masivo.md`, `power-platform/README.md` |
-| Definir prioridades de negocio | `docs/REGLAS_NEGOCIO_PENDIENTES.txt`, `cloud-run/reference-data/reglas_operativas.json` |
-| Preparar publicación | `docs/runbooks/CHANGE_AND_DEPLOY.md` |
+| Componente | Responsabilidad |
+| --- | --- |
+| Power Apps | Selecciona metadatos de PDFs y consulta progreso. |
+| Power Automate | Valida eTag, carga cada PDF individual y entrega XLSX. |
+| `batch_api.py` | Registra manifiesto, tickets, confirmación, estado e inicio. |
+| `batch_worker.py` | Procesa solo objetos `CARGADO` de un manifiesto. |
+| `service.py` | Comparte clasificación por PDF y mantiene el endpoint ZIP heredado. |
+| `contracts/masivo.md` | Define el XLSX estable. |

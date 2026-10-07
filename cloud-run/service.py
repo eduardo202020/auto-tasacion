@@ -20,7 +20,7 @@ import re
 from datetime import timedelta
 from uuid import uuid4
 import zipfile
-from typing import Any
+from typing import Any, Callable, Iterable
 
 import functions_framework
 import google.auth
@@ -40,10 +40,11 @@ from catalog import (
     lookup_location_from_text,
     lookup_property_codes,
 )
+from batch_api import handle_request as handle_batch_control_request
+from batch_lotes import MAX_PDFS_PER_BATCH
 from pdf_extractor import extract_pdf
 
 
-MAX_PDFS_PER_BATCH = 300
 # El endpoint HTTP/1 de Cloud Run solo recibe hasta 32 MiB. Este valor conserva
 # margen para que Power Automate use el camino directo sin recibir un 413.
 MAX_DIRECT_ZIP_BYTES = 30 * 1024 * 1024
@@ -139,7 +140,7 @@ RULES_PATH = Path(__file__).parent / "reference-data" / "reglas_operativas.json"
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
 }
 
@@ -459,30 +460,6 @@ def validate_zip(raw_data: bytes) -> list[zipfile.ZipInfo]:
         )
 
 
-def validate_zip_file(
-    zip_path: str | Path,
-    *,
-    max_archive_bytes: int = MAX_BATCH_ZIP_BYTES,
-    max_uncompressed_bytes: int = MAX_BATCH_UNCOMPRESSED_BYTES,
-    max_pdf_bytes: int = MAX_BATCH_PDF_BYTES,
-) -> list[zipfile.ZipInfo]:
-    """Valida un ZIP almacenado como archivo, por ejemplo en un volumen GCS FUSE."""
-    path = Path(zip_path)
-    if not path.is_file():
-        raise ValueError("El ZIP de lote no existe")
-    with path.open("rb") as source:
-        if source.read(2) != b"PK":
-            raise ValueError("El archivo de lote no es un ZIP válido")
-    with zipfile.ZipFile(path) as archive:
-        return validate_zip_archive(
-            archive,
-            archive_size=path.stat().st_size,
-            max_archive_bytes=max_archive_bytes,
-            max_uncompressed_bytes=max_uncompressed_bytes,
-            max_pdf_bytes=max_pdf_bytes,
-        )
-
-
 def upload_bucket_name() -> str:
     bucket = os.getenv(GCS_UPLOAD_BUCKET_ENV, "").strip()
     if not bucket:
@@ -577,35 +554,18 @@ def download_staged_zip(value: Any) -> bytes:
     return raw_data
 
 
-def process_zip(
-    zip_source: bytes | str | Path,
+def process_pdf_entries(
+    pdf_entries: Iterable[tuple[str, bytes]],
     reviewer: CaseReviewer | None = None,
     *,
     use_environment_reviewer: bool = True,
-    max_archive_bytes: int = MAX_ZIP_BYTES,
-    max_uncompressed_bytes: int = MAX_UNCOMPRESSED_BYTES,
-    max_pdf_bytes: int | None = None,
+    on_processed: Callable[[], None] | None = None,
 ) -> tuple[list[list[Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Clasifica un ZIP en cola operable, excepciones IA y control.
+    """Clasifica PDFs ya individualizados sin cambiar las reglas de negocio.
 
-    Las rutas HTTP siguen entregando ``bytes``. El worker masivo entrega una
-    ruta a un ZIP montado desde Cloud Storage; ambas rutas comparten las mismas
-    reglas y solo leen el contenido de un PDF por iteración.
+    El endpoint ZIP heredado y el worker de objetos GCS comparten este punto de
+    entrada. Cada iteración mantiene en memoria solamente el PDF actual.
     """
-    if isinstance(zip_source, bytes):
-        if not zip_source.startswith(b"PK"):
-            raise ValueError("El cuerpo debe ser un archivo ZIP válido")
-        archive_input: io.BytesIO | Path = io.BytesIO(zip_source)
-        archive_size = len(zip_source)
-    else:
-        archive_input = Path(zip_source)
-        if not archive_input.is_file():
-            raise ValueError("El ZIP de lote no existe")
-        with archive_input.open("rb") as source:
-            if source.read(2) != b"PK":
-                raise ValueError("El archivo de lote no es un ZIP válido")
-        archive_size = archive_input.stat().st_size
-
     ready_rows: list[list[Any]] = []
     review_rows: list[dict[str, Any]] = []
     control_rows: list[dict[str, Any]] = []
@@ -617,158 +577,151 @@ def process_zip(
             reviewer_error = str(error)
     approved_rules = load_approved_rules()
 
-    with zipfile.ZipFile(archive_input) as archive:
-        entries = validate_zip_archive(
-            archive,
-            archive_size=archive_size,
-            max_archive_bytes=max_archive_bytes,
-            max_uncompressed_bytes=max_uncompressed_bytes,
-            max_pdf_bytes=max_pdf_bytes,
-        )
-        for entry in entries:
-            # ``ZipFile.read`` descomprime una sola entrada. Nunca carga el
-            # archivo ZIP entero, incluso cuando ``archive_input`` es un path
-            # montado desde Cloud Storage.
-            content = archive.read(entry)
-            filename = entry.filename.rsplit("/", 1)[-1]
-            case_id = build_case_id(entry.filename, content)
-            if not content.startswith(b"%PDF-"):
-                extracted: dict[str, Any] = {
-                    "ID / Codigo PDF": filename.rsplit(".", 1)[0],
-                    "PDF_Archivo": entry.filename,
-                    "Tasadora id": "",
-                    "Tasadora detectada": "",
-                    "Origen tasadora": "",
-                    "Perfil plantilla": "generic-v1",
-                    "Version perfil": "1",
-                    "Confianza perfil": 0.0,
-                    "Coincidencias perfil": "",
-                    "Observacion extraccion": "El archivo no tiene una firma PDF válida",
-                }
+    for source_filename, content in pdf_entries:
+        source_filename = str(source_filename or "")
+        filename = source_filename.rsplit("/", 1)[-1]
+        case_id = build_case_id(source_filename, content)
+        if not content.startswith(b"%PDF-"):
+            extracted: dict[str, Any] = {
+                "ID / Codigo PDF": filename.rsplit(".", 1)[0],
+                "PDF_Archivo": source_filename,
+                "Tasadora id": "",
+                "Tasadora detectada": "",
+                "Origen tasadora": "",
+                "Perfil plantilla": "generic-v1",
+                "Version perfil": "1",
+                "Confianza perfil": 0.0,
+                "Coincidencias perfil": "",
+                "Observacion extraccion": "El archivo no tiene una firma PDF válida",
+            }
+        else:
+            extracted = extract_pdf(content, filename)
+        extracted["ID_CASO"] = case_id
+
+        deterministic = dict(extracted)
+        _, initial_missing, initial_issues = assess_case(deterministic)
+        working = dict(deterministic)
+        macro_row, missing_fields, issues = assess_case(working)
+        route = "LISTO_DETERMINISTA" if not missing_fields and not issues else ""
+        review_executed = False
+        model_name = ""
+        ai_reason = ""
+        requested_fields = ai_targets(missing_fields, issues)
+        accepted: list[dict[str, Any]] = []
+        rejected: list[str] = []
+
+        if not route:
+            if has_business_conflict(issues):
+                route = "REGLA_NEGOCIO_PENDIENTE"
+                ai_reason = "Existe un conflicto entre fuentes que no cubre una regla operativa activa"
+            elif len(content) > MAX_INLINE_AI_PDF_BYTES:
+                route = "PENDIENTE_IA"
+                ai_reason = "El PDF excede el límite de revisión IA inline y requiere una ruta aprobada"
+            elif reviewer is None:
+                route = "PENDIENTE_IA"
+                ai_reason = reviewer_error or "La revisión IA no está habilitada"
+            elif not requested_fields:
+                route = "REVISION_HUMANA"
+                ai_reason = "No existe un campo autorizable para revisión IA"
             else:
-                extracted = extract_pdf(content, filename)
-            extracted["ID_CASO"] = case_id
-
-            deterministic = dict(extracted)
-            _, initial_missing, initial_issues = assess_case(deterministic)
-            working = dict(deterministic)
-            macro_row, missing_fields, issues = assess_case(working)
-            route = "LISTO_DETERMINISTA" if not missing_fields and not issues else ""
-            review_executed = False
-            model_name = ""
-            ai_reason = ""
-            requested_fields = ai_targets(missing_fields, issues)
-            accepted: list[dict[str, Any]] = []
-            rejected: list[str] = []
-
-            if not route:
-                if has_business_conflict(issues):
-                    route = "REGLA_NEGOCIO_PENDIENTE"
-                    ai_reason = "Existe un conflicto entre fuentes que no cubre una regla operativa activa"
-                elif len(content) > MAX_INLINE_AI_PDF_BYTES:
+                review_executed = True
+                model_name = str(getattr(reviewer, "model_name", "IA"))
+                try:
+                    response = reviewer.review(
+                        content, case_id=case_id, requested_fields=requested_fields,
+                        observations=issues, extracted=deterministic, approved_rules=approved_rules,
+                    )
+                    ai_reason = str(response.get("reason", "")).strip()
+                    accepted, rejected = apply_ai_corrections(
+                        working, response, requested_fields=requested_fields, page_count=pdf_page_count(content),
+                    )
+                    macro_row, missing_fields, issues = assess_case(working)
+                    if not missing_fields and not issues:
+                        route = "LISTO_IA_VERIFICADO"
+                    elif has_business_conflict(issues):
+                        route = "REGLA_NEGOCIO_PENDIENTE"
+                    else:
+                        route = "REVISION_HUMANA"
+                except AiReviewUnavailable as error:
                     route = "PENDIENTE_IA"
-                    ai_reason = "El PDF excede el límite de revisión IA inline y requiere una ruta aprobada"
-                elif reviewer is None:
+                    ai_reason = str(error)
+                except Exception:
                     route = "PENDIENTE_IA"
-                    ai_reason = reviewer_error or "La revisión IA no está habilitada"
-                elif not requested_fields:
-                    route = "REVISION_HUMANA"
-                    ai_reason = "No existe un campo autorizable para revisión IA"
-                else:
-                    review_executed = True
-                    model_name = str(getattr(reviewer, "model_name", "IA"))
-                    try:
-                        response = reviewer.review(
-                            content, case_id=case_id, requested_fields=requested_fields,
-                            observations=issues, extracted=deterministic, approved_rules=approved_rules,
-                        )
-                        ai_reason = str(response.get("reason", "")).strip()
-                        accepted, rejected = apply_ai_corrections(
-                            working, response, requested_fields=requested_fields, page_count=pdf_page_count(content),
-                        )
-                        macro_row, missing_fields, issues = assess_case(working)
-                        if not missing_fields and not issues:
-                            route = "LISTO_IA_VERIFICADO"
-                        elif has_business_conflict(issues):
-                            route = "REGLA_NEGOCIO_PENDIENTE"
-                        else:
-                            route = "REVISION_HUMANA"
-                    except AiReviewUnavailable as error:
-                        route = "PENDIENTE_IA"
-                        ai_reason = str(error)
-                    except Exception:
-                        route = "PENDIENTE_IA"
-                        ai_reason = "La revisión IA no pudo completarse"
+                    ai_reason = "La revisión IA no pudo completarse"
 
-            ready_row_number: int | str = ""
-            if route in {"LISTO_DETERMINISTA", "LISTO_IA_VERIFICADO"}:
-                ready_rows.append([*macro_row, case_id])
-                ready_row_number = len(ready_rows)
-            else:
-                review_rows.append({
-                    "ID_CASO": case_id, "PDF_Archivo": entry.filename,
-                    "Tasadora id": deterministic.get("Tasadora id", ""),
-                    "Tasadora detectada": deterministic.get("Tasadora detectada", ""),
-                    "Origen tasadora": deterministic.get("Origen tasadora", ""),
-                    "Perfil plantilla": deterministic.get("Perfil plantilla", "generic-v1"),
-                    "Version perfil": deterministic.get("Version perfil", "1"),
-                    "Confianza perfil": deterministic.get("Confianza perfil", 0.0),
-                    "Coincidencias perfil": deterministic.get("Coincidencias perfil", ""),
-                    "Estado": route,
-                    "Campos faltantes": "; ".join(missing_fields),
-                    "Incidencias de validacion": "; ".join(issues),
-                    "Campos enviados a IA": "; ".join(requested_fields), "Motivo IA": ai_reason,
-                    "Correcciones IA": json_cell(accepted),
-                    "Evidencia IA": json_cell([
-                        {"field": item["field"], "page": item["page"], "evidence": item["evidence"]}
-                        for item in accepted
-                    ]),
-                    "Modelo IA": model_name, "Siguiente accion": next_action(route),
-                })
-
-            control = dict(deterministic)
-            control.update({
-                "ID_CASO": case_id, "Campos faltantes": "; ".join(missing_fields),
-                "Incidencias de validacion": "; ".join(unique([*issues, *rejected])), "Ruta final": route,
-                "Revision IA ejecutada": "SI" if review_executed else "NO", "Modelo IA": model_name,
+        ready_row_number: int | str = ""
+        if route in {"LISTO_DETERMINISTA", "LISTO_IA_VERIFICADO"}:
+            ready_rows.append([*macro_row, case_id])
+            ready_row_number = len(ready_rows)
+        else:
+            review_rows.append({
+                "ID_CASO": case_id, "PDF_Archivo": source_filename,
+                "Tasadora id": deterministic.get("Tasadora id", ""),
+                "Tasadora detectada": deterministic.get("Tasadora detectada", ""),
+                "Origen tasadora": deterministic.get("Origen tasadora", ""),
+                "Perfil plantilla": deterministic.get("Perfil plantilla", "generic-v1"),
+                "Version perfil": deterministic.get("Version perfil", "1"),
+                "Confianza perfil": deterministic.get("Confianza perfil", 0.0),
+                "Coincidencias perfil": deterministic.get("Coincidencias perfil", ""),
+                "Estado": route,
+                "Campos faltantes": "; ".join(missing_fields),
+                "Incidencias de validacion": "; ".join(issues),
                 "Campos enviados a IA": "; ".join(requested_fields), "Motivo IA": ai_reason,
                 "Correcciones IA": json_cell(accepted),
                 "Evidencia IA": json_cell([
                     {"field": item["field"], "page": item["page"], "evidence": item["evidence"]}
                     for item in accepted
                 ]),
-                "Fila PARA_PROCESAR": ready_row_number,
+                "Modelo IA": model_name, "Siguiente accion": next_action(route),
             })
-            control["Observacion extraccion"] = "; ".join(unique([
-                str(deterministic.get("Observacion extraccion") or ""),
-                *(f"Campo inicial faltante: {field}" for field in initial_missing), *initial_issues,
-            ]))
-            control_rows.append(control)
+
+        control = dict(deterministic)
+        control.update({
+            "ID_CASO": case_id, "Campos faltantes": "; ".join(missing_fields),
+            "Incidencias de validacion": "; ".join(unique([*issues, *rejected])), "Ruta final": route,
+            "Revision IA ejecutada": "SI" if review_executed else "NO", "Modelo IA": model_name,
+            "Campos enviados a IA": "; ".join(requested_fields), "Motivo IA": ai_reason,
+            "Correcciones IA": json_cell(accepted),
+            "Evidencia IA": json_cell([
+                {"field": item["field"], "page": item["page"], "evidence": item["evidence"]}
+                for item in accepted
+            ]),
+            "Fila PARA_PROCESAR": ready_row_number,
+        })
+        control["Observacion extraccion"] = "; ".join(unique([
+            str(deterministic.get("Observacion extraccion") or ""),
+            *(f"Campo inicial faltante: {field}" for field in initial_missing), *initial_issues,
+        ]))
+        control_rows.append(control)
+        if on_processed is not None:
+            on_processed()
     return ready_rows, review_rows, control_rows
 
 
-def process_zip_file(
-    zip_path: str | Path,
+def process_zip(
+    raw_data: bytes,
     reviewer: CaseReviewer | None = None,
     *,
     use_environment_reviewer: bool = True,
-    max_archive_bytes: int = MAX_BATCH_ZIP_BYTES,
-    max_uncompressed_bytes: int = MAX_BATCH_UNCOMPRESSED_BYTES,
-    max_pdf_bytes: int = MAX_BATCH_PDF_BYTES,
 ) -> tuple[list[list[Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Procesa un ZIP de lote masivo desde un archivo seekable.
+    """Ruta ZIP heredada, limitada a 90 MB y mantenida como transición."""
+    if not raw_data.startswith(b"PK"):
+        raise ValueError("El cuerpo debe ser un archivo ZIP válido")
+    with zipfile.ZipFile(io.BytesIO(raw_data)) as archive:
+        entries = validate_zip_archive(
+            archive,
+            archive_size=len(raw_data),
+            max_archive_bytes=MAX_ZIP_BYTES,
+            max_uncompressed_bytes=MAX_UNCOMPRESSED_BYTES,
+        )
 
-    Cloud Run Job lo recibe como un path de GCS FUSE. El contrato XLSX y las
-    rutas de negocio son idénticos a los del endpoint existente.
-    """
-    return process_zip(
-        zip_path,
-        reviewer,
-        use_environment_reviewer=use_environment_reviewer,
-        max_archive_bytes=max_archive_bytes,
-        max_uncompressed_bytes=max_uncompressed_bytes,
-        max_pdf_bytes=max_pdf_bytes,
-    )
+        def zip_entries() -> Iterable[tuple[str, bytes]]:
+            for entry in entries:
+                yield entry.filename, archive.read(entry)
+
+        return process_pdf_entries(
+            zip_entries(), reviewer, use_environment_reviewer=use_environment_reviewer,
+        )
 
 
 def _add_excel_table(worksheet, name: str) -> None:
@@ -840,10 +793,14 @@ def xlsx_response(raw_data: bytes) -> Response:
 
 @functions_framework.http
 def procesar_tasaciones(request):
+    # La ruta masiva usa un contrato JSON independiente. La entrada ZIP de
+    # hasta 90 MB contin?a aislada abajo como LEGACY / TRANSICI?N.
+    if request.path.rstrip("/").startswith("/v1/lotes"):
+        return handle_batch_control_request(request)
     if request.method == "OPTIONS":
         return "", 204, CORS_HEADERS
     if request.method != "POST":
-        return json_error("Método no permitido", 405)
+        return json_error("M?todo no permitido", 405)
     try:
         if request.mimetype == "application/json":
             payload = request.get_json(silent=False)

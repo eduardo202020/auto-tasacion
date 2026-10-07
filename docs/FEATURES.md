@@ -1,43 +1,30 @@
-# Registro de features: perfiles de tasadoras
+# Registro de features: perfiles e ingesta de tasaciones
 
-Este registro hace visible el avance del sistema de adaptación documental.
 Una feature se considera implementada solo cuando tiene prueba automática y no
 altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 
 | ID | Feature | Estado | Criterio de aceptación |
 | --- | --- | --- | --- |
-| F01 | Catálogo versionado de tasadoras | Implementado | Cada empresa tiene un ID estable y firmas textuales no ambiguas, o permanece en respaldo genérico si su marca no está disponible como texto; la detección solo agrega metadatos. El catálogo cubre Braschi, Layseca, Tinsa, Valortec, IMAX, EV Inmobiliaria Barrenechea y Quantum Valuaciones. |
+| F01 | Catálogo versionado de tasadoras | Implementado | Cada empresa tiene un ID estable y firmas no ambiguas, o se mantiene el respaldo genérico. |
 | F02 | Detección de plantilla | Implementado | Una firma inequívoca selecciona un perfil; si no existe, se mantiene `generic-v1`. |
-| F03 | Extracción específica por perfil | Implementado de forma acotada | `opd-construyo-v1` aporta alias técnicos para valores y `braschi-construyo-v1` habilita OCR local de una tabla técnica cuando el texto extraíble no contiene ambos valores. Las demás empresas continúan con el extractor general hasta contar con una variación repetida y probada. |
+| F03 | Extracción específica por perfil | Implementado de forma acotada | OP-D y Braschi agregan aliases/OCR local validado; otras diferencias repetidas requieren prueba sintética. |
 | F04 | Trazabilidad de perfil | Implementado | `CONTROL` y `REVISION_IA` registran tasadora, perfil, versión, confianza y coincidencias. |
-| F05 | Bitácora de correcciones del operador | Implementado | El CSV exige `ID_CASO`, campo, valor final, página, evidencia, motivo, operador y fecha. |
-| F06 | Propuesta de perfil mediante Gemini | Pendiente de aprobación | La IA debe generar un borrador con evidencia; nunca crea ni publica perfiles por sí sola. Requiere Seguridad y Operaciones. |
-| F07 | Aprobación y publicación de perfiles | Proceso definido | Un perfil pasa por validación del catálogo, prueba sintética, revisión funcional y despliegue autorizado. |
-| F08 | Métricas por perfil | Pendiente | Medir proporción de revisión, campos faltantes y correcciones por perfil sin guardar PDFs productivos. |
-| F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. Si falla o no hay firma única, se conserva `generic-v1`. Desplegado en Cloud Run el 2026-10-06. |
-| F10 | OCR de campo por perfil técnico | Desplegado en Cloud Run el 2026-10-06 | `braschi-construyo-v1` recorta solo las celdas de pisos y sótanos cuando ambos encabezados coinciden y el parser textual falla. Cada lectura debe ser un entero único y válido; cualquier ambigüedad mantiene el caso en revisión. |
-| F11 | Inicio masivo autenticado | Pendiente de Seguridad | Solo un operador autenticado puede registrar un lote de OneDrive de hasta 2 GB y activar su Job. |
-| F12 | Ingesta OneDrive a GCS por rangos | Pendiente de Seguridad | Microsoft Graph limitado a la carpeta operativa descarga partes de 8 MiB hacia Cloud Storage sin pasar bytes por Power Apps ni Power Automate. |
-| F13 | Procesamiento asíncrono de lote | En desarrollo | El worker `cloud-run/batch_worker.py` procesa hasta 300 PDFs desde un archivo seekable, sin cargar el ZIP completo en memoria. Falta crear el Cloud Run Job, montar GCS FUSE y aprobar la prueba sintética de 1.4 GB. |
-| F14 | Estado y entrega diferida | Pendiente | Power Automate consulta el estado, guarda el XLSX en la misma carpeta de OneDrive y solo entonces habilita `tblParaProcesar`. |
-| F15 | Integridad e idempotencia de lote | Pendiente | La combinacion `driveId:itemId:eTag` evita Jobs duplicados; un cambio del ZIP durante la copia se rechaza y el resultado no sobrescribe otro lote. |
+| F05 | Bitácora de correcciones del operador | Implementado | El CSV exige `ID_CASO`, evidencia, motivo, operador y fecha. |
+| F06 | Propuesta de perfil mediante Gemini | Pendiente de aprobación | La IA genera borradores con evidencia; nunca publica perfiles. |
+| F07 | Aprobación y publicación de perfiles | Proceso definido | Catálogo, prueba sintética, revisión funcional y despliegue autorizado. |
+| F08 | Métricas por perfil | Pendiente | Medir revisión, faltantes y correcciones sin guardar PDFs productivos. |
+| F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. |
+| F10 | OCR de campo por perfil técnico | Implementado | Braschi recorta celdas técnicas solo ante evidencia y ambigüedad controlada. |
+| F11 | Registro de lote de PDFs | Implementado localmente | `POST /v1/lotes` valida manifiesto, límites e idempotencia y devuelve un `ID_LOTE` sin contenido documental. |
+| F12 | Ingesta OneDrive a GCS por PDF | Backend implementado; flujo pendiente | La API emite ticket por PDF y confirma eTag/tamaño; falta construir el flujo Power Automate que los use. |
+| F13 | Procesamiento asíncrono desde PDFs individuales | Implementado localmente; Job pendiente | `batch_worker.py` procesa únicamente objetos `CARGADO`, uno por iteración, y conserva el XLSX contractual. |
+| F14 | Estado y entrega diferida | Backend implementado; flujo pendiente | API expone progreso, resultado y confirmación de entrega; falta Power Automate para consultar y crear el XLSX en OneDrive. |
+| F15 | Integridad e idempotencia por manifiesto | Implementado localmente | SHA-256 de carpeta + `itemId:eTag`, validación eTag antes/después y verificación de tamaño en GCS. |
 
 ## Ciclo de alta seguro
 
-1. El extractor general procesa el documento y registra el perfil detectado.
-2. El operador registra correcciones con evidencia en
-   `docs/templates/correcciones_operador.csv`.
-3. Si una misma variación se repite, se propone un perfil JSON con una firma
-   técnica explícita y solamente los alias requeridos.
-4. Se añade una prueba con PDF sintético. Los PDFs reales no ingresan al
-   repositorio ni a las pruebas.
-5. Se valida con `python tools/validate_profile_catalog.py` y la suite de
-   pruebas antes de solicitar el despliegue.
-
-## Criterio para crear una plantilla nueva
-
-No se crea una plantilla solo porque la empresa sea diferente. Deben existir
-al menos dos documentos autorizados con una misma variación técnica que el
-extractor general no resuelva, junto con la evidencia del campo y una prueba
-sintética. La ausencia de evidencia en el PDF se mantiene en revisión; una
-plantilla no puede completarla por inferencia.
+1. El extractor general procesa y registra perfil detectado.
+2. El operador registra correcciones con evidencia.
+3. Variaciones repetidas generan un perfil técnico explícito.
+4. Se agrega una prueba sintética sin PDFs productivos.
+5. Se valida catálogo y suite antes de solicitar despliegue.
