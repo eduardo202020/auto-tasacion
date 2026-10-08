@@ -23,8 +23,12 @@ class ControlFileParseDefinitionTests(unittest.TestCase):
     def test_control_file_content_is_decoded_from_binary_base64(self):
         self.assertIn("function Get-ControlJsonContentExpression", self.script)
         self.assertIn(CONTROL_JSON_POWERSHELL_LITERAL, self.script)
-        self.assertIn("base64ToString", CONTROL_JSON_EXPRESSION)
-        self.assertIn("['$content']", CONTROL_JSON_EXPRESSION)
+        decoded_literal = (
+            CONTROL_JSON_POWERSHELL_LITERAL.removeprefix("return '")
+            .removesuffix("'")
+            .replace("''", "'")
+        )
+        self.assertEqual(decoded_literal, CONTROL_JSON_EXPRESSION)
 
     def test_both_flows_use_the_control_file_decoder(self):
         self.assertEqual(

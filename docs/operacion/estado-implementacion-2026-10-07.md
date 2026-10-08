@@ -59,6 +59,13 @@ como origen de datos, aplicar la fórmula de manifiesto y publicar la app.
 La fórmula, el caso inicial con `D01.pdf` y los criterios de aceptación están
 en [`prueba-e2e-lotes-masivos.md`](prueba-e2e-lotes-masivos.md).
 
+La lectura de `_autotasacion_lote_<ID_LOTE>.json` recibió inicialmente el
+cuerpo binario de OneDrive en `ParseJson`. La definición fue corregida para
+decodificar `body.$content` con `base64ToString` antes de convertirlo a JSON y
+se publicó en los flujos de carga y entrega. La prueba de un PDF aún requiere
+una nueva ejecución efectiva de `auto-tasacion-cargar-lotes`: el lote observado
+permanece en `RECIBIDO`, por lo que no se aprobó ni se invocó la entrega.
+
 La actualización automática de la Canvas App no se pudo empaquetar desde PAC:
 la exportación de la solución `autoTasacion` falla por falta de lectura sobre un
 flujo heredado de otro propietario. El bloqueo afecta la exportación de la

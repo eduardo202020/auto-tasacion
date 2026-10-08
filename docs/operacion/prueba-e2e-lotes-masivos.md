@@ -98,6 +98,19 @@ completo.
 - El Excel conserva sus tres hojas y el contrato de `tblParaProcesar`.
 - El archivo de control se elimina solo después de crear y confirmar el Excel.
 
+## Ejecución de regresión: lectura del control
+
+El 7 de octubre de 2026 se observó que `Leer control lote` recibía
+`application/octet-stream` desde `GetFileContentByPath`. La definición de ambos
+flujos fue corregida y publicada para convertir `body.$content` de Base64 a
+JSON antes de `ParseJson`.
+
+La verificación de la definición publicada confirmó la nueva expresión en
+`auto-tasacion-cargar-lotes` y `auto-tasacion-entregar-lote`. El lote de un PDF
+usado para la prueba se mantuvo en `RECIBIDO` con el archivo `PENDIENTE`, sin
+iniciar el Job durante la ventana observada de recurrencia. Por ello esta prueba
+no aprueba todavía la ruta E2E y no se solicitó la entrega del XLSX.
+
 ## Prueba de capacidad
 
 Una vez aprobado el caso de un PDF, repetir con 10, 150 y hasta 300 PDFs. El
