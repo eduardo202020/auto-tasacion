@@ -50,10 +50,10 @@ class ControlFileParseDefinitionTests(unittest.TestCase):
 
 class ConsultarLoteDefinitionTests(unittest.TestCase):
     def setUp(self):
-        script = SCRIPT.read_text(encoding="utf-8")
-        start = script.index("'auto-tasacion-consultar-lote'")
-        end = script.index("'auto-tasacion-cargar-lotes'", start)
-        self.definition = script[start:end]
+        self.script = SCRIPT.read_text(encoding="utf-8")
+        start = self.script.index("'auto-tasacion-consultar-lote'")
+        end = self.script.index("'auto-tasacion-cargar-lotes'", start)
+        self.definition = self.script[start:end]
 
     def test_queries_the_batch_status_endpoint_with_the_power_apps_lot_id(self):
         self.assertIn(
@@ -71,6 +71,9 @@ class ConsultarLoteDefinitionTests(unittest.TestCase):
             "pdfs_procesados": "integer",
             "pdfs_fallidos": "integer",
             "resultado_disponible": "boolean",
+            "fecha_inicio": "string",
+            "fecha_fin": "string",
+            "duracion_segundos": "integer",
         }
         for field, field_type in fields.items():
             self.assertIn(
@@ -80,6 +83,16 @@ class ConsultarLoteDefinitionTests(unittest.TestCase):
             self.assertIn(f"{field} = [ordered]@{{", self.definition)
             self.assertIn(f"type = '{field_type}'", self.definition)
         self.assertNotIn("estadojson", self.definition)
+
+    def test_start_flow_returns_the_persisted_start_timestamp(self):
+        start = self.script.index("'auto-tasacion-iniciar-lote'")
+        end = self.script.index("'auto-tasacion-consultar-lote'", start)
+        definition = self.script[start:end]
+        self.assertIn(
+            'fecha_inicio = "@{body(\'HTTP_Registrar_Lote\')?[\'fecha_inicio\']}"',
+            definition,
+        )
+        self.assertIn("fecha_inicio = [ordered]@{", definition)
 
     def test_does_not_return_file_metadata_or_transfer_secrets_to_power_apps(self):
         for forbidden in ("archivos", "url_carga", "url_descarga", "objeto_gcs"):
@@ -91,22 +104,43 @@ class CanvasPollingGuideTests(unittest.TestCase):
         self.guide = POLLING_GUIDE.read_text(encoding="utf-8")
 
     def test_uses_the_typed_query_contract_and_ten_second_timer(self):
-        self.assertIn("`Button5`", self.guide)
+        self.assertIn("`Button5.OnSelect`", self.guide)
         self.assertIn("'auto-tasacion-iniciar-lote'.Run(", self.guide)
         self.assertIn("'auto-tasacion-consultar-lote'.Run(varIdLote)", self.guide)
-        self.assertIn("| `Duration` | `10000` |", self.guide)
+        self.assertIn("`Duration = 10000`", self.guide)
+        for field in ("fecha_inicio", "fecha_fin", "duracion_segundos"):
+            self.assertIn(field, self.guide)
         self.assertNotIn("estadojson", self.guide)
 
     def test_stops_only_after_delivery_or_a_real_terminal_failure(self):
         self.assertIn('varEstadoLote = "ENTREGADO"', self.guide)
         self.assertIn('varEstadoLote = "FALLIDO"', self.guide)
         self.assertIn('varEstadoLote = "FALLIDO_ORIGEN_CAMBIO"', self.guide)
-        self.assertIn("`COMPLETADO` no detiene\nel temporizador", self.guide)
+        self.assertIn("`COMPLETADO` no detiene el polling", self.guide)
 
     def test_keeps_the_lot_id_on_a_transient_query_error(self):
         self.assertIn("IfError(", self.guide)
         self.assertIn("varErrorConsultaReportado", self.guide)
-        self.assertIn("Set(varIdLote; varLote.id_lote);;", self.guide)
+        self.assertIn("Conserva el último estado ante", self.guide)
+        self.assertIn("Set(varMonitorearLote; false)", self.guide)
+        self.assertIn("`btnReanudarLote`", self.guide)
+        self.assertIn("Set(varIdLote; Trim(txtIdLote.Text));;", self.guide)
+
+    def test_documents_a_visual_only_timer_and_all_step_states(self):
+        self.assertIn("`tmrVistaLote`", self.guide)
+        self.assertIn("`Duration` | `750`", self.guide)
+        self.assertIn("Set(varBlinkPasoActivo; !varBlinkPasoActivo)", self.guide)
+        for state in (
+            "RECIBIDO",
+            "CARGANDO_PDFS",
+            "LISTO_PARA_PROCESAR",
+            "EN_PROCESO",
+            "COMPLETADO",
+            "ENTREGADO",
+            "FALLIDO",
+            "FALLIDO_ORIGEN_CAMBIO",
+        ):
+            self.assertIn(f'"{state}"', self.guide)
 
 
 if __name__ == "__main__":

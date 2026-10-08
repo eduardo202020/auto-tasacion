@@ -3,6 +3,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import fitz
 from flask import Flask, request
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from batch_api import BatchControlApi, handle_request
 from batch_lotes import (
     BATCH_COMPLETED,
+    BATCH_DELIVERED,
     BATCH_FAILED,
     BATCH_PROCESSING,
     BATCH_READY,
@@ -24,6 +26,7 @@ from batch_lotes import (
     InMemoryBatchStore,
     build_manifest,
     manifest_idempotency_key,
+    public_batch_status,
     update_manifest,
 )
 from batch_worker import process_batch_gcs
@@ -129,6 +132,21 @@ class BatchManifestTests(unittest.TestCase):
         self.assertNotEqual(first["clave_idempotencia"], changed["clave_idempotencia"])
         self.assertNotIn("drive_id", first)
 
+    def test_records_an_immutable_start_timestamp_when_the_batch_is_registered(self):
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:00:00Z"):
+            manifest = build_manifest(payload([file_item(1)]))
+
+        self.assertEqual(manifest["fecha_inicio"], "2026-10-08T12:00:00Z")
+        self.assertEqual(manifest["fecha_fin"], "")
+
+    def test_initial_validation_failure_has_a_finished_lifecycle(self):
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:00:00Z"):
+            manifest = build_manifest(payload([file_item(1, size=MAX_PDF_BYTES + 1)]))
+
+        self.assertEqual(manifest["estado"], BATCH_FAILED)
+        self.assertEqual(manifest["fecha_inicio"], "2026-10-08T12:00:00Z")
+        self.assertEqual(manifest["fecha_fin"], "2026-10-08T12:00:00Z")
+
 
 class BatchControlApiTests(unittest.TestCase):
     def setUp(self):
@@ -189,6 +207,9 @@ class BatchControlApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         status = response.get_json()
         self.assertEqual(status["estado"], "RECIBIDO")
+        self.assertTrue(status["fecha_inicio"])
+        self.assertEqual(status["fecha_fin"], "")
+        self.assertGreaterEqual(status["duracion_segundos"], 0)
         self.assertEqual(status["archivos"], [{
             "id_archivo": body["archivos"][0]["id_archivo"],
             "item_id": "onedrive-item-1",
@@ -198,6 +219,40 @@ class BatchControlApiTests(unittest.TestCase):
             "estado": "PENDIENTE",
         }])
         self.assertNotIn("objeto_gcs", status["archivos"][0])
+
+    def test_delivery_freezes_the_persisted_duration(self):
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:00:00Z"):
+            manifest, _ = self.api.create_batch(payload([file_item(1)]))
+
+        def mark_delivered(current):
+            current["estado"] = BATCH_DELIVERED
+
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:03:42Z"):
+            update_manifest(self.store, manifest["id_lote"], mark_delivered)
+        delivered = self.store.get(manifest["id_lote"])
+        self.assertEqual(delivered["fecha_fin"], "2026-10-08T12:03:42Z")
+        self.assertEqual(public_batch_status(delivered)["duracion_segundos"], 222)
+
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:10:00Z"):
+            update_manifest(self.store, manifest["id_lote"], lambda _current: None)
+        self.assertEqual(
+            self.store.get(manifest["id_lote"])["fecha_fin"],
+            "2026-10-08T12:03:42Z",
+        )
+
+    def test_failure_freezes_the_persisted_duration(self):
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:00:00Z"):
+            manifest, _ = self.api.create_batch(payload([file_item(1)]))
+
+        def mark_failed(current):
+            current["estado"] = BATCH_FAILED
+            current["mensaje"] = "Fallo de prueba"
+
+        with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:01:15Z"):
+            update_manifest(self.store, manifest["id_lote"], mark_failed)
+        failed = self.store.get(manifest["id_lote"])
+        self.assertEqual(failed["fecha_fin"], "2026-10-08T12:01:15Z")
+        self.assertEqual(public_batch_status(failed)["duracion_segundos"], 75)
 
     def test_http_api_records_and_rejects_oversized_pdf(self):
         app = Flask(__name__)

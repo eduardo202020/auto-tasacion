@@ -73,13 +73,20 @@ solamente:
 
 ```text
 id_lote, estado, mensaje, total_pdfs, pdfs_cargados,
-pdfs_procesados, pdfs_fallidos, resultado_disponible
+pdfs_procesados, pdfs_fallidos, resultado_disponible, fecha_inicio,
+fecha_fin, duracion_segundos
 ```
 
 El arreglo operativo `archivos`, las URLs firmadas, rutas de GCS y el contenido
 documental no se devuelven a la aplicación. `archivos` queda disponible solo
 para `auto-tasacion-cargar-lotes`, que lo necesita para localizar PDFs
 `PENDIENTE`.
+
+`fecha_inicio` se registra al crear el manifiesto. `fecha_fin` se fija una sola
+vez cuando el lote llega a `ENTREGADO`, `FALLIDO` o
+`FALLIDO_ORIGEN_CAMBIO`. Ambas fechas son ISO-8601 en UTC.
+`duracion_segundos` se calcula a partir de esas marcas; mientras el lote sigue
+activo usa el reloj UTC del servicio y, al terminar, queda congelada.
 
 ## Power Apps
 
@@ -94,6 +101,11 @@ propiedades y fórmulas exactas para `Button5`, `tmrEstadoLote` y `Label3`, est�
 en [`canvas/autoTasacionJG/POLLING.md`](canvas/autoTasacionJG/POLLING.md).
 El temporizador continúa durante `COMPLETADO` y se detiene únicamente en
 `ENTREGADO`, `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`.
+
+La misma guía incorpora `galPasosLote`, que traduce los estados técnicos a
+cinco pasos para el operador, y `tmrVistaLote`, un temporizador local de 750 ms
+para el pulso visual y el contador. Este segundo Timer no invoca flujos ni
+modifica el lote.
 
 Eliminar de esta ruta `ControlAdjuntos`, **Cargar Zip**, `contentBytes` y
 `varZipSubido`. La consulta de estado debe usar temporizador y el `ID_LOTE`.

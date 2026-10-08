@@ -16,12 +16,14 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. |
 | F10 | OCR de campo por perfil técnico | Implementado | Braschi recorta celdas técnicas solo ante evidencia y ambigüedad controlada. |
 | F11 | Registro de lote de PDFs | Implementado y desplegado | POST /v1/lotes valida manifiesto, limites e idempotencia y devuelve un ID_LOTE sin contenido documental. |
-| F12 | Ingesta OneDrive a GCS por PDF | Implementado y flujo publicado; E2E pendiente | La API emite ticket por PDF y auto-tasacion-cargar-lotes lo usa para cargar y confirmar cada archivo. |
+| F12 | Ingesta OneDrive a GCS por PDF | Implementado y E2E confirmado | La API emite ticket por PDF y auto-tasacion-cargar-lotes lo usa para cargar y confirmar cada archivo. |
 | F13 | Procesamiento asíncrono desde PDFs individuales | Implementado y desplegado | tasaciones-batch procesa objetos CARGADO, uno por iteracion, y conserva el XLSX contractual. |
-| F14 | Estado y entrega diferida | Implementado y flujo publicado; E2E pendiente | La API expone progreso y resultado; auto-tasacion-entregar-lote crea el XLSX final en OneDrive. |
+| F14 | Estado y entrega diferida | Implementado y E2E confirmado | La API expone progreso y resultado; auto-tasacion-entregar-lote crea el XLSX final en OneDrive. |
 | F15 | Integridad e idempotencia por manifiesto | Implementado localmente | SHA-256 de carpeta + `itemId:eTag`, validación eTag antes/después y verificación de tamaño en GCS. |
-| F16 | Ejecucion desde Power Apps | Pendiente de publicacion | La app lista y selecciona PDFs; falta enlazar Ejecutar con auto-tasacion-iniciar-lote. |
-| F17 | Prueba E2E de lote masivo | Pendiente | Ejecutar primero un PDF y luego lotes de 10, 150 y 300 archivos con evidencia en OneDrive y Cloud Run. |
+| F16 | Ejecucion desde Power Apps | Implementado y E2E confirmado | La app lista, selecciona PDFs, registra el lote y hace polling hasta `ENTREGADO`. |
+| F17 | Prueba E2E de lote masivo | E2E de un PDF confirmado | La ruta llego a Excel y entrega; faltan pruebas de capacidad con 10, 150 y 300 archivos. |
+| F18 | Stepper visual del lote | Implementado en fuente; pendiente de publicacion Canvas | `POLLING.md` define cinco pasos, colores de avance/error y un Timer visual sin llamadas adicionales. |
+| F19 | Tiempo persistente de lote | Implementado en fuente; pendiente de despliegue | El manifiesto guarda inicio y fin inmutables; consulta tipada expone fechas y segundos. |
 
 ## Ciclo de alta seguro
 

@@ -1,6 +1,6 @@
-﻿# Estado de implementación: Auto Tasación
+# Estado de implementación: Auto Tasación
 
-> **Corte:** 7 de octubre de 2026
+> **Corte:** 8 de octubre de 2026
 
 ## Flujo objetivo
 
@@ -39,29 +39,32 @@ PDFs `PENDIENTE`. Esa corrección resolvió el error en el que
 | --- | --- | --- |
 | `auto-tasacion-listar-pdfs` | Publicado | Lista PDFs de `/auto-tasaciones/PDFs`. |
 | `auto-tasacion-iniciar-lote` | Publicado | Registra el manifiesto y crea el control del lote. |
-| `auto-tasacion-consultar-lote` | Publicado | Devuelve el estado y conteos tipados a Power Apps. |
+| `auto-tasacion-consultar-lote` | Publicado; ampliación pendiente de despliegue | Devuelve estado y conteos; la fuente ahora agrega tiempo tipado. |
 | `auto-tasacion-cargar-lotes` | Publicado | Cada cinco minutos transfiere PDFs y arranca el Job. |
 | `auto-tasacion-entregar-lote` | Publicado | Cada cinco minutos entrega el XLSX. |
 
 La definición reproducible está en
 [`power-platform/scripts/deploy-mass-flows.ps1`](../../power-platform/scripts/deploy-mass-flows.ps1).
 La respuesta de `auto-tasacion-consultar-lote` no devuelve `archivos`, URLs
-firmadas ni rutas GCS a Power Apps; expone solo ID, estado, mensaje y conteos.
+firmadas ni rutas GCS a Power Apps; expone ID, estado, mensaje, conteos y,
+tras el siguiente despliegue, `fecha_inicio`, `fecha_fin` y
+`duracion_segundos`.
 
 ### Power Apps
 
-La fuente descargada de `autoTasacionJG` confirma que `Button5` es el botón
-visible **Ejecutar**, `Label3` presenta `varEstadoLote` y `btnActualizar`
-conserva la actualización de `colPdfs`. La causa del estado congelado en
-`RECIBIDO` era que no había un Timer ni conexión al flujo
-`auto-tasacion-consultar-lote`.
+La aplicación `autoTasacionJG` ya consulta el lote y se comprobó
+manualmente que llega a `varEstadoLote = "ENTREGADO"` y deja
+`varMonitorearLote = false`. `Button5` es el botón visible **Ejecutar**,
+`Label3` presenta `varEstadoLote` y `btnActualizar` conserva la actualización
+de `colPdfs`.
 
 Las fórmulas y propiedades exactas para completar la aplicación están en
 [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md). El
 Timer consulta cada 10 segundos, conserva el último estado frente a un error
 transitorio y se detiene únicamente en `ENTREGADO`, `FALLIDO` o
 `FALLIDO_ORIGEN_CAMBIO`. `COMPLETADO` sigue en seguimiento hasta que la entrega
-del XLSX confirme `ENTREGADO`.
+del XLSX confirme `ENTREGADO`. La revisión actual agrega el stepper, el Timer
+visual de 750 ms y el contador reconstruible desde fechas persistidas.
 
 ## Limitación de publicación de la Canvas App
 
@@ -69,29 +72,33 @@ La CLI permite descargar, desempaquetar y empaquetar la aplicación, pero no
 actualizar ni publicar una Canvas App existente. Además, la exportación de la
 solución corporativa `autoTasacion` está bloqueada por permisos de lectura sobre
 un flujo heredado de otro propietario. Por eso el paso pendiente es aplicar el
-documento `POLLING.md` en Power Apps Studio y publicar la aplicación. No afecta
-los flujos masivos ni el procesamiento de Google Cloud.
+documento `POLLING.md` en Power Apps Studio y publicar la aplicación. Los
+cambios de contrato de esta revisión también requieren desplegar el servicio y
+regenerar los flujos antes de actualizar el origen de datos de la app. No afecta
+la recurrencia de los flujos masivos ni el procesamiento de Google Cloud.
 
 ## Validaciones del repositorio
 
 | Validación | Resultado |
 | --- | --- |
-| Suite del servicio Cloud Run | 61 de 61 pruebas correctas en la última validación completa. |
+| Suite del servicio Cloud Run | 65 de 65 pruebas correctas en la validacion local del 8 de octubre de 2026. |
 | Catálogo de perfiles y tasadoras | Correcto. |
 | Compilación Python | Correcta. |
-| Definiciones de flujos masivos | Prueban lectura de controles y contrato tipado de consulta. |
+| Definiciones de flujos masivos | 11 de 11 pruebas correctas: control JSON, contrato tipado, stepper y Timer visual documentados. |
 | Sintaxis de `deploy-mass-flows.ps1` | Correcta. |
 
 ## Próxima validación de interfaz
 
 1. En Studio, agregar `auto-tasacion-iniciar-lote` y
    `auto-tasacion-consultar-lote` como orígenes de datos de `autoTasacionJG`.
-2. Aplicar `POLLING.md` a `Button5`, al nuevo `tmrEstadoLote`, `Label3` y la
-   etiqueta de progreso, y publicar la aplicación.
-3. Con solo `D01.pdf`, seleccionar, pulsar **Ejecutar** y observar sin acciones
+2. Desplegar el servicio y regenerar los flujos para publicar `fecha_inicio`,
+   `fecha_fin` y `duracion_segundos`.
+3. Aplicar `POLLING.md` a `Button5`, `tmrEstadoLote`, `tmrVistaLote`, la
+   galería de pasos y las etiquetas, y publicar la aplicación.
+4. Con dos PDFs, seleccionar, pulsar **Ejecutar** y observar sin acciones
    manuales `RECIBIDO` → estados intermedios → `COMPLETADO` → `ENTREGADO`.
-4. Confirmar que el Excel aparece en `/auto-tasaciones` y que el Timer deja de
-   consultar al llegar a `ENTREGADO`.
+5. Confirmar que el Excel aparece en `/auto-tasaciones`, que el Timer deja de
+   consultar al llegar a `ENTREGADO` y que el tiempo queda fijo.
 
 ## Límites y seguridad
 

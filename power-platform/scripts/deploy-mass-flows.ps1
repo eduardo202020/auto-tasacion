@@ -273,12 +273,14 @@ function New-FlowDefinition {
                         body = [ordered]@{
                             id_lote = "@{body('HTTP_Registrar_Lote')?['id_lote']}"
                             estado = "@{body('HTTP_Registrar_Lote')?['estado']}"
+                            fecha_inicio = "@{body('HTTP_Registrar_Lote')?['fecha_inicio']}"
                         }
                         schema = [ordered]@{
                             type = 'object'
                             properties = [ordered]@{
                                 id_lote = [ordered]@{ title = 'IdLote'; 'x-ms-dynamically-added' = $true; type = 'string' }
                                 estado = [ordered]@{ title = 'Estado'; 'x-ms-dynamically-added' = $true; type = 'string' }
+                                fecha_inicio = [ordered]@{ title = 'FechaInicio'; 'x-ms-dynamically-added' = $true; type = 'string' }
                             }
                         }
                     }
@@ -306,6 +308,9 @@ function New-FlowDefinition {
                             pdfs_procesados = "@body('HTTP_Consultar_Lote')?['pdfs_procesados']"
                             pdfs_fallidos = "@body('HTTP_Consultar_Lote')?['pdfs_fallidos']"
                             resultado_disponible = "@body('HTTP_Consultar_Lote')?['resultado_disponible']"
+                            fecha_inicio = "@body('HTTP_Consultar_Lote')?['fecha_inicio']"
+                            fecha_fin = "@body('HTTP_Consultar_Lote')?['fecha_fin']"
+                            duracion_segundos = "@body('HTTP_Consultar_Lote')?['duracion_segundos']"
                         }
                         schema = [ordered]@{
                             type = 'object'
@@ -318,8 +323,11 @@ function New-FlowDefinition {
                                 pdfs_procesados = [ordered]@{ title = 'PdfsProcesados'; 'x-ms-dynamically-added' = $true; type = 'integer' }
                                 pdfs_fallidos = [ordered]@{ title = 'PdfsFallidos'; 'x-ms-dynamically-added' = $true; type = 'integer' }
                                 resultado_disponible = [ordered]@{ title = 'ResultadoDisponible'; 'x-ms-dynamically-added' = $true; type = 'boolean' }
+                                fecha_inicio = [ordered]@{ title = 'FechaInicio'; 'x-ms-dynamically-added' = $true; type = 'string' }
+                                fecha_fin = [ordered]@{ title = 'FechaFin'; 'x-ms-dynamically-added' = $true; type = 'string' }
+                                duracion_segundos = [ordered]@{ title = 'DuracionSegundos'; 'x-ms-dynamically-added' = $true; type = 'integer' }
                             }
-                            required = @('id_lote', 'estado', 'total_pdfs', 'pdfs_cargados', 'pdfs_procesados', 'pdfs_fallidos', 'resultado_disponible')
+                            required = @('id_lote', 'estado', 'total_pdfs', 'pdfs_cargados', 'pdfs_procesados', 'pdfs_fallidos', 'resultado_disponible', 'fecha_inicio', 'fecha_fin', 'duracion_segundos')
                         }
                     }
                 }

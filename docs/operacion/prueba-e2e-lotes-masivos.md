@@ -1,4 +1,4 @@
-﻿# Prueba E2E: lotes masivos de tasaciones
+# Prueba E2E: lotes masivos de tasaciones
 
 ## Propósito
 
@@ -17,8 +17,10 @@ Power Apps -> iniciar lote -> control de OneDrive -> cargar lotes
 
 El Excel se creó en `/auto-tasaciones` y el control
 `_autotasacion_lote_<ID_LOTE>.json` se eliminó tras confirmar la entrega. Esto
-valida la ruta de procesamiento. La validación pendiente es exclusivamente la
-actualización automática que muestra la Canvas App durante ese proceso.
+valida la ruta de procesamiento. También se observó manualmente que la
+Canvas App llega a `ENTREGADO` y deja `varMonitorearLote` en `false`. El
+stepper y el contador de esta versión requieren desplegar el contrato ampliado
+y aplicar la guía de Studio antes de validarlos en el entorno.
 
 ## Precondiciones para la prueba de interfaz
 
@@ -26,7 +28,8 @@ actualización automática que muestra la Canvas App durante ese proceso.
    [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md) en
    `autoTasacionJG`.
 2. Ejecutar `deploy-mass-flows.ps1 -Activate`, que publica
-   `auto-tasacion-consultar-lote` con su contrato tipado.
+   `auto-tasacion-consultar-lote` con su contrato tipado, incluidos
+   `fecha_inicio`, `fecha_fin` y `duracion_segundos`.
 3. Confirmar que el origen de datos de la app contiene
    `auto-tasacion-listar-pdfs`, `auto-tasacion-iniciar-lote` y
    `auto-tasacion-consultar-lote`.
@@ -49,20 +52,51 @@ ningún PDF se transmite por la aplicación.
    `ENTREGADO`.
 8. Verificar `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` y comprobar sus
    hojas `PARA_PROCESAR`, `REVISION_IA` y `CONTROL`.
-9. Confirmar que el Timer deja de consultar después de `ENTREGADO`.
+9. Confirmar que el Timer deja de consultar después de `ENTREGADO`, todos los
+   pasos quedan verdes y `lblTiempoLote` queda fijo.
 
 El mismo caso debe conservar el último estado e ID conocido si una consulta
 puntual falla. Una advertencia de conectividad no equivale a un estado real
 `FALLIDO`.
 
+## Casos adicionales de interfaz
+
+### Dos PDFs
+
+1. Seleccionar dos PDFs distintos y ejecutar un lote.
+2. Verificar que `CARGANDO_PDFS` muestra `pdfs_cargados / total_pdfs` y que
+   `EN_PROCESO` muestra `pdfs_procesados / total_pdfs`.
+3. Confirmar que el paso activo pulsa, los anteriores son verdes y los futuros
+   grises hasta la entrega.
+
+### Fallo terminal simulado
+
+Con un manifiesto sintético o un entorno de prueba, forzar `FALLIDO` y luego
+`FALLIDO_ORIGEN_CAMBIO`. Confirmar que el paso 3 o 2 respectivamente se muestra
+rojo, aparece el mensaje seguro del lote, el tiempo queda congelado y
+`varMonitorearLote` queda en `false`.
+
+### Reapertura
+
+Conservar un `id_lote` conocido, volver a abrir la app e ingresarlo en
+`txtIdLote`; pulsar `btnReanudarLote`. Confirmar que `fecha_inicio` y
+`fecha_fin` reconstruyen el tiempo total sin usar datos de la sesión anterior.
+No se crea un flujo de historial: el ID proviene del mensaje de registro o del
+nombre del Excel entregado.
+
 ## Criterios de aceptación
 
 - `auto-tasacion-consultar-lote` llama a `GET /v1/lotes/{id_lote}` y responde
   a la app los campos tipados `id_lote`, `estado`, `mensaje`, `total_pdfs`,
-  `pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos` y
-  `resultado_disponible`.
+  `pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos`,
+  `resultado_disponible`, `fecha_inicio`, `fecha_fin` y
+  `duracion_segundos`.
 - La app conserva el ID del lote, actualiza la etiqueta sin intervención del
-  operador y muestra progreso real cuando el API lo informa.
+  operador y muestra progreso real cuando el API lo informa. El stepper
+  muestra los pasos terminados en verde, el activo pulsando en verde, los
+  pendientes en gris y el fallo en rojo.
+- El contador usa `fecha_inicio` y `fecha_fin`; avanza mientras no hay fecha de
+  fin y queda congelado al terminar.
 - `COMPLETADO` no detiene el seguimiento; este se detiene solo en `ENTREGADO`,
   `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`.
 - El Excel final se crea una sola vez y el control se elimina solo después de

@@ -1,10 +1,10 @@
 # Flujo Power Platform para lotes masivos de PDFs
 
-> **Estado al 7 de octubre de 2026:** la ruta OneDrive → Cloud Run Job → Excel
-> ya completó una prueba con un PDF. El siguiente cambio publicado habilita el
-> contrato tipado de consulta. La fórmula de seguimiento de la Canvas App debe
-> aplicarse y publicarse desde Power Apps Studio según
-> [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md).
+> **Estado al 8 de octubre de 2026:** la ruta OneDrive → Cloud Run Job → Excel
+> ya completó una prueba E2E y la Canvas App consulta el estado hasta
+> `ENTREGADO`. La extensión de seguimiento visual y tiempo está versionada en
+> [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md) y debe
+> aplicarse y publicarse desde Power Apps Studio junto con el nuevo contrato.
 
 ## Decisión
 
@@ -65,8 +65,9 @@ Recibe la selección de la app, vuelve a consultar metadatos y envía a
 }
 ```
 
-Responde de inmediato con `id_lote`, estado y conteos. No obtiene contenido de
-ningún PDF y no espera la transferencia ni el procesamiento.
+Responde de inmediato con `id_lote`, estado y `fecha_inicio`. No obtiene
+contenido de ningún PDF y no espera la transferencia ni el procesamiento.
+`fecha_inicio` queda persistida en el manifiesto y no cambia con las consultas.
 
 ### 3. `auto-tasacion-cargar-lotes`
 
@@ -90,9 +91,13 @@ Consulta `GET /v1/lotes/{id_lote}`. El backend incluye el arreglo `archivos`
 para que `auto-tasacion-cargar-lotes` pueda localizar registros `PENDIENTE`,
 pero la respuesta del flujo hacia Power Apps se limita a campos tipados y
 seguros: `id_lote`, `estado`, `mensaje`, `total_pdfs`, `pdfs_cargados`,
-`pdfs_procesados`, `pdfs_fallidos` y `resultado_disponible`. No devuelve
-contenido de PDF, rutas GCS, URLs firmadas ni metadatos por archivo a la
-aplicación.
+`pdfs_procesados`, `pdfs_fallidos`, `resultado_disponible`, `fecha_inicio`,
+`fecha_fin` y `duracion_segundos`. No devuelve contenido de PDF, rutas GCS,
+URLs firmadas ni metadatos por archivo a la aplicación.
+
+`fecha_fin` se persiste una sola vez en los estados terminales `ENTREGADO`,
+`FALLIDO` y `FALLIDO_ORIGEN_CAMBIO`. La duración se deriva de las dos fechas,
+por lo que puede reconstruirse al volver a consultar el ID del lote.
 
 Power Apps lo llama mediante un temporizador cada 10 segundos mientras el lote
 está activo; no mantiene una solicitud abierta durante el Job. El temporizador
@@ -118,7 +123,9 @@ La pantalla nueva contiene:
 | `btnSeleccionarTodos` | Selecciona o limpia los PDFs de la galería. |
 | `Button5` (**Ejecutar**) | Registra el manifiesto seleccionado y comienza el seguimiento. |
 | `tmrEstadoLote` | Consulta el lote cada 10 segundos mientras está activo. |
-| `Label3` e indicador de progreso | Muestran `ID_LOTE`, estado y conteos actuales. |
+| `galPasosLote` | Muestra los cinco pasos, su avance y el paso con error. |
+| `tmrVistaLote` | Alterna el pulso del paso activo y actualiza el contador local, sin llamar flujos. |
+| `Label3`, `lblProgresoLote`, `lblTiempoLote` | Muestran estado amigable, conteos y tiempo transcurrido o total. |
 
 La fuente descargada de `autoTasacionJG` no se puede actualizar ni publicar con
 la CLI disponible y la exportación de la solución corporativa está bloqueada por
@@ -149,6 +156,11 @@ Lote: `RECIBIDO`, `CARGANDO_PDFS`, `LISTO_PARA_PROCESAR`, `EN_PROCESO`,
 
 Archivo: `PENDIENTE`, `SUBIENDO`, `CARGADO`, `FALLIDO`,
 `FALLIDO_ORIGEN_CAMBIO`.
+
+La Canvas App los traduce a: **Lote recibido**, **Cargando documentos**,
+**Procesando tasaciones**, **Resultado generado** y **Entregado**. Los pasos
+terminados son verdes, el activo pulsa en verde, los pendientes son grises y
+el paso asociado a un estado terminal de error es rojo.
 
 ## Límites
 

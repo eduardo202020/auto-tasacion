@@ -42,6 +42,14 @@ Descarga solamente un PDF confirmado por iteración y genera
 `Resultado_Final_<ID_LOTE>.xlsx` en GCS. No usa ZIP masivo, GCS FUSE ni
 Microsoft Graph.
 
+### Estado y tiempo del lote
+
+El manifiesto conserva `fecha_inicio` desde su registro. `fecha_fin` se fija
+una sola vez si el lote queda `ENTREGADO`, `FALLIDO` o
+`FALLIDO_ORIGEN_CAMBIO`. `GET /v1/lotes/{id_lote}` devuelve estas fechas en
+ISO-8601 UTC y `duracion_segundos`; durante la ejecución la duración se
+calcula contra el reloj UTC y al terminar queda fija.
+
 ## Pruebas locales
 
 ```bash

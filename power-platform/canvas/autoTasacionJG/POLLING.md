@@ -1,38 +1,77 @@
-# Seguimiento automático de lote en `autoTasacionJG`
+# Seguimiento visual y tiempo de lote en `autoTasacionJG`
 
-## Estado de la fuente de la aplicación
+## Alcance y fuente de verdad
 
-La fuente descargada el 7 de octubre de 2026 con `pac canvas download` muestra
-que la aplicación tiene `Button5` como botón visible **Ejecutar**, `Label3`
-como etiqueta de estado y `btnActualizar` para listar los PDFs. `Label3` ya
-usa `varEstadoLote`, pero no había temporizador ni conexión a
-`auto-tasacion-iniciar-lote` o `auto-tasacion-consultar-lote`; por ello el
-estado inicial no se volvía a consultar.
+La ruta masiva ya conserva el estado técnico del lote y la aplicación consulta
+`auto-tasacion-consultar-lote` periódicamente. Esta guía extiende esa consulta:
+no agrega flujos, no cambia las recurrencias y no envía contenido de PDF a
+Power Apps.
 
-La CLI permite descargar y empaquetar una Canvas App, pero no actualizar ni
-publicar una aplicación existente. La exportación de la solución corporativa
-`autoTasacion` sigue bloqueada por permisos de lectura sobre un flujo heredado.
-Por eso estos cambios se aplican en Power Apps Studio, después de publicar los
-dos flujos desde `scripts/deploy-mass-flows.ps1`.
+Los cambios de backend persisten `fecha_inicio` al registrar el lote y
+`fecha_fin` una sola vez cuando alcanza `ENTREGADO`, `FALLIDO` o
+`FALLIDO_ORIGEN_CAMBIO`. La respuesta tipada de consulta contiene además
+`duracion_segundos`.
 
-No modifiques `btnActualizar`: continúa dedicado a actualizar `colPdfs`.
+La CLI disponible no puede actualizar ni publicar una Canvas App existente.
+Por ello las propiedades de esta guía se aplican en Power Apps Studio y deben
+publicarse allí. Usa el Timer de polling existente; en la guía anterior se
+llama `tmrEstadoLote`. Si su nombre difiere en Studio, aplica las propiedades
+al control que ya invoca `auto-tasacion-consultar-lote`.
 
-## Orígenes de datos
+Las fórmulas usan `;` para argumentos y `;;` para encadenar acciones, que es
+la sintaxis de la aplicación con locale `es-ES`.
 
-En **Datos**, agrega los flujos publicados:
+## Contrato y estados
 
-1. `auto-tasacion-iniciar-lote`.
-2. `auto-tasacion-consultar-lote`.
+Power Apps recibe estos campos sin rutas GCS, archivos ni URLs firmadas:
 
-Conserva `auto-tasacion-listar-pdfs`. Al agregar el segundo flujo, Power Apps
-recibe sus propiedades tipadas: `id_lote`, `estado`, `mensaje`, `total_pdfs`,
-`pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos` y
-`resultado_disponible`.
+```text
+id_lote, estado, mensaje, total_pdfs, pdfs_cargados, pdfs_procesados,
+pdfs_fallidos, resultado_disponible, fecha_inicio, fecha_fin,
+duracion_segundos
+```
 
-Las fórmulas siguientes usan `;` como separador de argumentos y `;;` para
-encadenar acciones, correspondiente al locale `es-ES` de la aplicación.
+| Estado técnico | Paso visible | Tratamiento |
+| --- | --- | --- |
+| `RECIBIDO` | Lote recibido | Paso activo 1. |
+| `CARGANDO_PDFS` | Cargando documentos | Paso activo 2. |
+| `LISTO_PARA_PROCESAR`, `EN_PROCESO` | Procesando tasaciones | Paso activo 3. |
+| `COMPLETADO` | Resultado generado | Paso activo 4; la entrega sigue pendiente. |
+| `ENTREGADO` | Entregado | Los cinco pasos quedan completados. |
+| `FALLIDO_ORIGEN_CAMBIO` | Cargando documentos | Paso 2 en rojo. |
+| `FALLIDO` | Cargando documentos o Procesando tasaciones | Rojo en el paso 2 si aún faltaban cargas; de otro modo en el paso 3. |
 
-## `Button5` — propiedad `OnSelect`
+## Inicialización de pantalla
+
+En `Screen1.OnVisible`, **agrega** estas acciones al final de la fórmula actual;
+no reemplaces la lógica que lista PDFs:
+
+```powerfx
+ClearCollect(
+    colPasosLote;
+    Table(
+        {Orden: 1; Texto: "Lote recibido"};
+        {Orden: 2; Texto: "Cargando documentos"};
+        {Orden: 3; Texto: "Procesando tasaciones"};
+        {Orden: 4; Texto: "Resultado generado"};
+        {Orden: 5; Texto: "Entregado"}
+    )
+);;
+Set(varPasoActivo; 0);;
+Set(varPasoError; Blank());;
+Set(varBlinkPasoActivo; true);;
+Set(varInicioProceso; Blank());;
+Set(varFinProceso; Blank());;
+Set(varAhoraProceso; Now())
+```
+
+Conserva `btnActualizar` exclusivamente para actualizar `colPdfs`.
+
+## Boton **Ejecutar** (`Button5.OnSelect`)
+
+Reemplaza la propiedad `OnSelect` por esta formula. Mantiene la seleccion
+multiple existente, crea solo el manifiesto y deja la transferencia de cada PDF
+al flujo programado.
 
 ```powerfx
 If(
@@ -60,7 +99,7 @@ If(
     );;
     If(
         IsBlank(varLote.id_lote);
-        Notify("No se pudo registrar el lote. Inténtelo nuevamente."; NotificationType.Error);
+        Notify("No se pudo registrar el lote. Intentelo nuevamente."; NotificationType.Error);
         Set(varIdLote; varLote.id_lote);;
         Set(varEstadoLote; varLote.estado);;
         Set(varTotalPdfs; CountRows(Filter(colPdfs; Seleccionado)));;
@@ -69,41 +108,39 @@ If(
         Set(varPdfsFallidos; 0);;
         Set(varMensajeLote; Blank());;
         Set(varResultadoDisponible; false);;
+        Set(varFechaInicioProceso; varLote.fecha_inicio);;
+        Set(varFechaFinProceso; Blank());;
+        Set(varInicioProceso; DateTimeValue(varFechaInicioProceso));;
+        Set(varFinProceso; Blank());;
+        Set(varAhoraProceso; Now());;
+        Set(varDuracionProceso; 0);;
+        Set(varPasoActivo; 1);;
+        Set(varPasoError; Blank());;
+        Set(varBlinkPasoActivo; true);;
         Set(varErrorConsultaReportado; false);;
         Set(varMonitorearLote; true);;
         Notify(
-            "Lote " & varIdLote & " registrado. El seguimiento se actualizará automáticamente.";
+            "Lote " & varIdLote & " registrado. El seguimiento se actualizara automaticamente.";
             NotificationType.Success
         )
     )
 )
 ```
 
-Opcionalmente, en `Button5.DisplayMode` usa esta fórmula para evitar iniciar
-dos lotes mientras uno sigue activo:
+Despues de publicar el flujo actualizado, vuelve a agregar
+`auto-tasacion-iniciar-lote` como origen de datos si `fecha_inicio` no aparece
+en IntelliSense. Si `Button5.DisplayMode` ya evita iniciar dos lotes mientras
+`varMonitorearLote` esta activo, conservalo.
 
-```powerfx
-If(
-    varMonitorearLote || CountRows(Filter(colPdfs; Seleccionado)) = 0;
-    DisplayMode.Disabled;
-    DisplayMode.Edit
-)
-```
+## Timer de polling (`tmrEstadoLote.OnTimerEnd`)
 
-## Nuevo temporizador `tmrEstadoLote`
+Mantén las propiedades de polling existentes: `Duration = 10000`, `Repeat =
+true`, `Start = varMonitorearLote && !IsBlank(varIdLote)`, `Reset =
+!varMonitorearLote` y `Visible = false`.
 
-Inserta un control **Timer** clásico y asígnale estas propiedades:
-
-| Propiedad | Valor |
-| --- | --- |
-| `Duration` | `10000` |
-| `Repeat` | `true` |
-| `AutoStart` | `false` |
-| `Start` | `varMonitorearLote && !IsBlank(varIdLote)` |
-| `Reset` | `!varMonitorearLote` |
-| `Visible` | `false` |
-
-En `tmrEstadoLote.OnTimerEnd` usa:
+Reemplaza `OnTimerEnd` por la fórmula siguiente. Conserva el último estado ante
+un fallo transitorio de consulta y no confunde ese fallo con un estado real
+`FALLIDO`.
 
 ```powerfx
 If(
@@ -124,7 +161,7 @@ If(
                 NotificationType.Warning
             );;
             Set(varErrorConsultaReportado; true)
-        );;
+        );
         Set(varConsultaLote; varConsultaIntento);;
         Set(varEstadoLote; varConsultaLote.estado);;
         Set(varMensajeLote; varConsultaLote.mensaje);;
@@ -133,6 +170,44 @@ If(
         Set(varPdfsProcesados; varConsultaLote.pdfs_procesados);;
         Set(varPdfsFallidos; varConsultaLote.pdfs_fallidos);;
         Set(varResultadoDisponible; varConsultaLote.resultado_disponible);;
+        Set(varFechaInicioProceso; varConsultaLote.fecha_inicio);;
+        Set(varFechaFinProceso; varConsultaLote.fecha_fin);;
+        Set(varInicioProceso; DateTimeValue(varFechaInicioProceso));;
+        Set(
+            varFinProceso;
+            If(
+                IsBlank(varFechaFinProceso);
+                Blank();
+                DateTimeValue(varFechaFinProceso)
+            )
+        );;
+        Set(varDuracionProceso; varConsultaLote.duracion_segundos);;
+        Set(varAhoraProceso; Now());;
+        Set(
+            varPasoActivo;
+            Switch(
+                varEstadoLote;
+                "RECIBIDO"; 1;
+                "CARGANDO_PDFS"; 2;
+                "LISTO_PARA_PROCESAR"; 3;
+                "EN_PROCESO"; 3;
+                "COMPLETADO"; 4;
+                "ENTREGADO"; 5;
+                "FALLIDO_ORIGEN_CAMBIO"; 2;
+                "FALLIDO"; If(varPdfsCargados < varTotalPdfs; 2; 3);
+                0
+            )
+        );;
+        Set(
+            varPasoError;
+            If(
+                varEstadoLote = "FALLIDO_ORIGEN_CAMBIO";
+                2;
+                varEstadoLote = "FALLIDO";
+                If(varPdfsCargados < varTotalPdfs; 2; 3);
+                Blank()
+            )
+        );;
         Set(varErrorConsultaReportado; false);;
         If(
             Or(
@@ -157,36 +232,201 @@ If(
 )
 ```
 
-El error de red no modifica `varIdLote` ni `varEstadoLote`, y se notifica solo
-una vez hasta que una consulta posterior tenga éxito. `COMPLETADO` no detiene
-el temporizador: el monitoreo sigue hasta que el flujo de entrega cambie el
-lote a `ENTREGADO`.
+`COMPLETADO` no detiene el polling: el paso 4 permanece activo hasta que el
+flujo de entrega persista `ENTREGADO` y `fecha_fin`.
 
-## Etiquetas
+## Stepper visual
 
-En `Label3.Text` conserva o aplica:
+Inserta una galería vertical llamada `galPasosLote` y asígnale:
 
-```powerfx
-"Estado: " & Coalesce(varEstadoLote; "Sin iniciar")
-```
+| Propiedad | Valor |
+| --- | --- |
+| `Items` | `colPasosLote` |
+| `TemplateSize` | `52` |
+| `ShowScrollbar` | `false` |
 
-Para mostrar avance, agrega `lblProgresoLote` con esta propiedad `Text`:
+Dentro de la galería inserta un círculo `cirPaso`, un texto `lblIconoPaso` y
+un texto `lblTextoPaso`. Configura:
+
+### `cirPaso.Fill`
 
 ```powerfx
 If(
-    IsBlank(varIdLote);
-    "Progreso: -";
-    "Procesados: " & Text(Coalesce(varPdfsProcesados; 0)) &
-    " / " & Text(Coalesce(varTotalPdfs; 0)) &
-    " | Cargados: " & Text(Coalesce(varPdfsCargados; 0)) &
-    " | Fallidos: " & Text(Coalesce(varPdfsFallidos; 0))
+    ThisItem.Orden = varPasoError;
+    RGBA(196; 49; 75; 1);
+    ThisItem.Orden < varPasoActivo ||
+    (varEstadoLote = "ENTREGADO" && ThisItem.Orden = varPasoActivo);
+    RGBA(16; 124; 16; 1);
+    ThisItem.Orden = varPasoActivo;
+    If(
+        varBlinkPasoActivo;
+        RGBA(16; 124; 16; 1);
+        RGBA(107; 175; 107; 1)
+    );
+    RGBA(166; 166; 166; 1)
 )
 ```
 
-## Publicación y prueba
+### `lblIconoPaso.Text`
 
-Guarda y publica la aplicación desde Power Apps Studio. Prueba con `D01.pdf`:
-la pantalla debe mostrar `RECIBIDO`, consultar cada diez segundos y conservar
-el seguimiento por `CARGANDO_PDFS`, `LISTO_PARA_PROCESAR`, `EN_PROCESO`,
-`COMPLETADO` y finalmente `ENTREGADO`. El temporizador se detiene solamente en
-`ENTREGADO`, `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`.
+```powerfx
+If(
+    ThisItem.Orden = varPasoError;
+    "×";
+    ThisItem.Orden < varPasoActivo ||
+    (varEstadoLote = "ENTREGADO" && ThisItem.Orden = varPasoActivo);
+    "✓";
+    ThisItem.Orden = varPasoActivo;
+    "●";
+    "○"
+)
+```
+
+### `lblTextoPaso.Text`
+
+```powerfx
+ThisItem.Texto
+```
+
+### `lblTextoPaso.Color`
+
+```powerfx
+If(
+    ThisItem.Orden = varPasoError;
+    RGBA(196; 49; 75; 1);
+    ThisItem.Orden <= varPasoActivo;
+    RGBA(32; 32; 32; 1);
+    RGBA(96; 96; 96; 1)
+)
+```
+
+## Timer visual y contador
+
+Inserta un segundo Timer llamado `tmrVistaLote`. No llama flujos ni actualiza
+el lote; solo actualiza la animación y el reloj.
+
+| Propiedad | Valor |
+| --- | --- |
+| `Duration` | `750` |
+| `Repeat` | `true` |
+| `AutoStart` | `false` |
+| `Start` | `!IsBlank(varInicioProceso) && IsBlank(varFinProceso)` |
+| `Reset` | `IsBlank(varInicioProceso) || !IsBlank(varFinProceso)` |
+| `Visible` | `false` |
+| `OnTimerEnd` | `Set(varBlinkPasoActivo; !varBlinkPasoActivo);; Set(varAhoraProceso; Now())` |
+
+Agrega una etiqueta `lblTiempoLote` con esta propiedad `Text`:
+
+```powerfx
+With(
+    {
+        segundos: If(
+            IsBlank(varInicioProceso);
+            Blank();
+            DateDiff(
+                varInicioProceso;
+                If(IsBlank(varFinProceso); varAhoraProceso; varFinProceso);
+                TimeUnit.Seconds
+            )
+        )
+    };
+    If(
+        IsBlank(segundos);
+        "Tiempo transcurrido: --:--:--";
+        "Tiempo " & If(IsBlank(varFinProceso); "transcurrido: "; "total: ") &
+        Text(RoundDown(segundos / 3600; 0); "00") & ":" &
+        Text(RoundDown(Mod(segundos; 3600) / 60; 0); "00") & ":" &
+        Text(Mod(segundos; 60); "00")
+    )
+)
+```
+
+La duración se calcula en la pantalla a partir de las fechas persistidas. El
+campo `duracion_segundos` queda disponible como verificación y para mostrar el
+último valor servidor si fuera necesario.
+
+## Etiquetas de estado y progreso
+
+En `Label3.Text` muestra un estado amistoso:
+
+```powerfx
+"Estado: " & Switch(
+    varEstadoLote;
+    "RECIBIDO"; "Lote recibido";
+    "CARGANDO_PDFS"; "Cargando documentos";
+    "LISTO_PARA_PROCESAR"; "Preparando procesamiento";
+    "EN_PROCESO"; "Procesando tasaciones";
+    "COMPLETADO"; "Resultado generado";
+    "ENTREGADO"; "Entregado";
+    "FALLIDO"; "Error durante el procesamiento";
+    "FALLIDO_ORIGEN_CAMBIO"; "Error al cargar documentos";
+    "Sin iniciar"
+)
+```
+
+Para `lblProgresoLote.Text` usa:
+
+```powerfx
+Switch(
+    varEstadoLote;
+    "CARGANDO_PDFS";
+    "Documentos cargados: " & Text(varPdfsCargados) & " / " & Text(varTotalPdfs);
+    "LISTO_PARA_PROCESAR";
+    "Documentos cargados: " & Text(varPdfsCargados) & " / " & Text(varTotalPdfs) & ". Preparando procesamiento.";
+    "EN_PROCESO";
+    "Procesando " & Text(varPdfsProcesados) & " de " & Text(varTotalPdfs) & " documentos.";
+    "COMPLETADO";
+    "Resultado generado. Esperando entrega en OneDrive.";
+    "ENTREGADO";
+    "Proceso completado correctamente. El Excel está disponible.";
+    "FALLIDO";
+    Coalesce(varMensajeLote; "El lote terminó con error.");
+    "FALLIDO_ORIGEN_CAMBIO";
+    Coalesce(varMensajeLote; "Un documento cambió durante la carga.");
+    ""
+)
+```
+
+## Reapertura y compatibilidad
+
+Las fechas viven en el manifiesto de GCS, no solo en variables de la sesión.
+Cuando la aplicación vuelve a consultar un `id_lote`, reconstruye
+`varInicioProceso`, `varFinProceso` y el tiempo total desde esa respuesta.
+
+Para permitirlo después de cerrar la aplicación sin crear otro flujo, agrega
+un cuadro de texto `txtIdLote` con `HintText = "ID de lote para reanudar"` y un
+botón `btnReanudarLote`. En su propiedad `OnSelect` usa:
+
+```powerfx
+If(
+    IsBlank(Trim(txtIdLote.Text));
+    Notify("Ingrese un ID de lote."; NotificationType.Warning);
+    Set(varIdLote; Trim(txtIdLote.Text));;
+    Set(varEstadoLote; Blank());;
+    Set(varMensajeLote; Blank());;
+    Set(varFechaInicioProceso; Blank());;
+    Set(varFechaFinProceso; Blank());;
+    Set(varInicioProceso; Blank());;
+    Set(varFinProceso; Blank());;
+    Set(varPasoActivo; 0);;
+    Set(varPasoError; Blank());;
+    Set(varMonitorearLote; true)
+)
+```
+
+El Timer de polling consulta el ID en un maximo de 10 segundos y reconstituye el
+stepper y el contador desde los datos persistidos. No se agrego un flujo de
+historial: el operador obtiene el ID mostrado al registrar el lote o desde el
+nombre del Excel `Resultado_Final_<ID_LOTE>.xlsx`.
+
+## Prueba manual
+
+1. Selecciona dos PDFs y pulsa **Ejecutar**.
+2. Confirma que el paso 1 pulsa y el contador inicia en `00:00:00`.
+3. Comprueba la progresión de pasos hasta `COMPLETADO` y luego `ENTREGADO` sin
+   pulsar **Actualizar**.
+4. Confirma que todos los pasos quedan verdes, `varMonitorearLote` es `false` y
+   el contador queda fijo al entregarse el Excel.
+5. Prueba un lote que termine en `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`: el paso
+   afectado debe mostrarse rojo, el mensaje debe ser visible y el tiempo debe
+   quedar congelado.

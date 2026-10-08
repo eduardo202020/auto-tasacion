@@ -43,6 +43,12 @@ precondiciones de generación de GCS para evitar que cargas concurrentes pierdan
 actualizaciones. Los resultados usan
 `resultados/<ID_LOTE>/Resultado_Final_<ID_LOTE>.xlsx`.
 
+Cada manifiesto registra `fecha_inicio` al crearse. Cuando alcanza
+`ENTREGADO`, `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`, registra `fecha_fin` una sola
+vez. `GET /v1/lotes/{id_lote}` expone ambas marcas y `duracion_segundos`, sin
+exponer contenido documental; los lotes antiguos sin estas propiedades usan
+`creado_en` y `actualizado_en` como respaldo de lectura.
+
 El Job recibe `BATCH_ID`, `BATCH_INPUT_PREFIX` y `BATCH_OUTPUT_XLSX`. Lee solo
 los objetos declarados como `CARGADO`, descarga un PDF a memoria, lo procesa y
 lo libera antes de continuar. Al finalizar conserva el contrato XLSX actual y

@@ -43,6 +43,7 @@ BATCH_COMPLETED = "COMPLETADO"
 BATCH_DELIVERED = "ENTREGADO"
 BATCH_FAILED = "FALLIDO"
 BATCH_SOURCE_CHANGED = "FALLIDO_ORIGEN_CAMBIO"
+BATCH_TERMINAL_STATES = frozenset({BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED})
 
 
 class BatchError(ValueError):
@@ -88,6 +89,47 @@ def _environment_positive_int(name: str, default: int) -> int:
 
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc_timestamp(value: Any) -> datetime | None:
+    """Interpreta las marcas ISO-8601 del manifiesto sin fallar por lotes antiguos."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
+
+
+def _lifecycle_timestamps(manifest: dict[str, Any]) -> tuple[str, str]:
+    """Devuelve fechas compatibles con manifiestos creados antes del contador."""
+    start = str(manifest.get("fecha_inicio") or manifest.get("creado_en") or "")
+    end = str(manifest.get("fecha_fin") or "")
+    if not end and manifest.get("estado") in BATCH_TERMINAL_STATES:
+        end = str(manifest.get("actualizado_en") or start)
+    return start, end
+
+
+def batch_duration_seconds(manifest: dict[str, Any], *, now: str | None = None) -> int:
+    """Calcula la duración persistida; durante la ejecución usa el reloj UTC actual."""
+    start_text, end_text = _lifecycle_timestamps(manifest)
+    start = _parse_utc_timestamp(start_text)
+    end = _parse_utc_timestamp(end_text or now or utc_timestamp())
+    if start is None or end is None:
+        return 0
+    return max(0, int((end - start).total_seconds()))
+
+
+def refresh_lifecycle_timestamps(manifest: dict[str, Any], *, now: str) -> None:
+    """Fija el inicio una vez y congela el final al alcanzar un estado terminal."""
+    if not manifest.get("fecha_inicio"):
+        manifest["fecha_inicio"] = str(manifest.get("creado_en") or now)
+    if manifest.get("estado") in BATCH_TERMINAL_STATES and not manifest.get("fecha_fin"):
+        manifest["fecha_fin"] = now
 
 
 def configured_source_folder() -> str:
@@ -228,6 +270,8 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
         "mensaje": invalid_file_errors[0] if invalid_file_errors else "",
         "creado_en": now,
         "actualizado_en": now,
+        "fecha_inicio": now,
+        "fecha_fin": now if invalid_file_errors else "",
         "total_pdfs": len(files),
         "tamano_total_bytes": total_bytes,
         "pdfs_cargados": 0,
@@ -265,6 +309,7 @@ def refresh_manifest_progress(manifest: dict[str, Any]) -> None:
 
 
 def public_batch_status(manifest: dict[str, Any]) -> dict[str, Any]:
+    fecha_inicio, fecha_fin = _lifecycle_timestamps(manifest)
     return {
         "id_lote": manifest["id_lote"],
         "estado": manifest["estado"],
@@ -274,6 +319,9 @@ def public_batch_status(manifest: dict[str, Any]) -> dict[str, Any]:
         "pdfs_procesados": manifest.get("pdfs_procesados", 0),
         "pdfs_fallidos": manifest["pdfs_fallidos"],
         "resultado_disponible": bool(manifest.get("resultado_disponible")),
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "duracion_segundos": batch_duration_seconds(manifest),
     }
 
 
@@ -426,7 +474,9 @@ def update_manifest(
         if manifest is None:
             raise BatchError("El lote no existe", code="LOTE_NO_ENCONTRADO", status=404)
         result = change(manifest)
-        manifest["actualizado_en"] = utc_timestamp()
+        now = utc_timestamp()
+        manifest["actualizado_en"] = now
+        refresh_lifecycle_timestamps(manifest, now=now)
         try:
             return store.save(manifest), result
         except ConcurrentBatchUpdate:
