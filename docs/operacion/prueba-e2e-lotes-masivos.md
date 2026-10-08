@@ -111,6 +111,21 @@ usado para la prueba se mantuvo en `RECIBIDO` con el archivo `PENDIENTE`, sin
 iniciar el Job durante la ventana observada de recurrencia. Por ello esta prueba
 no aprueba todavía la ruta E2E y no se solicitó la entrega del XLSX.
 
+## Regresión: consulta de archivos pendientes
+
+La ejecución posterior confirmó que `Leer_control_lote` ya completaba, pero
+`Filtrar_archivos_pendientes` recibía `null`. La causa era que
+`GET /v1/lotes/{id_lote}` devolvía solo el resumen del lote y omitía
+`archivos`. El cargador requiere ese arreglo para identificar los registros
+`PENDIENTE`.
+
+La revisión `demo-tasaciones-ia-00078-kbq` devuelve ahora los metadatos
+operativos por archivo (`id_archivo`, `item_id`, nombre, eTag, tamaño y estado),
+sin contenido de PDF, rutas GCS ni URLs firmadas. La validación autenticada de
+un lote de un PDF confirmó que `archivos` es un arreglo. La aprobación E2E aún
+requiere una ejecución nueva de `auto-tasacion-cargar-lotes` que llegue a
+`HTTP_Iniciar_Job`.
+
 ## Prueba de capacidad
 
 Una vez aprobado el caso de un PDF, repetir con 10, 150 y hasta 300 PDFs. El
