@@ -39,6 +39,16 @@ no lo guarda en el repositorio. Los dos flujos programados se ejecutan cada cinc
 minutos y usan archivos de control `_autotasacion_lote_<ID_LOTE>.json` dentro de
 `/auto-tasaciones/PDFs`. La lista de PDFs de Power Apps los excluye por extensión.
 
+`GetFileContentByPath` devuelve el archivo de control como contenido binario.
+Antes de `ParseJson`, los flujos `auto-tasacion-cargar-lotes` y
+`auto-tasacion-entregar-lote` convierten `body.$content` de Base64 a texto JSON:
+
+```text
+@json(base64ToString(outputs('Obtener_control_lote')?['body']?['$content']))
+```
+
+No se debe pasar `@body('Obtener_control_lote')` directamente a `ParseJson`.
+
 Ejecutar sin activar los flujos:
 
 ```powershell

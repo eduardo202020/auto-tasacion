@@ -78,7 +78,9 @@ completo.
 4. La app debe informar el identificador de lote recibido. En OneDrive aparece
    `_autotasacion_lote_<ID_LOTE>.json`.
 5. Espera la siguiente ejecución de `auto-tasacion-cargar-lotes` (hasta cinco
-   minutos). El flujo carga un PDF individual a GCS e inicia el Job.
+   minutos). El flujo debe convertir el contenido binario del archivo de
+   control a JSON, consultar el lote, cargar un PDF individual a GCS e iniciar
+   el Job.
 6. Cuando el Job termine, espera la siguiente ejecución de
    `auto-tasacion-entregar-lote` (hasta cinco minutos). Debe aparecer
    `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
@@ -89,6 +91,8 @@ completo.
 ## Criterios de aceptación
 
 - La app envía `item_id`, nombre, tamaño y eTag; no envía el PDF.
+- `Leer control lote` termina correctamente y obtiene `id_lote` desde el JSON
+  de control.
 - El lote pasa por `RECIBIDO`, `CARGANDO_PDFS`, `EN_PROCESO` y `COMPLETADO`.
 - Se crea un único Excel con el identificador del lote en OneDrive.
 - El Excel conserva sus tres hojas y el contrato de `tblParaProcesar`.

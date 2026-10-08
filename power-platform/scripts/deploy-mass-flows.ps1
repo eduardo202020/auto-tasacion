@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# This script creates the mass-processing flows as disabled solution-aware
+# This script creates or updates mass-processing flows as solution-aware
 # components. No document content or control token is written to this repository.
 $DataverseUrl = 'https://org9a4ef0e0.crm4.dynamics.com'
 $SolutionUniqueName = 'autoTasacion'
@@ -215,6 +215,13 @@ function New-OneDriveAction {
     }
 }
 
+function Get-ControlJsonContentExpression {
+    # GetFileContentByPath is a binary connector operation. Power Automate
+    # exposes the base64 payload in body.$content; ParseJson cannot receive the
+    # application/octet-stream envelope directly.
+    return '@json(base64ToString(outputs(''Obtener_control_lote'')?[''body'']?[''$content'']))'
+}
+
 function New-HttpAction {
     param(
         [Parameter(Mandatory)] [string] $Method,
@@ -315,7 +322,7 @@ function New-FlowDefinition {
                             runAfter = [ordered]@{ Obtener_control_lote = @('Succeeded') }
                             type = 'ParseJson'
                             inputs = [ordered]@{
-                                content = "@body('Obtener_control_lote')"
+                                content = Get-ControlJsonContentExpression
                                 schema = [ordered]@{ type = 'object'; properties = [ordered]@{ id_lote = [ordered]@{ type = 'string' } }; required = @('id_lote') }
                             }
                         }
@@ -378,7 +385,7 @@ function New-FlowDefinition {
                             runAfter = [ordered]@{ Obtener_control_lote = @('Succeeded') }
                             type = 'ParseJson'
                             inputs = [ordered]@{
-                                content = "@body('Obtener_control_lote')"
+                                content = Get-ControlJsonContentExpression
                                 schema = [ordered]@{ type = 'object'; properties = [ordered]@{ id_lote = [ordered]@{ type = 'string' } }; required = @('id_lote') }
                             }
                         }
@@ -438,12 +445,6 @@ function Create-DisabledFlow {
         [Parameter(Mandatory)] [string] $Description
     )
 
-    $existing = Get-WorkflowByName -Name $Name
-    if ($existing) {
-        Write-Verbose "Ya existe: $Name ($($existing.workflowid))"
-        return [string] $existing.workflowid
-    }
-
     $flowDefinition = New-FlowDefinition -Name $Name
     $clientdata = [ordered]@{
         properties = [ordered]@{
@@ -452,6 +453,15 @@ function Create-DisabledFlow {
         }
         schemaVersion = '1.0.0.0'
     } | ConvertTo-Json -Depth 100 -Compress
+
+    $existing = Get-WorkflowByName -Name $Name
+    if ($existing) {
+        Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($($existing.workflowid))" -Body ([ordered]@{
+            clientdata = $clientdata
+        }) | Out-Null
+        Write-Verbose "Actualizado: $Name ($($existing.workflowid))"
+        return [string] $existing.workflowid
+    }
 
     $response = Invoke-DataverseRequest -Method 'POST' -Path 'workflows' -Body ([ordered]@{
         category = 5
@@ -486,11 +496,16 @@ foreach ($flow in $flows.GetEnumerator()) {
         # The Power Automate service validates the full definition when a draft
         # cloud flow turns on, so preserve its current clientdata in the update.
         $currentFlow = Get-WorkflowByName -Name $flow.Key
-        Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($id)" -Body ([ordered]@{
-            statecode = 1
-            clientdata = [string] $currentFlow.clientdata
-        }) | Out-Null
-        Write-Output "Activado: $($flow.Key)"
+        if ([int] $currentFlow.statecode -ne 1) {
+            Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($id)" -Body ([ordered]@{
+                statecode = 1
+                clientdata = [string] $currentFlow.clientdata
+            }) | Out-Null
+            Write-Output "Activado: $($flow.Key)"
+        }
+        else {
+            Write-Output "Ya publicado: $($flow.Key)"
+        }
     }
 }
 
