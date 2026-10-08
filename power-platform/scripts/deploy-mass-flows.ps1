@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 # This script creates the mass-processing flows as disabled solution-aware
 # components. No document content or control token is written to this repository.
 $DataverseUrl = 'https://org9a4ef0e0.crm4.dynamics.com'
-$SolutionUniqueName = 'autoTasacionMasivo'
+$SolutionUniqueName = 'autoTasacion'
 $EnvironmentId = 'Default-3048dc87-43f0-4100-9acb-ae1971c79395'
 $ServiceUrl = 'https://demo-tasaciones-ia-h75cd5qm2q-nn.a.run.app'
 $SourceFolder = '/auto-tasaciones/PDFs'
@@ -413,7 +413,7 @@ function New-FlowDefinition {
 function Get-WorkflowByName {
     param([Parameter(Mandatory)] [string] $Name)
     $safeName = $Name.Replace("'", "''")
-    $response = Invoke-DataverseRequest -Method 'GET' -Path "workflows?`$select=workflowid,name,statecode&`$filter=name eq '$safeName' and category eq 5"
+    $response = Invoke-DataverseRequest -Method 'GET' -Path "workflows?`$select=workflowid,name,statecode,clientdata&`$filter=name eq '$safeName' and category eq 5"
     $items = if ($response.Body) { ($response.Body | ConvertFrom-Json).value } else { @() }
     return @($items | Select-Object -First 1)
 }
@@ -483,7 +483,13 @@ foreach ($flow in $flows.GetEnumerator()) {
     $id = Create-DisabledFlow -Name $flow.Key -Description $flow.Value
     Add-SolutionComponent -ComponentId $id -ComponentType 29
     if ($Activate) {
-        Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($id)" -Body ([ordered]@{ statecode = 1; statuscode = 2 }) | Out-Null
+        # The Power Automate service validates the full definition when a draft
+        # cloud flow turns on, so preserve its current clientdata in the update.
+        $currentFlow = Get-WorkflowByName -Name $flow.Key
+        Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($id)" -Body ([ordered]@{
+            statecode = 1
+            clientdata = [string] $currentFlow.clientdata
+        }) | Out-Null
         Write-Output "Activado: $($flow.Key)"
     }
 }
