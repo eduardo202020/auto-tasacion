@@ -368,7 +368,11 @@ def handle_request(
             return _json_response(payload, 201 if created else 200)
         matched = _LOTE_PATH.fullmatch(path)
         if request.method == "GET" and matched:
-            return _json_response(public_batch_status(api.get_batch(matched.group(1))))
+            # The recurring Power Automate loader needs the per-file operational
+            # state to select PENDIENTE entries.  This response deliberately
+            # exposes only manifest metadata: it never includes PDF content,
+            # GCS object paths, or signed URLs.
+            return _json_response(batch_registration_status(api.get_batch(matched.group(1))))
         matched = _TICKET_PATH.fullmatch(path)
         if request.method == "POST" and matched:
             return _json_response(api.upload_ticket(matched.group(1), matched.group(2)))

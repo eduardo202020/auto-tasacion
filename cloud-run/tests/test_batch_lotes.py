@@ -187,7 +187,17 @@ class BatchControlApiTests(unittest.TestCase):
         with app.test_request_context(f"/v1/lotes/{body['id_lote']}", method="GET"):
             response = handle_request(request, self.api)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["estado"], "RECIBIDO")
+        status = response.get_json()
+        self.assertEqual(status["estado"], "RECIBIDO")
+        self.assertEqual(status["archivos"], [{
+            "id_archivo": body["archivos"][0]["id_archivo"],
+            "item_id": "onedrive-item-1",
+            "nombre": "tasacion-1.pdf",
+            "etag": "etag-1",
+            "tamano_bytes": 1024,
+            "estado": "PENDIENTE",
+        }])
+        self.assertNotIn("objeto_gcs", status["archivos"][0])
 
     def test_http_api_records_and_rejects_oversized_pdf(self):
         app = Flask(__name__)

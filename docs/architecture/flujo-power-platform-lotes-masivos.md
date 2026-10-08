@@ -83,9 +83,12 @@ confirmados, el flujo invoca `POST /v1/lotes/{id}/iniciar`.
 ### 4. `auto-tasacion-consultar-lote`
 
 Consulta `GET /v1/lotes/{id_lote}` y devuelve estado, `total_pdfs`,
-`pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos` y disponibilidad del
-resultado. Power Apps lo llama mediante un temporizador mientras el lote está
-activo; no mantiene una solicitud abierta durante el Job.
+`pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos`, disponibilidad del
+resultado y el arreglo `archivos` con los metadatos operativos necesarios para
+retomar la carga (`id_archivo`, `item_id`, nombre, eTag, tamaño y estado). No
+devuelve contenido de PDF, rutas GCS ni URLs firmadas. Power Apps lo llama
+mediante un temporizador mientras el lote está activo; no mantiene una solicitud
+abierta durante el Job.
 
 ### 5. `auto-tasacion-entregar-lote`
 
