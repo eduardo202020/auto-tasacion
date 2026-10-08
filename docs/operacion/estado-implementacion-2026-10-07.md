@@ -39,16 +39,15 @@ PDFs `PENDIENTE`. Esa corrección resolvió el error en el que
 | --- | --- | --- |
 | `auto-tasacion-listar-pdfs` | Publicado | Lista PDFs de `/auto-tasaciones/PDFs`. |
 | `auto-tasacion-iniciar-lote` | Publicado | Registra el manifiesto y crea el control del lote. |
-| `auto-tasacion-consultar-lote` | Publicado; ampliación pendiente de despliegue | Devuelve estado y conteos; la fuente ahora agrega tiempo tipado. |
+| `auto-tasacion-consultar-lote` | Publicado | Devuelve estado, conteos y tiempo tipado. |
 | `auto-tasacion-cargar-lotes` | Publicado | Cada cinco minutos transfiere PDFs y arranca el Job. |
 | `auto-tasacion-entregar-lote` | Publicado | Cada cinco minutos entrega el XLSX. |
 
 La definición reproducible está en
 [`power-platform/scripts/deploy-mass-flows.ps1`](../../power-platform/scripts/deploy-mass-flows.ps1).
 La respuesta de `auto-tasacion-consultar-lote` no devuelve `archivos`, URLs
-firmadas ni rutas GCS a Power Apps; expone ID, estado, mensaje, conteos y,
-tras el siguiente despliegue, `fecha_inicio`, `fecha_fin` y
-`duracion_segundos`.
+firmadas ni rutas GCS a Power Apps; expone ID, estado, mensaje, conteos,
+`fecha_inicio`, `fecha_fin` y `duracion_segundos`.
 
 ### Power Apps
 
@@ -84,14 +83,14 @@ la recurrencia de los flujos masivos ni el procesamiento de Google Cloud.
 | Suite del servicio Cloud Run | 65 de 65 pruebas correctas en la validacion local del 8 de octubre de 2026. |
 | Catálogo de perfiles y tasadoras | Correcto. |
 | Compilación Python | Correcta. |
-| Definiciones de flujos masivos | 11 de 11 pruebas correctas: control JSON, contrato tipado, stepper y Timer visual documentados. |
+| Definiciones de flujos masivos | 12 de 12 pruebas correctas: control JSON, contrato tipado, ciclo de publicación, stepper y Timer visual documentados. |
 | Sintaxis de `deploy-mass-flows.ps1` | Correcta. |
 
 ## Próxima validación de interfaz
 
 1. En Studio, agregar `auto-tasacion-iniciar-lote` y
    `auto-tasacion-consultar-lote` como orígenes de datos de `autoTasacionJG`.
-2. Desplegar el servicio y regenerar los flujos para publicar `fecha_inicio`,
+2. Actualizar esos orígenes para usar los campos publicados `fecha_inicio`,
    `fecha_fin` y `duracion_segundos`.
 3. Aplicar `POLLING.md` a `Button5`, `tmrEstadoLote`, `tmrVistaLote`, la
    galería de pasos y las etiquetas, y publicar la aplicación.

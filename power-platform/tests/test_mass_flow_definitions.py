@@ -48,6 +48,31 @@ class ControlFileParseDefinitionTests(unittest.TestCase):
         self.assertGreaterEqual(self.script.count("required = @('id_lote')"), 2)
 
 
+class FlowDeploymentLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.script = SCRIPT.read_text(encoding="utf-8")
+
+    def test_active_unpublished_flow_is_drafted_before_definition_replacement(self):
+        """Avoid a direct PATCH of clientdata against an ActiveUnpublished flow."""
+        deactivate = "statecode = 0\n                statuscode = 1"
+        update_definition = "clientdata = $clientdata"
+        reactivate = "statecode = 1\n                statuscode = 2"
+        publish = "Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)"
+        self.assertIn("function Publish-WorkflowDraft", self.script)
+        self.assertIn("-Path 'PublishXml'", self.script)
+        self.assertIn(publish, self.script)
+        self.assertIn(deactivate, self.script)
+        self.assertIn(reactivate, self.script)
+        self.assertLess(
+            self.script.index(publish),
+            self.script.index(deactivate),
+        )
+        self.assertLess(
+            self.script.index(deactivate),
+            self.script.index(update_definition),
+        )
+
+
 class ConsultarLoteDefinitionTests(unittest.TestCase):
     def setUp(self):
         self.script = SCRIPT.read_text(encoding="utf-8")

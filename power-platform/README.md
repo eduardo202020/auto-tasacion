@@ -62,7 +62,10 @@ Para aplicar las definiciones y dejar los cuatro flujos publicados, ejecutar:
 ```
 
 `-Activate` conserva las recurrencias y la concurrencia definidas en cada
-flujo; solamente activa los que estuvieran desactivados. En particular,
+flujo. Si un flujo publicado tiene un borrador activo sin publicar, el script lo
+publica de forma dirigida, lo desactiva brevemente, actualiza la definición y
+lo vuelve a publicar. Así evita el error de Dataverse `0x80040203` al
+actualizar `clientdata`, sin publicar cambios ajenos del entorno. En particular,
 `auto-tasacion-consultar-lote` queda disponible para que Power Apps lo invoque.
 
 ### Contrato de consulta para Power Apps

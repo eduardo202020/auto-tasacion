@@ -453,7 +453,7 @@ function New-FlowDefinition {
 function Get-WorkflowByName {
     param([Parameter(Mandatory)] [string] $Name)
     $safeName = $Name.Replace("'", "''")
-    $response = Invoke-DataverseRequest -Method 'GET' -Path "workflows?`$select=workflowid,name,statecode,clientdata&`$filter=name eq '$safeName' and category eq 5"
+    $response = Invoke-DataverseRequest -Method 'GET' -Path "workflows?`$select=workflowid,name,statecode,statuscode,clientdata&`$filter=name eq '$safeName' and category eq 5"
     $items = if ($response.Body) { ($response.Body | ConvertFrom-Json).value } else { @() }
     return @($items | Select-Object -First 1)
 }
@@ -469,6 +469,19 @@ function Add-SolutionComponent {
         SolutionUniqueName = $SolutionUniqueName
         AddRequiredComponents = $false
         DoNotIncludeSubcomponents = $false
+    }) | Out-Null
+}
+
+function Publish-WorkflowDraft {
+    param([Parameter(Mandatory)] [string] $WorkflowId)
+
+    # A solution-aware cloud flow can retain an ActiveUnpublished draft even
+    # though statecode reports Activated. Publish only this workflow before the
+    # update so Dataverse accepts the controlled Draft -> update -> Activated
+    # lifecycle below; never publish unrelated environment customizations.
+    $parameterXml = "<importexportxml><workflows><workflow>$WorkflowId</workflow></workflows></importexportxml>"
+    Invoke-DataverseRequest -Method 'POST' -Path 'PublishXml' -Body ([ordered]@{
+        ParameterXml = $parameterXml
     }) | Out-Null
 }
 
@@ -489,6 +502,19 @@ function Create-DisabledFlow {
 
     $existing = Get-WorkflowByName -Name $Name
     if ($existing) {
+        # An active cloud flow can retain an unpublished active draft. Dataverse
+        # rejects a direct published update in that state (0x80040203). Move it
+        # to Draft first, replace the definition, then let -Activate publish it
+        # again below. This keeps deployments repeatable for edited flows.
+        if ([int] $existing.statecode -eq 1) {
+            Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)
+            Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($($existing.workflowid))" -Body ([ordered]@{
+                statecode = 0
+                statuscode = 1
+            }) | Out-Null
+            $existing = Get-WorkflowByName -Name $Name
+            Write-Verbose "Desactivado para actualizar: $Name ($($existing.workflowid))"
+        }
         Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($($existing.workflowid))" -Body ([ordered]@{
             clientdata = $clientdata
         }) | Out-Null
@@ -532,6 +558,7 @@ foreach ($flow in $flows.GetEnumerator()) {
         if ([int] $currentFlow.statecode -ne 1) {
             Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($id)" -Body ([ordered]@{
                 statecode = 1
+                statuscode = 2
                 clientdata = [string] $currentFlow.clientdata
             }) | Out-Null
             Write-Output "Activado: $($flow.Key)"
