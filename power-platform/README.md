@@ -26,8 +26,7 @@ Microsoft Graph ni recibe rutas de OneDrive para descargar contenido.
 ## Despliegue de flujos masivos
 
 El script [`scripts/deploy-mass-flows.ps1`](scripts/deploy-mass-flows.ps1)
-crea y agrega a la solución `autoTasacion` estos flujos, inicialmente en estado
-**Borrador**:
+crea o actualiza en la solución `autoTasacion` estos flujos:
 
 1. `auto-tasacion-iniciar-lote`;
 2. `auto-tasacion-consultar-lote`;
@@ -56,18 +55,45 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 .\power-platform\scripts\deploy-mass-flows.ps1
 ```
 
-Después de conectar y publicar `autoTasacionJG`, activar los flujos con:
+Para aplicar las definiciones y dejar los cuatro flujos publicados, ejecutar:
 
 ```powershell
 .\power-platform\scripts\deploy-mass-flows.ps1 -Activate
 ```
 
+`-Activate` conserva las recurrencias y la concurrencia definidas en cada
+flujo; solamente activa los que estuvieran desactivados. En particular,
+`auto-tasacion-consultar-lote` queda disponible para que Power Apps lo invoque.
+
+### Contrato de consulta para Power Apps
+
+`auto-tasacion-consultar-lote` recibe el `id_lote` como texto y llama a
+`GET /v1/lotes/{id_lote}`. Su respuesta hacia Power Apps está tipada y contiene
+solamente:
+
+```text
+id_lote, estado, mensaje, total_pdfs, pdfs_cargados,
+pdfs_procesados, pdfs_fallidos, resultado_disponible
+```
+
+El arreglo operativo `archivos`, las URLs firmadas, rutas de GCS y el contenido
+documental no se devuelven a la aplicación. `archivos` queda disponible solo
+para `auto-tasacion-cargar-lotes`, que lo necesita para localizar PDFs
+`PENDIENTE`.
+
 ## Power Apps
 
-La pantalla nueva usa `galPdfs`, selección múltiple, **Actualizar**,
-**Seleccionar todos**, **Ejecutar** e indicador de lote. El botón **Ejecutar**
-envía solo `ItemId`, nombre, tamaño y eTag disponible hacia
-`auto-tasacion-iniciar-lote`.
+La aplicación `autoTasacionJG` lista y selecciona PDFs con el flujo
+`auto-tasacion-listar-pdfs`. **Actualizar** solamente vuelve a listar la
+carpeta. El botón **Ejecutar** envía solo `ItemId`, nombre, tamaño y eTag
+disponible hacia `auto-tasacion-iniciar-lote`.
+
+La aplicación debe mantener el `id_lote` devuelto y consultar su estado cada
+10 segundos mediante un control Timer. El procedimiento reproducible, con las
+propiedades y fórmulas exactas para `Button5`, `tmrEstadoLote` y `Label3`, está
+en [`canvas/autoTasacionJG/POLLING.md`](canvas/autoTasacionJG/POLLING.md).
+El temporizador continúa durante `COMPLETADO` y se detiene únicamente en
+`ENTREGADO`, `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`.
 
 Eliminar de esta ruta `ControlAdjuntos`, **Cargar Zip**, `contentBytes` y
 `varZipSubido`. La consulta de estado debe usar temporizador y el `ID_LOTE`.

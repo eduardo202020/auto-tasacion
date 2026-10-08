@@ -1,6 +1,10 @@
 # Flujo Power Platform para lotes masivos de PDFs
 
-> **Estado al 7 de octubre de 2026:** servicio, Job y flujos masivos desplegados; la app lista PDFs. Falta vincular y publicar el boton **Ejecutar** para iniciar la prueba E2E.
+> **Estado al 7 de octubre de 2026:** la ruta OneDrive → Cloud Run Job → Excel
+> ya completó una prueba con un PDF. El siguiente cambio publicado habilita el
+> contrato tipado de consulta. La fórmula de seguimiento de la Canvas App debe
+> aplicarse y publicarse desde Power Apps Studio según
+> [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md).
 
 ## Decisión
 
@@ -82,13 +86,19 @@ confirmados, el flujo invoca `POST /v1/lotes/{id}/iniciar`.
 
 ### 4. `auto-tasacion-consultar-lote`
 
-Consulta `GET /v1/lotes/{id_lote}` y devuelve estado, `total_pdfs`,
-`pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos`, disponibilidad del
-resultado y el arreglo `archivos` con los metadatos operativos necesarios para
-retomar la carga (`id_archivo`, `item_id`, nombre, eTag, tamaño y estado). No
-devuelve contenido de PDF, rutas GCS ni URLs firmadas. Power Apps lo llama
-mediante un temporizador mientras el lote está activo; no mantiene una solicitud
-abierta durante el Job.
+Consulta `GET /v1/lotes/{id_lote}`. El backend incluye el arreglo `archivos`
+para que `auto-tasacion-cargar-lotes` pueda localizar registros `PENDIENTE`,
+pero la respuesta del flujo hacia Power Apps se limita a campos tipados y
+seguros: `id_lote`, `estado`, `mensaje`, `total_pdfs`, `pdfs_cargados`,
+`pdfs_procesados`, `pdfs_fallidos` y `resultado_disponible`. No devuelve
+contenido de PDF, rutas GCS, URLs firmadas ni metadatos por archivo a la
+aplicación.
+
+Power Apps lo llama mediante un temporizador cada 10 segundos mientras el lote
+está activo; no mantiene una solicitud abierta durante el Job. El temporizador
+sigue activo en `COMPLETADO`, porque la entrega del XLSX aún debe cambiar el
+lote a `ENTREGADO`, y se detiene solo en `ENTREGADO`, `FALLIDO` o
+`FALLIDO_ORIGEN_CAMBIO`.
 
 ### 5. `auto-tasacion-entregar-lote`
 
@@ -106,12 +116,16 @@ La pantalla nueva contiene:
 | `galPdfs` | Galería de PDFs existentes con nombre, tamaño, modificación y selección múltiple. |
 | `btnActualizar` | Vuelve a listar los PDFs. |
 | `btnSeleccionarTodos` | Selecciona o limpia los PDFs de la galería. |
-| `btnEjecutar` | Registra el manifiesto seleccionado. |
-| Indicador de lote | Muestra cantidad seleccionada, `ID_LOTE`, estado y progreso. |
+| `Button5` (**Ejecutar**) | Registra el manifiesto seleccionado y comienza el seguimiento. |
+| `tmrEstadoLote` | Consulta el lote cada 10 segundos mientras está activo. |
+| `Label3` e indicador de progreso | Muestran `ID_LOTE`, estado y conteos actuales. |
 
-Se eliminan `ControlAdjuntos`, **Cargar Zip**, `contentBytes`, `varZipSubido` y
-la selección de ZIP de la ruta masiva. La ruta ZIP actual permanece en una
-pantalla o flujo de transición separado para lotes de hasta 90 MB.
+La fuente descargada de `autoTasacionJG` no se puede actualizar ni publicar con
+la CLI disponible y la exportación de la solución corporativa está bloqueada por
+un flujo heredado de otro propietario. Por ello, las fórmulas versionadas en
+[`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md) se deben
+aplicar en Studio y publicar allí. La ruta ZIP actual permanece en un flujo de
+transición separado para lotes de hasta 90 MB.
 
 ## API de control
 

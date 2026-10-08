@@ -1,4 +1,4 @@
-# Estado de implementación: Auto Tasación
+﻿# Estado de implementación: Auto Tasación
 
 > **Corte:** 7 de octubre de 2026
 
@@ -6,10 +6,9 @@
 
 ```text
 PDFs en OneDrive /auto-tasaciones/PDFs
-  -> Power Apps: selección de metadatos
+  -> Power Apps: selección de metadatos y seguimiento de lote
   -> Power Automate: manifiesto y transferencia de un PDF por vez
-  -> Cloud Storage privado
-  -> Cloud Run Job
+  -> Cloud Storage privado -> Cloud Run Job
   -> Resultado_Final_<ID_LOTE>.xlsx en OneDrive
   -> Power Automate Desktop / IBM 3270
 ```
@@ -18,87 +17,86 @@ La ruta masiva admite hasta 300 PDFs, 2 GiB por lote y 90 000 000 bytes por
 PDF. La ruta ZIP de hasta 90 MB continúa como transición y no se mezcla con
 este flujo.
 
-## Implementado y desplegado
+## Implementado y validado
 
-### Servicio en Google Cloud
+### Servicio y procesamiento
 
 | Componente | Estado | Evidencia |
 | --- | --- | --- |
-| API de control `/v1/lotes` | Desplegada | Cloud Run `demo-tasaciones-ia` está `Ready`. |
-| Manifiesto, eTag e idempotencia | Implementado | El lote usa `item_id`, nombre, eTag y tamaño; se rechazan cambios de origen. |
-| Carga por PDF mediante ticket firmado | Implementado | Cada archivo se carga por separado a GCS. |
-| Cloud Run Job `tasaciones-batch` | Desplegado y listo | Procesa objetos confirmados uno por iteración; última ejecución exitosa. |
-| Resultado XLSX | Implementado | Genera `PARA_PROCESAR`, `REVISION_IA` y `CONTROL` con sus tablas contractuales. |
-| Perfiles de tasadoras | Implementado de forma acotada | Catálogo y perfiles `generic-v1`, `braschi-construyo-v1` y `opd-construyo-v1`. |
+| API de control `/v1/lotes` | Desplegada | Controla manifiesto, eTag e idempotencia. |
+| Carga por PDF mediante ticket firmado | Implementada | Power Automate carga un PDF por iteración. |
+| Cloud Run Job `tasaciones-batch` | Desplegado | Procesa objetos confirmados. |
+| Resultado XLSX | Implementado | Genera `PARA_PROCESAR`, `REVISION_IA` y `CONTROL`. |
+| E2E de un PDF hasta Excel | Confirmado | La ejecución llegó a entrega, creó el Excel y eliminó el control. |
+
+El endpoint de estado devuelve también `archivos` al cargador para identificar
+PDFs `PENDIENTE`. Esa corrección resolvió el error en el que
+`Filtrar_archivos_pendientes` recibía `null`.
 
 ### Power Automate
 
-| Flujo | Estado | Propósito |
+| Flujo | Estado después de ejecutar `deploy-mass-flows.ps1 -Activate` | Propósito |
 | --- | --- | --- |
-| `auto-tasacion-listar-pdfs` | Publicado | Lista PDFs de `/auto-tasaciones/PDFs` para la app. |
+| `auto-tasacion-listar-pdfs` | Publicado | Lista PDFs de `/auto-tasaciones/PDFs`. |
 | `auto-tasacion-iniciar-lote` | Publicado | Registra el manifiesto y crea el control del lote. |
-| `auto-tasacion-cargar-lotes` | Publicado | Cada cinco minutos, transfiere PDFs individuales y arranca el Job. |
-| `auto-tasacion-entregar-lote` | Publicado | Cada cinco minutos, entrega el XLSX cuando el lote termina. |
-| `auto-tasacion-consultar-lote` | Borrador | Consulta de progreso para la interfaz; no bloquea la ejecución del lote. |
+| `auto-tasacion-consultar-lote` | Publicado | Devuelve el estado y conteos tipados a Power Apps. |
+| `auto-tasacion-cargar-lotes` | Publicado | Cada cinco minutos transfiere PDFs y arranca el Job. |
+| `auto-tasacion-entregar-lote` | Publicado | Cada cinco minutos entrega el XLSX. |
 
-Los flujos y su definición reproducible están en
+La definición reproducible está en
 [`power-platform/scripts/deploy-mass-flows.ps1`](../../power-platform/scripts/deploy-mass-flows.ps1).
-El script apunta a la solución corporativa `autoTasacion`.
+La respuesta de `auto-tasacion-consultar-lote` no devuelve `archivos`, URLs
+firmadas ni rutas GCS a Power Apps; expone solo ID, estado, mensaje y conteos.
 
 ### Power Apps
 
-`autoTasacionJG` ya muestra los PDFs de OneDrive, permite seleccionarlos y
-cuenta la selección. Esta parte usa `auto-tasacion-listar-pdfs`.
+La fuente descargada de `autoTasacionJG` confirma que `Button5` es el botón
+visible **Ejecutar**, `Label3` presenta `varEstadoLote` y `btnActualizar`
+conserva la actualización de `colPdfs`. La causa del estado congelado en
+`RECIBIDO` era que no había un Timer ni conexión al flujo
+`auto-tasacion-consultar-lote`.
 
-## Pendiente antes de aprobar E2E
+Las fórmulas y propiedades exactas para completar la aplicación están en
+[`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md). El
+Timer consulta cada 10 segundos, conserva el último estado frente a un error
+transitorio y se detiene únicamente en `ENTREGADO`, `FALLIDO` o
+`FALLIDO_ORIGEN_CAMBIO`. `COMPLETADO` sigue en seguimiento hasta que la entrega
+del XLSX confirme `ENTREGADO`.
 
-El botón visible **Ejecutar** de `autoTasacionJG` no tiene una fórmula
-`OnSelect` que llame a `auto-tasacion-iniciar-lote`. Debe agregarse el flujo
-como origen de datos, aplicar la fórmula de manifiesto y publicar la app.
+## Limitación de publicación de la Canvas App
 
-La fórmula, el caso inicial con `D01.pdf` y los criterios de aceptación están
-en [`prueba-e2e-lotes-masivos.md`](prueba-e2e-lotes-masivos.md).
+La CLI permite descargar, desempaquetar y empaquetar la aplicación, pero no
+actualizar ni publicar una Canvas App existente. Además, la exportación de la
+solución corporativa `autoTasacion` está bloqueada por permisos de lectura sobre
+un flujo heredado de otro propietario. Por eso el paso pendiente es aplicar el
+documento `POLLING.md` en Power Apps Studio y publicar la aplicación. No afecta
+los flujos masivos ni el procesamiento de Google Cloud.
 
-La lectura de `_autotasacion_lote_<ID_LOTE>.json` recibió inicialmente el
-cuerpo binario de OneDrive en `ParseJson`. La definición fue corregida para
-decodificar `body.$content` con `base64ToString` antes de convertirlo a JSON y
-se publicó en los flujos de carga y entrega. La prueba de un PDF aún requiere
-una nueva ejecución efectiva de `auto-tasacion-cargar-lotes`: el lote observado
-permanece en `RECIBIDO`, por lo que no se aprobó ni se invocó la entrega.
-
-La actualización automática de la Canvas App no se pudo empaquetar desde PAC:
-la exportación de la solución `autoTasacion` falla por falta de lectura sobre un
-flujo heredado de otro propietario. El bloqueo afecta la exportación de la
-solución; no afecta los flujos masivos ya publicados ni el servicio de Google
-Cloud.
-
-## Validaciones ejecutadas
+## Validaciones del repositorio
 
 | Validación | Resultado |
 | --- | --- |
-| Suite del servicio Cloud Run | 61 de 61 pruebas correctas. |
-| Catálogo de perfiles y tasadoras | Correcto; sin errores. |
+| Suite del servicio Cloud Run | 61 de 61 pruebas correctas en la última validación completa. |
+| Catálogo de perfiles y tasadoras | Correcto. |
 | Compilación Python | Correcta. |
+| Definiciones de flujos masivos | Prueban lectura de controles y contrato tipado de consulta. |
 | Sintaxis de `deploy-mass-flows.ps1` | Correcta. |
-| Estado de Cloud Run | Servicio y Job en estado `Ready`. |
-| Prueba E2E OneDrive -> Excel | Pendiente del vínculo y publicación de `Ejecutar`. |
 
-## Siguiente secuencia operativa
+## Próxima validación de interfaz
 
-1. En Power Apps Studio, agregar `auto-tasacion-iniciar-lote` a
-   `autoTasacionJG`.
-2. Asignar la fórmula documentada al botón **Ejecutar** y publicar.
-3. Procesar solo `D01.pdf` y verificar la creación de un `ID_LOTE`.
-4. Validar las ejecuciones de carga y entrega, y
-   `Resultado_Final_<ID_LOTE>.xlsx`.
-5. Revisar tablas y contrato del Excel.
-6. Repetir con 10, 150 y hasta 300 PDFs.
+1. En Studio, agregar `auto-tasacion-iniciar-lote` y
+   `auto-tasacion-consultar-lote` como orígenes de datos de `autoTasacionJG`.
+2. Aplicar `POLLING.md` a `Button5`, al nuevo `tmrEstadoLote`, `Label3` y la
+   etiqueta de progreso, y publicar la aplicación.
+3. Con solo `D01.pdf`, seleccionar, pulsar **Ejecutar** y observar sin acciones
+   manuales `RECIBIDO` → estados intermedios → `COMPLETADO` → `ENTREGADO`.
+4. Confirmar que el Excel aparece en `/auto-tasaciones` y que el Timer deja de
+   consultar al llegar a `ENTREGADO`.
 
 ## Límites y seguridad
 
-- Power Apps transmite solo metadatos; no transmite contenido PDF.
+- Power Apps transmite únicamente metadatos; no transmite contenido PDF.
 - Power Automate es el único componente que lee OneDrive.
-- El servicio no utiliza Microsoft Graph para descargar documentos.
-- No se almacenan PDFs de clientes, resultados productivos, secretos o URLs
-  firmadas en este repositorio.
-- `tblParaProcesar` es la única tabla que puede consumir PAD/IBM 3270.
+- No se almacenan PDFs, resultados productivos, secretos ni URLs firmadas en
+  este repositorio.
+- `tblParaProcesar` es la única tabla destinada a PAD/IBM 3270.

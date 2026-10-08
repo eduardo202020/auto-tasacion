@@ -294,8 +294,33 @@ function New-FlowDefinition {
                     type = 'Response'; kind = 'PowerApp'
                     inputs = [ordered]@{
                         statusCode = 200
-                        body = [ordered]@{ estadojson = "@{body('HTTP_Consultar_Lote')}" }
-                        schema = [ordered]@{ type = 'object'; properties = [ordered]@{ estadojson = [ordered]@{ title = 'EstadoJson'; 'x-ms-dynamically-added' = $true; type = 'string' } } }
+                        # Keep the Power Apps contract typed. The loader's
+                        # per-file metadata remains server-side; the app only
+                        # needs the batch state and safe aggregate progress.
+                        body = [ordered]@{
+                            id_lote = "@body('HTTP_Consultar_Lote')?['id_lote']"
+                            estado = "@body('HTTP_Consultar_Lote')?['estado']"
+                            mensaje = "@body('HTTP_Consultar_Lote')?['mensaje']"
+                            total_pdfs = "@body('HTTP_Consultar_Lote')?['total_pdfs']"
+                            pdfs_cargados = "@body('HTTP_Consultar_Lote')?['pdfs_cargados']"
+                            pdfs_procesados = "@body('HTTP_Consultar_Lote')?['pdfs_procesados']"
+                            pdfs_fallidos = "@body('HTTP_Consultar_Lote')?['pdfs_fallidos']"
+                            resultado_disponible = "@body('HTTP_Consultar_Lote')?['resultado_disponible']"
+                        }
+                        schema = [ordered]@{
+                            type = 'object'
+                            properties = [ordered]@{
+                                id_lote = [ordered]@{ title = 'IdLote'; 'x-ms-dynamically-added' = $true; type = 'string' }
+                                estado = [ordered]@{ title = 'Estado'; 'x-ms-dynamically-added' = $true; type = 'string' }
+                                mensaje = [ordered]@{ title = 'Mensaje'; 'x-ms-dynamically-added' = $true; type = 'string' }
+                                total_pdfs = [ordered]@{ title = 'TotalPdfs'; 'x-ms-dynamically-added' = $true; type = 'integer' }
+                                pdfs_cargados = [ordered]@{ title = 'PdfsCargados'; 'x-ms-dynamically-added' = $true; type = 'integer' }
+                                pdfs_procesados = [ordered]@{ title = 'PdfsProcesados'; 'x-ms-dynamically-added' = $true; type = 'integer' }
+                                pdfs_fallidos = [ordered]@{ title = 'PdfsFallidos'; 'x-ms-dynamically-added' = $true; type = 'integer' }
+                                resultado_disponible = [ordered]@{ title = 'ResultadoDisponible'; 'x-ms-dynamically-added' = $true; type = 'boolean' }
+                            }
+                            required = @('id_lote', 'estado', 'total_pdfs', 'pdfs_cargados', 'pdfs_procesados', 'pdfs_fallidos', 'resultado_disponible')
+                        }
                     }
                 }
             }

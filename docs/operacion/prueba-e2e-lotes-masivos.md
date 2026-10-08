@@ -1,134 +1,91 @@
-# Prueba E2E: lotes masivos de tasaciones
+﻿# Prueba E2E: lotes masivos de tasaciones
 
 ## Propósito
 
 Validar la ruta operativa de PDFs individuales desde OneDrive hasta el Excel
-que consume PAD. Esta prueba no usa la ruta ZIP heredada.
+que consume PAD y, después, el seguimiento automático visible en Power Apps.
+La prueba no usa la ruta ZIP heredada.
 
-## Estado previo
+## Estado de la ruta de procesamiento
 
-- La app `autoTasacionJG` ya lista los PDFs de `/auto-tasaciones/PDFs`.
-- Los flujos `auto-tasacion-iniciar-lote`, `auto-tasacion-cargar-lotes` y
-  `auto-tasacion-entregar-lote` están publicados.
-- El servicio y el Job de Cloud Run superaron las pruebas automatizadas locales.
-- Pendiente: asociar `auto-tasacion-iniciar-lote` al `OnSelect` del botón
-  **Ejecutar** de la app y publicar esa versión.
+La ejecución de referencia con un PDF completó esta secuencia:
 
-## Infraestructura verificada
-
-Verificación realizada el 7 de octubre de 2026 en Google Cloud:
-
-- Cloud Run `demo-tasaciones-ia`: revisión `demo-tasaciones-ia-00077-c2j` en
-  estado `Ready`.
-- API configurada para la carpeta `/auto-tasaciones/PDFs`, hasta 300 PDFs, 2
-  GiB por lote y 90 000 000 bytes por PDF.
-- Cloud Run Job `tasaciones-batch`: estado `Ready`, tiempo máximo de una hora
-  y última ejecución finalizada correctamente.
-
-## Fórmula requerida en `OnSelect`
-
-Antes de pegarla, agrega el flujo `auto-tasacion-iniciar-lote` como origen de
-datos de la aplicación. Luego usa esta fórmula en el botón **Ejecutar**:
-
-```powerfx
-With(
-    {
-        seleccion: ForAll(
-            Filter(colPdfs, Seleccionado),
-            {
-                item_id: ItemId,
-                nombre: Nombre,
-                tamano_bytes: Tamano,
-                etag: ETag
-            }
-        )
-    },
-    If(
-        CountRows(seleccion) = 0,
-        Notify("Seleccione al menos un PDF."; NotificationType.Warning),
-        Set(
-            varLote,
-            'auto-tasacion-iniciar-lote'.Run(
-                JSON(seleccion, JSONFormat.Compact)
-            )
-        );
-        Notify(
-            "Lote " & varLote.id_lote & " registrado. La carga se realizará en segundo plano.";
-            NotificationType.Success
-        )
-    )
-)
+```text
+Power Apps -> iniciar lote -> control de OneDrive -> cargar lotes
+-> Cloud Run Job -> entregar lote -> Resultado_Final_<ID_LOTE>.xlsx
 ```
 
-La fórmula envía solo el manifiesto de la selección; no transmite el contenido
-de ningún PDF.
+El Excel se creó en `/auto-tasaciones` y el control
+`_autotasacion_lote_<ID_LOTE>.json` se eliminó tras confirmar la entrega. Esto
+valida la ruta de procesamiento. La validación pendiente es exclusivamente la
+actualización automática que muestra la Canvas App durante ese proceso.
 
-## Caso inicial
+## Precondiciones para la prueba de interfaz
 
-Usa un PDF ya visible en la carpeta, por ejemplo `D01.pdf`. El primer caso debe
-tener un solo archivo para aislar fallas de integración antes de probar el lote
-completo.
+1. Aplicar y publicar las instrucciones de
+   [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md) en
+   `autoTasacionJG`.
+2. Ejecutar `deploy-mass-flows.ps1 -Activate`, que publica
+   `auto-tasacion-consultar-lote` con su contrato tipado.
+3. Confirmar que el origen de datos de la app contiene
+   `auto-tasacion-listar-pdfs`, `auto-tasacion-iniciar-lote` y
+   `auto-tasacion-consultar-lote`.
 
-## Pasos
+La Canvas App envía solamente el manifiesto (`item_id`, nombre, tamaño y eTag);
+ningún PDF se transmite por la aplicación.
 
-1. En `autoTasacionJG`, pulsa **Actualizar** y verifica que `D01.pdf` aparece
-   con su tamaño.
-2. Marca solamente ese PDF y comprueba que el contador muestra `1`.
-3. Pulsa **Ejecutar**.
-4. La app debe informar el identificador de lote recibido. En OneDrive aparece
-   `_autotasacion_lote_<ID_LOTE>.json`.
-5. Espera la siguiente ejecución de `auto-tasacion-cargar-lotes` (hasta cinco
-   minutos). El flujo debe convertir el contenido binario del archivo de
-   control a JSON, consultar el lote, cargar un PDF individual a GCS e iniciar
-   el Job.
-6. Cuando el Job termine, espera la siguiente ejecución de
-   `auto-tasacion-entregar-lote` (hasta cinco minutos). Debe aparecer
-   `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
-7. Abre el archivo y verifica las hojas `PARA_PROCESAR`, `REVISION_IA` y
-   `CONTROL`, incluidas las tablas `tblParaProcesar`, `tblRevisionIa` y
-   `tblControl`.
+## Caso de prueba: `D01.pdf`
+
+1. Abrir `autoTasacionJG` y pulsar **Actualizar**.
+2. Verificar que aparece `D01.pdf` y seleccionar solamente ese archivo.
+3. Pulsar **Ejecutar**.
+4. Confirmar que la app muestra un `ID_LOTE` y el estado inicial `RECIBIDO`.
+5. Sin pulsar otros botones ni ejecutar flujos manualmente, esperar las
+   consultas automáticas de 10 segundos.
+6. Verificar que la interfaz actualiza el estado y los conteos a medida que el
+   backend avanza: `CARGANDO_PDFS`, `LISTO_PARA_PROCESAR`, `EN_PROCESO` y,
+   transitoriamente, `COMPLETADO`.
+7. Esperar la siguiente recurrencia de entrega y confirmar que la app pasa a
+   `ENTREGADO`.
+8. Verificar `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` y comprobar sus
+   hojas `PARA_PROCESAR`, `REVISION_IA` y `CONTROL`.
+9. Confirmar que el Timer deja de consultar después de `ENTREGADO`.
+
+El mismo caso debe conservar el último estado e ID conocido si una consulta
+puntual falla. Una advertencia de conectividad no equivale a un estado real
+`FALLIDO`.
 
 ## Criterios de aceptación
 
-- La app envía `item_id`, nombre, tamaño y eTag; no envía el PDF.
-- `Leer control lote` termina correctamente y obtiene `id_lote` desde el JSON
-  de control.
-- El lote pasa por `RECIBIDO`, `CARGANDO_PDFS`, `EN_PROCESO` y `COMPLETADO`.
-- Se crea un único Excel con el identificador del lote en OneDrive.
-- El Excel conserva sus tres hojas y el contrato de `tblParaProcesar`.
-- El archivo de control se elimina solo después de crear y confirmar el Excel.
+- `auto-tasacion-consultar-lote` llama a `GET /v1/lotes/{id_lote}` y responde
+  a la app los campos tipados `id_lote`, `estado`, `mensaje`, `total_pdfs`,
+  `pdfs_cargados`, `pdfs_procesados`, `pdfs_fallidos` y
+  `resultado_disponible`.
+- La app conserva el ID del lote, actualiza la etiqueta sin intervención del
+  operador y muestra progreso real cuando el API lo informa.
+- `COMPLETADO` no detiene el seguimiento; este se detiene solo en `ENTREGADO`,
+  `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`.
+- El Excel final se crea una sola vez y el control se elimina solo después de
+  la entrega confirmada.
+- Power Apps no recibe `archivos`, contenido de PDF, rutas GCS ni URLs firmadas.
 
-## Ejecución de regresión: lectura del control
+## Regresiones ya corregidas
 
-El 7 de octubre de 2026 se observó que `Leer control lote` recibía
-`application/octet-stream` desde `GetFileContentByPath`. La definición de ambos
-flujos fue corregida y publicada para convertir `body.$content` de Base64 a
-JSON antes de `ParseJson`.
+`GetFileContentByPath` entrega el control JSON de OneDrive como contenido
+binario. Los flujos de carga y entrega convierten `body.$content` desde Base64
+a JSON antes de `ParseJson`:
 
-La verificación de la definición publicada confirmó la nueva expresión en
-`auto-tasacion-cargar-lotes` y `auto-tasacion-entregar-lote`. El lote de un PDF
-usado para la prueba se mantuvo en `RECIBIDO` con el archivo `PENDIENTE`, sin
-iniciar el Job durante la ventana observada de recurrencia. Por ello esta prueba
-no aprueba todavía la ruta E2E y no se solicitó la entrega del XLSX.
+```text
+@json(base64ToString(outputs('Obtener_control_lote')?['body']?['$content']))
+```
 
-## Regresión: consulta de archivos pendientes
-
-La ejecución posterior confirmó que `Leer_control_lote` ya completaba, pero
-`Filtrar_archivos_pendientes` recibía `null`. La causa era que
-`GET /v1/lotes/{id_lote}` devolvía solo el resumen del lote y omitía
-`archivos`. El cargador requiere ese arreglo para identificar los registros
-`PENDIENTE`.
-
-La revisión `demo-tasaciones-ia-00078-kbq` devuelve ahora los metadatos
-operativos por archivo (`id_archivo`, `item_id`, nombre, eTag, tamaño y estado),
-sin contenido de PDF, rutas GCS ni URLs firmadas. La validación autenticada de
-un lote de un PDF confirmó que `archivos` es un arreglo. La aprobación E2E aún
-requiere una ejecución nueva de `auto-tasacion-cargar-lotes` que llegue a
-`HTTP_Iniciar_Job`.
+La siguiente regresión hacía que `Filtrar_archivos_pendientes` recibiera `null`.
+Se corrigió el resumen de `GET /v1/lotes/{id_lote}` para incluir el arreglo
+operativo `archivos` al cargador. Ese arreglo se mantiene interno y no forma
+parte del contrato de consulta de Power Apps.
 
 ## Prueba de capacidad
 
-Una vez aprobado el caso de un PDF, repetir con 10, 150 y hasta 300 PDFs. El
-límite del manifiesto es 300 archivos, 2 GiB totales y 90 000 000 bytes por PDF.
-Cada iteración debe confirmar que Power Apps y HTTP no transportan ZIPs ni el
-lote completo.
+Tras aprobar el seguimiento de un PDF, repetir con 10, 150 y hasta 300 PDFs.
+Cada iteración debe comprobar que Power Apps y HTTP no transportan ZIPs ni el
+lote completo en contenido binario.
