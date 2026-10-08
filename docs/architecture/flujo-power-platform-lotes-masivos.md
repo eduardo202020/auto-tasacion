@@ -1,6 +1,6 @@
 # Flujo Power Platform para lotes masivos de PDFs
 
-> **Estado:** implementación local pendiente de configuración corporativa y despliegue.
+> **Estado al 7 de octubre de 2026:** servicio, Job y flujos masivos desplegados; la app lista PDFs. Falta vincular y publicar el boton **Ejecutar** para iniciar la prueba E2E.
 
 ## Decisión
 

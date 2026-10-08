@@ -15,11 +15,13 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F08 | Métricas por perfil | Pendiente | Medir revisión, faltantes y correcciones sin guardar PDFs productivos. |
 | F09 | Detección de firmas gráficas u OCR | Implementado localmente | OCR local de encabezados y pies identifica logos sin enviar PDFs fuera de Cloud Run. |
 | F10 | OCR de campo por perfil técnico | Implementado | Braschi recorta celdas técnicas solo ante evidencia y ambigüedad controlada. |
-| F11 | Registro de lote de PDFs | Implementado localmente | `POST /v1/lotes` valida manifiesto, límites e idempotencia y devuelve un `ID_LOTE` sin contenido documental. |
-| F12 | Ingesta OneDrive a GCS por PDF | Backend implementado; flujo pendiente | La API emite ticket por PDF y confirma eTag/tamaño; falta construir el flujo Power Automate que los use. |
-| F13 | Procesamiento asíncrono desde PDFs individuales | Implementado localmente; Job pendiente | `batch_worker.py` procesa únicamente objetos `CARGADO`, uno por iteración, y conserva el XLSX contractual. |
-| F14 | Estado y entrega diferida | Backend implementado; flujo pendiente | API expone progreso, resultado y confirmación de entrega; falta Power Automate para consultar y crear el XLSX en OneDrive. |
+| F11 | Registro de lote de PDFs | Implementado y desplegado | POST /v1/lotes valida manifiesto, limites e idempotencia y devuelve un ID_LOTE sin contenido documental. |
+| F12 | Ingesta OneDrive a GCS por PDF | Implementado y flujo publicado; E2E pendiente | La API emite ticket por PDF y auto-tasacion-cargar-lotes lo usa para cargar y confirmar cada archivo. |
+| F13 | Procesamiento asíncrono desde PDFs individuales | Implementado y desplegado | tasaciones-batch procesa objetos CARGADO, uno por iteracion, y conserva el XLSX contractual. |
+| F14 | Estado y entrega diferida | Implementado y flujo publicado; E2E pendiente | La API expone progreso y resultado; auto-tasacion-entregar-lote crea el XLSX final en OneDrive. |
 | F15 | Integridad e idempotencia por manifiesto | Implementado localmente | SHA-256 de carpeta + `itemId:eTag`, validación eTag antes/después y verificación de tamaño en GCS. |
+| F16 | Ejecucion desde Power Apps | Pendiente de publicacion | La app lista y selecciona PDFs; falta enlazar Ejecutar con auto-tasacion-iniciar-lote. |
+| F17 | Prueba E2E de lote masivo | Pendiente | Ejecutar primero un PDF y luego lotes de 10, 150 y 300 archivos con evidencia en OneDrive y Cloud Run. |
 
 ## Ciclo de alta seguro
 

@@ -26,6 +26,9 @@ lote completo. La arquitectura no usa Microsoft Graph para leer OneDrive.
 La descripción operativa está en
 [flujo Power Platform de lotes masivos](docs/architecture/flujo-power-platform-lotes-masivos.md).
 
+El estado de despliegue, pruebas y pendientes está en
+[estado de implementación](docs/operacion/estado-implementacion-2026-10-07.md).
+
 ## Ruta vigente heredada
 
 La ruta ZIP HTTP sigue disponible como **LEGACY / TRANSICIÓN** para lotes de
