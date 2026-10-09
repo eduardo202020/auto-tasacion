@@ -490,10 +490,16 @@ function New-FlowDefinition {
                                     expression = "@or(equals(variables('estado_lote'), 'COMPLETADO'), equals(variables('estado_lote'), 'ENTREGADO'), equals(variables('estado_lote'), 'FALLIDO'), equals(variables('estado_lote'), 'FALLIDO_ORIGEN_CAMBIO'))"
                                     limit = [ordered]@{ count = 30; timeout = 'PT2H' }
                                     actions = [ordered]@{
+                                        # Power Automate Cloud Flows serializes the Delay action with
+                                        # top-level count/unit fields. The generic Logic Apps interval object
+                                        # is rejected by this runtime schema.
                                         Esperar_con_backoff = [ordered]@{
                                             runAfter = @{}
                                             type = 'Wait'
-                                            inputs = [ordered]@{ interval = "@concat('PT', string(variables('espera_segundos')), 'S')" }
+                                            inputs = [ordered]@{
+                                                count = "@variables('espera_segundos')"
+                                                unit = 'Second'
+                                            }
                                         }
                                         Renovar_claim_en_espera = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/renovar')" -Headers $controlHeaders -Body ([ordered]@{ id_ejecucion = "@workflow()?['run']?['name']" }) -RunAfter ([ordered]@{ Esperar_con_backoff = @('Succeeded') }) -Secure
                                         HTTP_Consultar_Lote_en_espera = New-HttpAction -Method 'GET' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'])" -Headers $controlHeaders -RunAfter ([ordered]@{ Renovar_claim_en_espera = @('Succeeded') }) -Secure

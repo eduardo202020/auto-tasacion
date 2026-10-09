@@ -175,6 +175,15 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertLess(self.definition.index("Crear_excel_final"), self.definition.index("Confirmar_entrega_nuevo"))
         self.assertLess(self.definition.index("Confirmar_entrega_nuevo"), self.definition.index("Eliminar_control_lote_nuevo"))
 
+    def test_wait_uses_the_cloud_flow_count_and_unit_schema(self):
+        start = self.definition.index("Esperar_con_backoff")
+        end = self.definition.index("Renovar_claim_en_espera", start)
+        wait_action = self.definition[start:end]
+        self.assertIn("type = 'Wait'", wait_action)
+        self.assertIn("count = \"@variables('espera_segundos')\"", wait_action)
+        self.assertIn("unit = 'Second'", wait_action)
+        self.assertNotIn('interval = "@concat(', wait_action)
+
     def test_backoff_update_does_not_self_reference_the_target_variable(self):
         start = self.definition.index("Aumentar_espera_hasta_cinco_minutos")
         end = self.definition.index("Lote_alcanzo_estado_terminal", start)
