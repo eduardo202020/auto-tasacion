@@ -1,4 +1,6 @@
-﻿import io
+import contextlib
+import io
+import json
 import os
 import sys
 import unittest
@@ -759,6 +761,58 @@ class BatchWorkerTests(unittest.TestCase):
                 bucket_name="tasaciones-prueba",
                 use_environment_reviewer=False,
             )
+
+    def test_worker_marks_failed_after_all_pdfs_when_workbook_construction_fails(self):
+        """El fallo posterior a la extraccion conserva el progreso del lote."""
+        manifest = self._confirmed_batch()
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured), patch(
+            "batch_worker.build_workbook",
+            side_effect=ValueError("contenido-documental-que-no-debe-registrarse"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "CONSTRUYENDO_XLSX"):
+                process_batch_gcs(
+                    manifest["id_lote"],
+                    store=self.store,
+                    storage_client=self.storage,
+                    bucket_name="tasaciones-prueba",
+                    expected_input_prefix=f"ingresos/{manifest['id_lote']}/pdfs/",
+                    expected_output_object=manifest["resultado_objeto"],
+                    use_environment_reviewer=False,
+                )
+
+        saved = self.store.get(manifest["id_lote"])
+        self.assertEqual(saved["estado"], BATCH_FAILED)
+        self.assertEqual(saved["pdfs_procesados"], saved["total_pdfs"])
+        self.assertIn("CONSTRUYENDO_XLSX", saved["mensaje"])
+        self.assertNotIn("contenido-documental", captured.getvalue())
+        events = [json.loads(line)["evento"] for line in captured.getvalue().splitlines() if line.startswith("{")]
+        self.assertIn("PDFS_PROCESADOS", events)
+        self.assertIn("JOB_FALLIDO", events)
+
+    def test_worker_emits_safe_stage_logs_on_success(self):
+        manifest = self._confirmed_batch()
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            process_batch_gcs(
+                manifest["id_lote"],
+                store=self.store,
+                storage_client=self.storage,
+                bucket_name="tasaciones-prueba",
+                expected_input_prefix=f"ingresos/{manifest['id_lote']}/pdfs/",
+                expected_output_object=manifest["resultado_objeto"],
+                use_environment_reviewer=False,
+            )
+
+        logs = [json.loads(line) for line in captured.getvalue().splitlines() if line.startswith("{")]
+        self.assertEqual(
+            [entry["evento"] for entry in logs],
+            [
+                "JOB_INICIADO", "PDFS_PROCESADOS", "CONSTRUYENDO_XLSX", "XLSX_CONSTRUIDO",
+                "SUBIENDO_XLSX", "XLSX_SUBIDO", "ACTUALIZANDO_MANIFIESTO", "COMPLETADO",
+            ],
+        )
+        self.assertNotIn("PDF sint" + chr(233) + "tico", captured.getvalue())
 
     def test_direct_pdf_entries_keep_distinct_case_ids_for_same_content_and_names(self):
         content = make_pdf()

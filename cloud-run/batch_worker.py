@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
+import traceback
 from typing import Any, Iterator
 
 from google.cloud import storage
@@ -34,6 +36,24 @@ BATCH_ID_ENV = "BATCH_ID"
 BATCH_INPUT_PREFIX_ENV = "BATCH_INPUT_PREFIX"
 BATCH_OUTPUT_XLSX_ENV = "BATCH_OUTPUT_XLSX"
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _log_event(event: str, **fields: Any) -> None:
+    """Emite telemetría estructurada sin contenido documental ni secretos."""
+    print(json.dumps({"evento": event, **fields}, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+
+def _safe_traceback(error: BaseException) -> list[dict[str, int | str]]:
+    """Devuelve solo marcos de código, nunca ``str(error)`` ni valores de PDFs."""
+    return [
+        {"archivo": Path(frame.filename).name, "linea": frame.lineno, "funcion": frame.name}
+        for frame in traceback.extract_tb(error.__traceback__)
+    ]
+
+
+def _safe_internal_message(stage: str, error: BaseException) -> str:
+    """Mensaje útil para el manifiesto que no filtra contenido de documentos."""
+    return f"Error interno durante {stage} ({type(error).__name__})"
 
 
 def batch_storage_bucket_name() -> str:
@@ -95,6 +115,7 @@ def process_batch_gcs(
     use_environment_reviewer: bool = True,
 ) -> dict[str, int | str]:
     """Procesa exclusivamente los PDFs confirmados en el manifiesto indicado."""
+    stage = "VALIDANDO_LOTE"
     store = store or state_store_from_environment()
     manifest = store.get(batch_id)
     if manifest is None:
@@ -131,17 +152,33 @@ def process_batch_gcs(
             yield item["nombre"], _verified_pdf_bytes(bucket, item)
 
     try:
+        _log_event("JOB_INICIADO", id_lote=batch_id, total_pdfs=len(confirmed))
+        stage = "PROCESANDO_PDFS"
         ready_rows, review_rows, control_rows = process_pdf_entries(
             pdf_entries(),
             use_environment_reviewer=use_environment_reviewer,
             on_processed=lambda: _mark_processed(store, batch_id),
         )
+        _log_event(
+            "PDFS_PROCESADOS",
+            id_lote=batch_id,
+            total_pdfs=len(confirmed),
+            para_procesar=len(ready_rows),
+            revision_ia=len(review_rows),
+            control=len(control_rows),
+        )
+        stage = "CONSTRUYENDO_XLSX"
+        _log_event("CONSTRUYENDO_XLSX", id_lote=batch_id)
         workbook = build_workbook(ready_rows, review_rows, control_rows)
+        _log_event("XLSX_CONSTRUIDO", id_lote=batch_id, tamano_bytes=len(workbook.getbuffer()))
+        stage = "SUBIENDO_XLSX"
+        _log_event("SUBIENDO_XLSX", id_lote=batch_id)
         bucket.blob(output_object).upload_from_file(
             workbook,
             rewind=True,
             content_type=XLSX_CONTENT_TYPE,
         )
+        _log_event("XLSX_SUBIDO", id_lote=batch_id)
 
         def complete(current: dict[str, Any]) -> None:
             if current.get("estado") != BATCH_PROCESSING:
@@ -151,13 +188,35 @@ def process_batch_gcs(
             current["resultado_disponible"] = True
             current["mensaje"] = ""
 
+        stage = "ACTUALIZANDO_MANIFIESTO"
+        _log_event("ACTUALIZANDO_MANIFIESTO", id_lote=batch_id)
         completed, _ = update_manifest(store, batch_id, complete)
+        _log_event("COMPLETADO", id_lote=batch_id, total_pdfs=len(confirmed))
     except BatchError as error:
         _mark_failed(store, batch_id, str(error))
+        _log_event(
+            "JOB_FALLIDO",
+            estado=BATCH_FAILED,
+            codigo=error.code,
+            etapa=stage,
+            tipo_error=type(error).__name__,
+            mensaje=str(error),
+            traceback=_safe_traceback(error),
+        )
         raise
     except Exception as error:
-        _mark_failed(store, batch_id, "El Job no pudo procesar los PDFs confirmados")
-        raise RuntimeError("El Job no pudo procesar los PDFs confirmados") from error
+        safe_message = _safe_internal_message(stage, error)
+        _mark_failed(store, batch_id, safe_message)
+        _log_event(
+            "JOB_FALLIDO",
+            estado=BATCH_FAILED,
+            codigo="ERROR_INTERNO",
+            etapa=stage,
+            tipo_error=type(error).__name__,
+            mensaje=safe_message,
+            traceback=_safe_traceback(error),
+        )
+        raise RuntimeError(safe_message) from error
 
     return {
         "id_lote": completed["id_lote"],

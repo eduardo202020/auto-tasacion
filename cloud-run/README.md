@@ -43,6 +43,23 @@ Descarga solamente un PDF confirmado por iteración y genera
 `Resultado_Final_<ID_LOTE>.xlsx` en GCS. No usa ZIP masivo, GCS FUSE ni
 Microsoft Graph.
 
+### Integridad y observabilidad del XLSX
+
+Antes de escribir las tres hojas, `build_workbook()` normaliza cada celda que
+cruza la frontera hacia Excel. Elimina unicamente caracteres de control que
+`openpyxl` no admite, limita texto a 32 767 caracteres, convierte
+`None`/NaN/infinito a vacio, decodifica `bytes` de forma tolerante y protege
+texto que comienza con `=`, `+`, `-` o `@` para que Excel no lo evalua como
+formula. La normalizacion no interviene en las reglas de extraccion ni cambia
+las columnas, tablas o rutas de cada caso.
+
+El Job registra eventos JSON sin contenido documental: `JOB_INICIADO`,
+`PDFS_PROCESADOS`, `CONSTRUYENDO_XLSX`, `XLSX_CONSTRUIDO`, `SUBIENDO_XLSX`,
+`XLSX_SUBIDO`, `ACTUALIZANDO_MANIFIESTO` y `COMPLETADO`. Ante un error tambien
+registra `JOB_FALLIDO` con etapa, codigo, tipo de excepcion, mensaje seguro y
+marcos de la traza, sin serializar texto extraido ni el mensaje original de una
+excepcion que pudiera contenerlo.
+
 ### Estado y tiempo del lote
 
 `POST /v1/lotes/{id}/iniciar` persiste `EN_PROCESO` antes de solicitar el

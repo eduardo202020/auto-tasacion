@@ -14,10 +14,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
 from datetime import timedelta
+from numbers import Real
 from uuid import uuid4
 import zipfile
 from typing import Any, Callable, Iterable
@@ -28,6 +30,7 @@ import pandas as pd
 from flask import Response
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 import address_parser
@@ -145,8 +148,69 @@ CORS_HEADERS = {
 }
 
 
+EXCEL_MAX_CELL_LENGTH = 32_767
+_EXCEL_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
 def as_excel_value(value: Any) -> Any:
+    """Compatibilidad de la fila macro durante la evaluación del caso."""
     return "" if value is None else value
+
+
+def sanitize_excel_cell(value: Any) -> Any:
+    """Devuelve un valor seguro para una celda de Excel.
+
+    La extracción de PDFs y las evidencias de IA son datos externos. Un único
+    carácter de control permitido por Python pero rechazado por Excel no debe
+    impedir generar el resultado de todo el lote. Esta función se aplica justo
+    antes de crear el libro; no altera los datos usados para enrutar el caso.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, Real):
+        return value if math.isfinite(float(value)) else ""
+
+    # pandas.NA y sus equivalentes escalares no se pueden escribir como un
+    # valor útil en una celda.
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, bool) and missing:
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        text = value
+    else:
+        # Los contratos de salida esperan escalares. Esta es la frontera de
+        # serialización que evita que un objeto anómalo invalide todo el XLSX.
+        text = str(value)
+
+    text = ILLEGAL_CHARACTERS_RE.sub("", text)
+    if text.startswith(_EXCEL_FORMULA_PREFIXES):
+        # Excel muestra la comilla como texto y no evalúa el valor extraído.
+        return "'" + text[: EXCEL_MAX_CELL_LENGTH - 1]
+    return text[:EXCEL_MAX_CELL_LENGTH]
+
+
+def _sanitize_rows(rows: list[list[Any]], columns: list[str]) -> list[list[Any]]:
+    """Normaliza filas posicionales sin modificar el contrato de columnas."""
+    return [
+        [sanitize_excel_cell(row[index]) if index < len(row) else "" for index in range(len(columns))]
+        for row in rows
+    ]
+
+
+def _sanitize_mapping_rows(rows: list[dict[str, Any]], columns: list[str]) -> list[dict[str, Any]]:
+    """Normaliza filas de trazabilidad y conserva el orden contractual."""
+    return [
+        {column: sanitize_excel_cell(row.get(column, "")) for column in columns}
+        for row in rows
+    ]
 
 
 def is_blank(value: Any) -> bool:
@@ -751,9 +815,17 @@ def build_workbook(
 ) -> io.BytesIO:
     """Genera las tres tablas que consume el flujo Microsoft."""
     output = io.BytesIO()
-    ready_df = pd.DataFrame(ready_rows, columns=PARA_PROCESAR_COLUMNS)
-    review_df = pd.DataFrame(review_rows).reindex(columns=REVIEW_COLUMNS)
-    control_df = pd.DataFrame(control_rows).reindex(columns=CONTROL_COLUMNS)
+    # Sanitizar en esta frontera protege tanto los campos deterministas como
+    # los que provienen de IA, sin cambiar la decisión de ruta ya tomada.
+    ready_df = pd.DataFrame(
+        _sanitize_rows(ready_rows, PARA_PROCESAR_COLUMNS), columns=PARA_PROCESAR_COLUMNS,
+    )
+    review_df = pd.DataFrame(
+        _sanitize_mapping_rows(review_rows, REVIEW_COLUMNS), columns=REVIEW_COLUMNS,
+    )
+    control_df = pd.DataFrame(
+        _sanitize_mapping_rows(control_rows, CONTROL_COLUMNS), columns=CONTROL_COLUMNS,
+    )
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         ready_df.to_excel(writer, sheet_name=PARA_PROCESAR_SHEET, index=False)
         review_df.to_excel(writer, sheet_name=REVISION_IA_SHEET, index=False)

@@ -619,6 +619,46 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertIn("tblRevisionIa", workbook["REVISION_IA"].tables)
         self.assertIn("tblControl", workbook["CONTROL"].tables)
 
+    def test_build_workbook_sanitizes_external_cell_values(self):
+        """Un valor extraído no debe impedir guardar todo el lote en Excel."""
+        row, _ = complete_row({"Año construccion": 2018})
+        row[0] = "texto\x00con\x0bcontroles"
+        row[1] = float("nan")
+        row[2] = float("inf")
+        row[3] = b"bytes\x00externos"
+        review = {"ID_CASO": "TAS-REV", "Motivo IA": "=formula-extraida"}
+        control = {
+            "ID_CASO": "TAS-CTRL",
+            "PDF_Archivo": "D01.pdf",
+            "Observacion extraccion": "x" * 40_000,
+        }
+
+        workbook = load_workbook(
+            io.BytesIO(build_workbook([row] * 40, [review], [control]).read()), data_only=False,
+        )
+        para = workbook["PARA_PROCESAR"]
+        revision = workbook["REVISION_IA"]
+        control_sheet = workbook["CONTROL"]
+        self.assertEqual(para["A2"].value, "textoconcontroles")
+        self.assertIsNone(para["B2"].value)
+        self.assertIsNone(para["C2"].value)
+        self.assertEqual(para["D2"].value, "bytesexternos")
+        formula_column = REVIEW_COLUMNS.index("Motivo IA") + 1
+        formula_cell = revision.cell(2, formula_column)
+        self.assertEqual(formula_cell.value, "'=formula-extraida")
+        self.assertEqual(formula_cell.data_type, "s")
+        observation_column = CONTROL_COLUMNS.index("Observacion extraccion") + 1
+        self.assertEqual(len(control_sheet.cell(2, observation_column).value), 32_767)
+
+    def test_build_workbook_creates_contract_tables_when_all_sheets_are_empty(self):
+        workbook = load_workbook(io.BytesIO(build_workbook([], [], []).read()), data_only=True)
+        self.assertEqual(workbook["PARA_PROCESAR"].max_row, 1)
+        self.assertEqual(workbook["REVISION_IA"].max_row, 1)
+        self.assertEqual(workbook["CONTROL"].max_row, 1)
+        self.assertIn("tblParaProcesar", workbook["PARA_PROCESAR"].tables)
+        self.assertIn("tblRevisionIa", workbook["REVISION_IA"].tables)
+        self.assertIn("tblControl", workbook["CONTROL"].tables)
+
     def test_endpoint_accepts_raw_zip_and_returns_xlsx(self):
         app = Flask(__name__)
         with app.test_request_context("/", method="POST", data=build_zip(), content_type="application/zip"):
