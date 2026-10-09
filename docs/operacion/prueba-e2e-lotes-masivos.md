@@ -59,6 +59,15 @@ El mismo caso debe conservar el último estado e ID conocido si una consulta
 puntual falla. Una advertencia de conectividad no equivale a un estado real
 `FALLIDO`.
 
+## Verificación de entrega
+
+Durante `COMPLETADO`, confirmar que `resultado_disponible` es `true` y que el
+Timer sigue consultando. En el historial de `auto-tasacion-entregar-lote`, el
+orden obligatorio es `Solicitar_ticket_resultado` -> `Descargar_resultado` ->
+`Crear_excel_final` -> `Confirmar_entrega`. La interfaz solo puede mostrar
+`ENTREGADO` después de que exista `Resultado_Final_<ID_LOTE>.xlsx` y la llamada
+de confirmación haya sido exitosa.
+
 ## Casos adicionales de interfaz
 
 ### Dos PDFs

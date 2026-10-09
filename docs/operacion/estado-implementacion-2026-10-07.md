@@ -76,6 +76,25 @@ cambios de contrato de esta revisión también requieren desplegar el servicio y
 regenerar los flujos antes de actualizar el origen de datos de la app. No afecta
 la recurrencia de los flujos masivos ni el procesamiento de Google Cloud.
 
+## Investigación de consistencia de estados
+
+Se identificó una carrera entre la API de inicio y Cloud Run Job: la versión
+anterior solicitaba el Job antes de persistir `EN_PROCESO`. Un Job que arrancaba
+de inmediato podía leer `LISTO_PARA_PROCESAR`, rechazar el manifiesto y dejar
+el lote sin resultado. La corrección persiste `EN_PROCESO` antes de invocar el
+Job y conserva el resultado si este termina antes de que la solicitud de inicio
+responda.
+
+El backend solo persiste `ENTREGADO` en `POST /v1/lotes/{id}/entrega`. El flujo
+de entrega crea primero el XLSX en OneDrive y confirma después; su condición
+requiere `estado = COMPLETADO` y `resultado_disponible = true`. La guía de la
+Canvas App reinicia todas las variables de seguimiento antes de iniciar un
+lote, para impedir que una sesión anterior se muestre como estado del nuevo ID.
+
+Estas correcciones se validan localmente y requieren desplegar el servicio y
+regenerar los flujos antes de una nueva prueba E2E. La Canvas App requiere
+aplicar y publicar de forma manual la fórmula completa de `POLLING.md`.
+
 ## Validaciones del repositorio
 
 | Validación | Resultado |

@@ -181,6 +181,8 @@ class BatchControlApi:
         if not confirmed_etag:
             raise BatchError("etag_confirmado es obligatorio")
         manifest = self.get_batch(batch_id)
+        if manifest.get("estado") in {BATCH_FAILED, "FALLIDO_ORIGEN_CAMBIO", BATCH_PROCESSING, BATCH_COMPLETED, BATCH_DELIVERED}:
+            raise BatchError("El lote no acepta más confirmaciones", code="LOTE_NO_DISPONIBLE", status=409)
         item = find_file(manifest, file_id)
         if item.get("estado") == FILE_UPLOADED and item.get("etag_confirmado") == confirmed_etag:
             return public_batch_status(manifest)
@@ -218,24 +220,54 @@ class BatchControlApi:
         return public_batch_status(saved)
 
     def start_batch(self, batch_id: str) -> dict[str, Any]:
-        manifest = self.get_batch(batch_id)
-        if manifest.get("estado") == BATCH_PROCESSING:
-            return public_batch_status(manifest)
-        if manifest.get("estado") != BATCH_READY:
-            raise BatchError("El lote no tiene todos los PDFs confirmados", code="LOTE_INCOMPLETO", status=409)
-        execution = self.job_launcher(manifest)
-
-        def mark_processing(current: dict[str, Any]) -> None:
+        def mark_processing(current: dict[str, Any]) -> bool:
             if current.get("estado") == BATCH_PROCESSING:
-                return
+                return False
             if current.get("estado") != BATCH_READY:
                 raise BatchError("El lote no tiene todos los PDFs confirmados", code="LOTE_INCOMPLETO", status=409)
             current["estado"] = BATCH_PROCESSING
-            current["ejecucion_job"] = str(execution)
             current["mensaje"] = ""
+            return True
 
-        saved, _ = update_manifest(self.store, batch_id, mark_processing)
+        # Persist EN_PROCESO before submitting the Cloud Run Job. A Job can
+        # begin immediately after the run request succeeds; launching it first
+        # allowed it to read LISTO_PARA_PROCESAR and exit before this mutation.
+        manifest, started = update_manifest(self.store, batch_id, mark_processing)
+        if not started:
+            return public_batch_status(manifest)
+
+        try:
+            execution = self.job_launcher(manifest)
+        except BatchError:
+            self._mark_job_launch_failed(batch_id)
+            raise
+        except Exception:
+            self._mark_job_launch_failed(batch_id)
+            raise
+
+        def record_execution(current: dict[str, Any]) -> None:
+            # The Job can complete before the launch endpoint returns. Preserve
+            # that terminal progress while still retaining its execution id.
+            if current.get("estado") in {BATCH_PROCESSING, BATCH_COMPLETED, BATCH_DELIVERED}:
+                current["ejecucion_job"] = str(execution)
+
+        saved, _ = update_manifest(self.store, batch_id, record_execution)
         return public_batch_status(saved)
+
+    def _mark_job_launch_failed(self, batch_id: str) -> None:
+        def fail(current: dict[str, Any]) -> None:
+            # Never overwrite a result produced by a Job that did start despite
+            # a transient response failure from the launch request.
+            if current.get("estado") != BATCH_PROCESSING:
+                return
+            current["estado"] = BATCH_FAILED
+            current["mensaje"] = "No fue posible iniciar el Cloud Run Job"
+
+        try:
+            update_manifest(self.store, batch_id, fail)
+        except BatchError:
+            # Preserve the launch error and avoid leaking implementation detail.
+            pass
 
     def result_ticket(self, batch_id: str) -> dict[str, Any]:
         """Emite una URL temporal de solo lectura para el XLSX completado."""

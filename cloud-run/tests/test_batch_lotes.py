@@ -160,11 +160,23 @@ class BatchControlApiTests(unittest.TestCase):
             job_launcher=lambda _manifest: "operations/prueba",
         )
 
-    def _create_one_file_batch(self):
+    def _create_one_file_batch(self, *, index=1):
         content = make_pdf()
-        manifest, created = self.api.create_batch(payload([file_item(1, size=len(content))]))
+        manifest, created = self.api.create_batch(payload([file_item(index, size=len(content))]))
         self.assertTrue(created)
         return manifest, content
+
+    def _processing_one_file_batch(self, *, index=1):
+        """Build a batch through its valid transitions up to EN_PROCESO."""
+        manifest, content = self._create_one_file_batch(index=index)
+        item = manifest["archivos"][0]
+        self.api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+        blob = self.storage.bucket("tasaciones-prueba").blob(item["objeto_gcs"])
+        blob.data = content
+        blob.content_type = "application/pdf"
+        self.api.confirm_upload(manifest["id_lote"], item["id_archivo"], {"etag_confirmado": item["etag"]})
+        self.api.start_batch(manifest["id_lote"])
+        return self.store.get(manifest["id_lote"])
 
     def test_identical_manifest_reuses_same_batch(self):
         first, created = self.api.create_batch(payload([file_item(1)]))
@@ -222,13 +234,15 @@ class BatchControlApiTests(unittest.TestCase):
 
     def test_delivery_freezes_the_persisted_duration(self):
         with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:00:00Z"):
-            manifest, _ = self.api.create_batch(payload([file_item(1)]))
+            manifest = self._processing_one_file_batch()
 
-        def mark_delivered(current):
-            current["estado"] = BATCH_DELIVERED
+        def mark_completed(current):
+            current["estado"] = BATCH_COMPLETED
+            current["resultado_disponible"] = True
 
         with patch("batch_lotes.utc_timestamp", return_value="2026-10-08T12:03:42Z"):
-            update_manifest(self.store, manifest["id_lote"], mark_delivered)
+            update_manifest(self.store, manifest["id_lote"], mark_completed)
+            self.api.confirm_delivery(manifest["id_lote"])
         delivered = self.store.get(manifest["id_lote"])
         self.assertEqual(delivered["fecha_fin"], "2026-10-08T12:03:42Z")
         self.assertEqual(public_batch_status(delivered)["duracion_segundos"], 222)
@@ -292,21 +306,95 @@ class BatchControlApiTests(unittest.TestCase):
                 os.environ["BATCH_CONTROL_API_TOKEN"] = previous
 
     def test_result_ticket_is_available_only_after_completion(self):
-        manifest, _ = self._create_one_file_batch()
+        manifest = self._processing_one_file_batch(index=2)
         with self.assertRaisesRegex(BatchError, "resultado del lote"):
             self.api.result_ticket(manifest["id_lote"])
 
         result = self.storage.bucket("tasaciones-prueba").blob(manifest["resultado_objeto"])
         result.data = b"xlsx-sintetico"
+
         def mark_completed(current):
             current["estado"] = BATCH_COMPLETED
-            current["resultado_disponible"] = True
+
         update_manifest(self.store, manifest["id_lote"], mark_completed)
+        with self.assertRaisesRegex(BatchError, "resultado del lote"):
+            self.api.result_ticket(manifest["id_lote"])
+
+        def mark_result_available(current):
+            current["resultado_disponible"] = True
+
+        update_manifest(self.store, manifest["id_lote"], mark_result_available)
 
         ticket = self.api.result_ticket(manifest["id_lote"])
         self.assertEqual(ticket["id_lote"], manifest["id_lote"])
         self.assertIn(manifest["resultado_objeto"], ticket["url_descarga"])
         self.assertNotIn("objeto", ticket)
+
+    def test_confirm_delivery_only_changes_a_completed_available_result(self):
+        manifest, _ = self._create_one_file_batch()
+        with self.assertRaisesRegex(BatchError, "resultado del lote"):
+            self.api.confirm_delivery(manifest["id_lote"])
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], "RECIBIDO")
+
+        manifest = self._processing_one_file_batch(index=2)
+        result = self.storage.bucket("tasaciones-prueba").blob(manifest["resultado_objeto"])
+        result.data = b"xlsx-sintetico"
+
+        def mark_completed(current):
+            current["estado"] = BATCH_COMPLETED
+            current["resultado_disponible"] = True
+
+        update_manifest(self.store, manifest["id_lote"], mark_completed)
+        delivered = self.api.confirm_delivery(manifest["id_lote"])
+        self.assertEqual(delivered["estado"], BATCH_DELIVERED)
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], BATCH_DELIVERED)
+
+    def test_manifest_rejects_backward_state_transitions(self):
+        manifest = self._processing_one_file_batch()
+
+        def mark_completed(current):
+            current["estado"] = BATCH_COMPLETED
+            current["resultado_disponible"] = True
+
+        update_manifest(self.store, manifest["id_lote"], mark_completed)
+        with self.assertRaisesRegex(BatchError, "transición de estado"):
+            update_manifest(
+                self.store,
+                manifest["id_lote"],
+                lambda current: current.update({"estado": BATCH_PROCESSING}),
+            )
+
+        self.api.confirm_delivery(manifest["id_lote"])
+        with self.assertRaisesRegex(BatchError, "transición de estado"):
+            update_manifest(
+                self.store,
+                manifest["id_lote"],
+                lambda current: current.update({"estado": BATCH_COMPLETED}),
+            )
+
+    def test_failed_job_launch_marks_the_batch_failed_instead_of_leaving_processing(self):
+        manifest, content = self._create_one_file_batch()
+        item = manifest["archivos"][0]
+        self.api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+        blob = self.storage.bucket("tasaciones-prueba").blob(item["objeto_gcs"])
+        blob.data = content
+        blob.content_type = "application/pdf"
+        self.api.confirm_upload(manifest["id_lote"], item["id_archivo"], {"etag_confirmado": item["etag"]})
+        failing_api = BatchControlApi(
+            self.store,
+            upload_bucket="tasaciones-prueba",
+            storage_client=self.storage,
+            signed_url_factory=lambda _name: "https://signed.invalid/upload",
+            job_launcher=lambda _manifest: (_ for _ in ()).throw(
+                BatchError("Job no disponible", code="JOB_NO_INICIADO", status=503)
+            ),
+        )
+
+        with self.assertRaisesRegex(BatchError, "Job no disponible"):
+            failing_api.start_batch(manifest["id_lote"])
+        saved = self.store.get(manifest["id_lote"])
+        self.assertEqual(saved["estado"], BATCH_FAILED)
+        self.assertEqual(saved["mensaje"], "No fue posible iniciar el Cloud Run Job")
 
     def test_missing_gcs_object_marks_batch_failed(self):
         manifest, _ = self._create_one_file_batch()
@@ -388,11 +476,105 @@ class BatchWorkerTests(unittest.TestCase):
         self.assertEqual([cell.value for cell in workbook["REVISION_IA"][1]], REVIEW_COLUMNS)
         self.assertEqual([cell.value for cell in workbook["CONTROL"][1]], CONTROL_COLUMNS)
 
+    def test_immediate_job_sees_processing_and_completes_the_lifecycle(self):
+        """Reproduces a Cloud Run Job starting before the run API returns."""
+        observed_states = []
+
+        def immediate_job(manifest):
+            observed_states.append(self.store.get(manifest["id_lote"])["estado"])
+            process_batch_gcs(
+                manifest["id_lote"],
+                store=self.store,
+                storage_client=self.storage,
+                bucket_name="tasaciones-prueba",
+                expected_input_prefix=f"ingresos/{manifest['id_lote']}/pdfs/",
+                expected_output_object=manifest["resultado_objeto"],
+                use_environment_reviewer=False,
+            )
+            return "operations/inmediata"
+
+        api = BatchControlApi(
+            self.store,
+            upload_bucket="tasaciones-prueba",
+            storage_client=self.storage,
+            signed_url_factory=lambda _name: "https://signed.invalid/upload",
+            job_launcher=immediate_job,
+        )
+        content = make_pdf("PDF sintético de carrera")
+        manifest, _ = api.create_batch(payload([file_item(7, size=len(content))]))
+        item = manifest["archivos"][0]
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], "RECIBIDO")
+        api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], "CARGANDO_PDFS")
+        blob = self.storage.bucket("tasaciones-prueba").blob(item["objeto_gcs"])
+        blob.data = content
+        blob.content_type = "application/pdf"
+        api.confirm_upload(manifest["id_lote"], item["id_archivo"], {"etag_confirmado": item["etag"]})
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], BATCH_READY)
+
+        started = api.start_batch(manifest["id_lote"])
+        self.assertEqual(observed_states, [BATCH_PROCESSING])
+        self.assertEqual(started["estado"], BATCH_COMPLETED)
+        self.assertTrue(started["resultado_disponible"])
+
+        app = Flask(__name__)
+        with app.test_request_context(f"/v1/lotes/{manifest['id_lote']}", method="GET"):
+            response = handle_request(request, api)
+        status = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(status["id_lote"], manifest["id_lote"])
+        self.assertEqual(status["estado"], BATCH_COMPLETED)
+        self.assertTrue(status["resultado_disponible"])
+
+        ticket = api.result_ticket(manifest["id_lote"])
+        self.assertEqual(ticket["id_lote"], manifest["id_lote"])
+        self.assertEqual(api.confirm_delivery(manifest["id_lote"])["estado"], BATCH_DELIVERED)
+
+    def test_completed_batch_cannot_regress_when_start_is_retried(self):
+        manifest = self._confirmed_batch()
+        process_batch_gcs(
+            manifest["id_lote"],
+            store=self.store,
+            storage_client=self.storage,
+            bucket_name="tasaciones-prueba",
+            expected_input_prefix=f"ingresos/{manifest['id_lote']}/pdfs/",
+            expected_output_object=manifest["resultado_objeto"],
+            use_environment_reviewer=False,
+        )
+        with self.assertRaisesRegex(BatchError, "todos los PDFs confirmados"):
+            self.api.start_batch(manifest["id_lote"])
+        saved = self.store.get(manifest["id_lote"])
+        self.assertEqual(saved["estado"], BATCH_COMPLETED)
+        self.assertTrue(saved["resultado_disponible"])
+
+    def test_stale_worker_cannot_demote_a_delivered_batch(self):
+        manifest = self._confirmed_batch()
+        process_batch_gcs(
+            manifest["id_lote"],
+            store=self.store,
+            storage_client=self.storage,
+            bucket_name="tasaciones-prueba",
+            expected_input_prefix=f"ingresos/{manifest['id_lote']}/pdfs/",
+            expected_output_object=manifest["resultado_objeto"],
+            use_environment_reviewer=False,
+        )
+        self.api.confirm_delivery(manifest["id_lote"])
+
+        with self.assertRaisesRegex(BatchError, "no está listo"):
+            process_batch_gcs(
+                manifest["id_lote"],
+                store=self.store,
+                storage_client=self.storage,
+                bucket_name="tasaciones-prueba",
+                use_environment_reviewer=False,
+            )
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], BATCH_DELIVERED)
+
     def test_worker_rejects_manifest_without_all_confirmed_pdfs(self):
         manifest, _ = self.api.create_batch(payload([file_item(1)]))
-        def force_processing(current):
-            current["estado"] = BATCH_PROCESSING
-        update_manifest(self.store, manifest["id_lote"], force_processing)
+        # Deliberately corrupt the in-memory fixture; a valid API transition
+        # can never start the Job before all PDFs are confirmed.
+        self.store._batches[manifest["id_lote"]]["estado"] = BATCH_PROCESSING
         with self.assertRaisesRegex(BatchError, "todos los PDFs confirmados"):
             process_batch_gcs(
                 manifest["id_lote"],

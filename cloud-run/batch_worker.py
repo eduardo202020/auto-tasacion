@@ -15,8 +15,10 @@ from google.cloud import storage
 
 from batch_lotes import (
     BATCH_COMPLETED,
+    BATCH_DELIVERED,
     BATCH_FAILED,
     BATCH_PROCESSING,
+    BATCH_SOURCE_CHANGED,
     FILE_UPLOADED,
     BatchLimits,
     PDF_CONTENT_TYPE,
@@ -70,7 +72,7 @@ def _mark_processed(store: BatchStore, batch_id: str) -> None:
 
 def _mark_failed(store: BatchStore, batch_id: str, message: str) -> None:
     def fail(manifest: dict[str, Any]) -> None:
-        if manifest.get("estado") == BATCH_COMPLETED:
+        if manifest.get("estado") in {BATCH_COMPLETED, BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED}:
             return
         manifest["estado"] = BATCH_FAILED
         manifest["mensaje"] = message
@@ -98,6 +100,11 @@ def process_batch_gcs(
     if manifest is None:
         raise BatchError("El lote no existe", code="LOTE_NO_ENCONTRADO", status=404)
     if manifest.get("estado") != BATCH_PROCESSING:
+        # A Job invoked against a non-terminal state must leave an observable
+        # failure instead of stranding the manifest in an intermediate state.
+        # Completed and delivered batches can only be stale duplicate Jobs.
+        if manifest.get("estado") not in {BATCH_COMPLETED, BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED}:
+            _mark_failed(store, batch_id, "El Job se ejecutó antes de que el lote estuviera en proceso")
         raise BatchError("El lote no está listo para ejecución", code="ESTADO_INVALIDO", status=409)
 
     confirmed = [item for item in manifest.get("archivos", []) if item.get("estado") == FILE_UPLOADED]

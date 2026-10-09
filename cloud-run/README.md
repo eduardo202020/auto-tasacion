@@ -44,6 +44,14 @@ Microsoft Graph.
 
 ### Estado y tiempo del lote
 
+`POST /v1/lotes/{id}/iniciar` persiste `EN_PROCESO` antes de solicitar el
+Cloud Run Job. El Job escribe el XLSX en Cloud Storage y solo entonces
+persiste `COMPLETADO` con `resultado_disponible = true`. El resultado se puede
+pedir con ticket en ese punto. `ENTREGADO` se reserva para `POST /entrega`, que
+Power Automate llama después de crear el XLSX en OneDrive. Las transiciones del
+manifiesto son monotónicas: un reintento no puede regresar un lote completado o
+entregado a un estado anterior.
+
 El manifiesto conserva `fecha_inicio` desde su registro. `fecha_fin` se fija
 una sola vez si el lote queda `ENTREGADO`, `FALLIDO` o
 `FALLIDO_ORIGEN_CAMBIO`. `GET /v1/lotes/{id_lote}` devuelve estas fechas en

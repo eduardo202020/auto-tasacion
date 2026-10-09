@@ -124,6 +124,36 @@ class ConsultarLoteDefinitionTests(unittest.TestCase):
             self.assertNotIn(forbidden, self.definition)
 
 
+class DeliveryFlowDefinitionTests(unittest.TestCase):
+    def setUp(self):
+        script = SCRIPT.read_text(encoding="utf-8")
+        start = script.index("'auto-tasacion-entregar-lote'")
+        end = script.index("default { throw", start)
+        self.definition = script[start:end]
+
+    def test_enters_delivery_only_for_a_completed_available_result(self):
+        condition = (
+            "@and(equals(body('HTTP_Consultar_Lote')?['estado'], 'COMPLETADO'), "
+            "equals(body('HTTP_Consultar_Lote')?['resultado_disponible'], true))"
+        )
+        self.assertIn(condition, self.definition)
+        self.assertLess(
+            self.definition.index("Solicitar_ticket_resultado"),
+            self.definition.index("Crear_excel_final"),
+        )
+        self.assertLess(
+            self.definition.index("Crear_excel_final"),
+            self.definition.index("Confirmar_entrega"),
+        )
+
+    def test_uses_the_id_from_each_control_file_for_its_backend_request(self):
+        request = (
+            "@concat('$ServiceUrl/v1/lotes/', "
+            "body('Leer_control_lote')?['id_lote'])"
+        )
+        self.assertIn(request, self.definition)
+
+
 class CanvasPollingGuideTests(unittest.TestCase):
     def setUp(self):
         self.guide = POLLING_GUIDE.read_text(encoding="utf-8")
@@ -150,6 +180,26 @@ class CanvasPollingGuideTests(unittest.TestCase):
         self.assertIn("Set(varMonitorearLote; false)", self.guide)
         self.assertIn("`btnReanudarLote`", self.guide)
         self.assertIn("Set(varIdLote; Trim(txtIdLote.Text));;", self.guide)
+
+    def test_resets_all_previous_tracking_state_before_starting_a_new_batch(self):
+        button_start = self.guide.index("## Boton **Ejecutar**")
+        timer_start = self.guide.index("## Timer de polling", button_start)
+        button_formula = self.guide[button_start:timer_start]
+        start_flow = button_formula.index("'auto-tasacion-iniciar-lote'.Run(")
+        for reset in (
+            "Set(varMonitorearLote; false);;",
+            "Set(varIdLote; Blank());;",
+            "Set(varConsultaLote; Blank());;",
+            "Set(varConsultaIntento; Blank());;",
+            "Set(varEstadoLote; Blank());;",
+            "Set(varResultadoDisponible; false);;",
+            "Set(varFechaFinProceso; Blank());;",
+            "Set(varFinProceso; Blank());;",
+            "Set(varPasoActivo; 0);;",
+            "Set(varPasoError; Blank());;",
+        ):
+            self.assertIn(reset, button_formula)
+            self.assertLess(button_formula.index(reset), start_flow)
 
     def test_documents_a_visual_only_timer_and_all_step_states(self):
         self.assertIn("`tmrVistaLote`", self.guide)

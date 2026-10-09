@@ -85,6 +85,10 @@ La concurrencia inicial debe configurarse entre 1 y 3 archivos. Si el eTag
 cambia, se detiene el lote con `FALLIDO_ORIGEN_CAMBIO`. Cuando todos están
 confirmados, el flujo invoca `POST /v1/lotes/{id}/iniciar`.
 
+Antes de solicitar el Cloud Run Job, la API persiste `EN_PROCESO`. De esta
+forma un Job que arranque inmediatamente no puede leer el manifiesto todavía en
+`LISTO_PARA_PROCESAR` y rechazarse por una carrera de inicio.
+
 ### 4. `auto-tasacion-consultar-lote`
 
 Consulta `GET /v1/lotes/{id_lote}`. El backend incluye el arreglo `archivos`
@@ -106,6 +110,12 @@ lote a `ENTREGADO`, y se detiene solo en `ENTREGADO`, `FALLIDO` o
 `FALLIDO_ORIGEN_CAMBIO`.
 
 ### 5. `auto-tasacion-entregar-lote`
+
+La rama de entrega requiere `estado = COMPLETADO` y
+`resultado_disponible = true`. Primero descarga el resultado y crea el XLSX en
+OneDrive. Solo después de una creación exitosa llama a `POST /entrega`, que es
+la única operación que persiste `ENTREGADO`; el control se elimina después de
+esa confirmación.
 
 Cuando el estado es `COMPLETADO`, descarga únicamente el XLSX final, lo crea en
 la carpeta operativa de OneDrive y confirma `POST /entrega`. Solo después de
@@ -150,6 +160,10 @@ eTag distinto representa una versión nueva. La API no utiliza `driveId` ni
 intenta leer OneDrive.
 
 ## Estados
+
+El manifiesto valida sus transiciones. No puede retroceder de `COMPLETADO` a
+`EN_PROCESO` ni de `ENTREGADO` a `COMPLETADO`; un reintento tardío conserva el
+estado persistido más avanzado.
 
 Lote: `RECIBIDO`, `CARGANDO_PDFS`, `LISTO_PARA_PROCESAR`, `EN_PROCESO`,
 `COMPLETADO`, `ENTREGADO`, `FALLIDO`, `FALLIDO_ORIGEN_CAMBIO`.

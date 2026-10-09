@@ -426,7 +426,7 @@ function New-FlowDefinition {
                         Lote_completado = [ordered]@{
                             runAfter = [ordered]@{ HTTP_Consultar_Lote = @('Succeeded') }
                             type = 'If'
-                            expression = "@equals(body('HTTP_Consultar_Lote')?['estado'], 'COMPLETADO')"
+                            expression = "@and(equals(body('HTTP_Consultar_Lote')?['estado'], 'COMPLETADO'), equals(body('HTTP_Consultar_Lote')?['resultado_disponible'], true))"
                             actions = [ordered]@{
                                 Solicitar_ticket_resultado = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/resultado-ticket')" -Headers $controlHeaders -Body @{} -Secure
                                 Descargar_resultado = New-HttpAction -Method 'GET' -Uri "@body('Solicitar_ticket_resultado')?['url_descarga']" -RunAfter ([ordered]@{ Solicitar_ticket_resultado = @('Succeeded') }) -Secure

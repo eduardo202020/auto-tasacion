@@ -45,6 +45,20 @@ BATCH_FAILED = "FALLIDO"
 BATCH_SOURCE_CHANGED = "FALLIDO_ORIGEN_CAMBIO"
 BATCH_TERMINAL_STATES = frozenset({BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED})
 
+# The state is the single persisted source of truth for both Power Apps and
+# Power Automate.  Keep the graph explicit so an old retry cannot put a batch
+# back into a processing state after it has produced or delivered a result.
+_ALLOWED_BATCH_TRANSITIONS = {
+    BATCH_RECEIVED: frozenset({BATCH_RECEIVED, BATCH_UPLOADING, BATCH_FAILED, BATCH_SOURCE_CHANGED}),
+    BATCH_UPLOADING: frozenset({BATCH_UPLOADING, BATCH_READY, BATCH_FAILED, BATCH_SOURCE_CHANGED}),
+    BATCH_READY: frozenset({BATCH_READY, BATCH_PROCESSING, BATCH_FAILED, BATCH_SOURCE_CHANGED}),
+    BATCH_PROCESSING: frozenset({BATCH_PROCESSING, BATCH_COMPLETED, BATCH_FAILED, BATCH_SOURCE_CHANGED}),
+    BATCH_COMPLETED: frozenset({BATCH_COMPLETED, BATCH_DELIVERED}),
+    BATCH_DELIVERED: frozenset({BATCH_DELIVERED}),
+    BATCH_FAILED: frozenset({BATCH_FAILED}),
+    BATCH_SOURCE_CHANGED: frozenset({BATCH_SOURCE_CHANGED}),
+}
+
 
 class BatchError(ValueError):
     """Error de contrato seguro para devolver a Power Automate."""
@@ -294,7 +308,7 @@ def refresh_manifest_progress(manifest: dict[str, Any]) -> None:
     manifest["pdfs_fallidos"] = sum(1 for item in files if item.get("estado") in {FILE_FAILED, FILE_SOURCE_CHANGED})
 
     current = str(manifest.get("estado") or "")
-    if current in {BATCH_PROCESSING, BATCH_COMPLETED, BATCH_DELIVERED}:
+    if current in {BATCH_PROCESSING, BATCH_COMPLETED, *BATCH_TERMINAL_STATES}:
         return
     if any(item.get("estado") == FILE_SOURCE_CHANGED for item in files):
         manifest["estado"] = BATCH_SOURCE_CHANGED
@@ -473,7 +487,9 @@ def update_manifest(
         manifest = store.get(batch_id)
         if manifest is None:
             raise BatchError("El lote no existe", code="LOTE_NO_ENCONTRADO", status=404)
+        previous_state = str(manifest.get("estado") or "")
         result = change(manifest)
+        _validate_batch_state_transition(previous_state, str(manifest.get("estado") or ""))
         now = utc_timestamp()
         manifest["actualizado_en"] = now
         refresh_lifecycle_timestamps(manifest, now=now)
@@ -482,4 +498,15 @@ def update_manifest(
         except ConcurrentBatchUpdate:
             continue
     raise BatchError("El lote cambió durante la actualización; reintente", code="CONFLICTO_CONCURRENCIA", status=409)
+
+
+def _validate_batch_state_transition(previous: str, current: str) -> None:
+    """Reject a backward state write before it can be persisted."""
+    allowed = _ALLOWED_BATCH_TRANSITIONS.get(previous)
+    if allowed is None or current not in allowed:
+        raise BatchError(
+            "La transición de estado del lote no está permitida",
+            code="TRANSICION_ESTADO_INVALIDA",
+            status=409,
+        )
 

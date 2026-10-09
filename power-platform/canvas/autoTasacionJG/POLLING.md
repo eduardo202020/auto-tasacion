@@ -77,6 +77,26 @@ al flujo programado.
 If(
     CountRows(Filter(colPdfs; Seleccionado)) = 0;
     Notify("Seleccione al menos un PDF."; NotificationType.Warning);
+    Set(varMonitorearLote; false);;
+    Set(varLote; Blank());;
+    Set(varIdLote; Blank());;
+    Set(varConsultaLote; Blank());;
+    Set(varConsultaIntento; Blank());;
+    Set(varEstadoLote; Blank());;
+    Set(varMensajeLote; Blank());;
+    Set(varTotalPdfs; 0);;
+    Set(varPdfsCargados; 0);;
+    Set(varPdfsProcesados; 0);;
+    Set(varPdfsFallidos; 0);;
+    Set(varResultadoDisponible; false);;
+    Set(varFechaInicioProceso; Blank());;
+    Set(varFechaFinProceso; Blank());;
+    Set(varInicioProceso; Blank());;
+    Set(varFinProceso; Blank());;
+    Set(varDuracionProceso; 0);;
+    Set(varPasoActivo; 0);;
+    Set(varPasoError; Blank());;
+    Set(varErrorConsultaReportado; false);;
     Set(
         varLote;
         IfError(
@@ -403,13 +423,17 @@ If(
     Notify("Ingrese un ID de lote."; NotificationType.Warning);
     Set(varIdLote; Trim(txtIdLote.Text));;
     Set(varEstadoLote; Blank());;
+    Set(varConsultaLote; Blank());;
+    Set(varConsultaIntento; Blank());;
     Set(varMensajeLote; Blank());;
+    Set(varResultadoDisponible; false);;
     Set(varFechaInicioProceso; Blank());;
     Set(varFechaFinProceso; Blank());;
     Set(varInicioProceso; Blank());;
     Set(varFinProceso; Blank());;
     Set(varPasoActivo; 0);;
     Set(varPasoError; Blank());;
+    Set(varErrorConsultaReportado; false);;
     Set(varMonitorearLote; true)
 )
 ```
