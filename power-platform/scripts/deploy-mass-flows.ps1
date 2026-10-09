@@ -168,8 +168,9 @@ function New-OneDriveControlCreatedTrigger {
     }
 
     # OneDrive for Business: OnNewFilesV2 is "When a file is created
-    # (properties only)". It returns metadata and Split On creates one flow
-    # run per control file; it does not put a PDF in the trigger payload.
+    # (properties only)". In this connection its body is the array of metadata
+    # directly, so Split On must target triggerBody(). Each split execution then
+    # receives one metadata object in triggerBody(), never PDF content.
     return [ordered]@{
         Al_crear_control_lote = [ordered]@{
             type = 'OpenApiConnection'
@@ -177,7 +178,7 @@ function New-OneDriveControlCreatedTrigger {
             # run when there is no new control. The business flow itself is
             # event-driven and has no Recurrence trigger.
             recurrence = [ordered]@{ frequency = 'Minute'; interval = 1 }
-            splitOn = "@triggerOutputs()?['body/value']"
+            splitOn = "@triggerBody()"
             inputs = [ordered]@{
                 host = [ordered]@{
                     apiId = '/providers/Microsoft.PowerApps/apis/shared_onedriveforbusiness'

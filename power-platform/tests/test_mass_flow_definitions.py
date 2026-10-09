@@ -142,11 +142,14 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertIn("function New-OneDriveControlCreatedTrigger", self.script)
         self.assertIn("operationId = 'OnNewFilesV2'", self.script)
         self.assertIn("folderId = $FolderId", self.script)
-        self.assertIn("splitOn = \"@triggerOutputs()?['body/value']\"", self.script)
+        self.assertIn('splitOn = "@triggerBody()"', self.script)
+        self.assertNotIn("splitOn = \"@triggerOutputs()?['body/value']\"", self.script)
         self.assertIn("$ControlFolder = '/auto-tasaciones/Controles'", self.script)
         self.assertIn("folderPath = $ControlFolder", self.script)
 
-    def test_targets_only_the_triggered_control_and_does_not_scan_all_batches(self):
+    def test_split_trigger_uses_one_control_as_trigger_body_without_scanning_batches(self):
+        self.assertIn('splitOn = "@triggerBody()"', self.script)
+        self.assertIn("triggerBody()?['Name']", self.definition)
         self.assertIn("path = \"@triggerBody()?['Path']\"", self.definition)
         self.assertIn("id = \"@triggerBody()?['Id']\"", self.definition)
         self.assertNotIn("ListFolderV2", self.definition)
