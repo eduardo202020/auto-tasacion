@@ -53,24 +53,25 @@ class FlowDeploymentLifecycleTests(unittest.TestCase):
         self.script = SCRIPT.read_text(encoding="utf-8")
 
     def test_active_unpublished_flow_is_drafted_before_definition_replacement(self):
-        """Avoid a direct PATCH of clientdata against an ActiveUnpublished flow."""
+        """Only an ActiveUnpublished predecessor is published before PATCH."""
+        predecessor_publish = "Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)"
+        predecessor_status_check = "if ([int] $existing.statuscode -ne 2)"
         deactivate = "statecode = 0\n                statuscode = 1"
         update_definition = "clientdata = $clientdata"
         reactivate = "statecode = 1\n                statuscode = 2"
-        publish = "Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)"
+        final_publish = "Publish-WorkflowDraft -WorkflowId $id"
         self.assertIn("function Publish-WorkflowDraft", self.script)
         self.assertIn("-Path 'PublishXml'", self.script)
-        self.assertIn(publish, self.script)
+        self.assertIn(predecessor_publish, self.script)
+        self.assertIn(predecessor_status_check, self.script)
+        self.assertIn(final_publish, self.script)
         self.assertIn(deactivate, self.script)
         self.assertIn(reactivate, self.script)
-        self.assertLess(
-            self.script.index(publish),
-            self.script.index(deactivate),
-        )
-        self.assertLess(
-            self.script.index(deactivate),
-            self.script.index(update_definition),
-        )
+        self.assertLess(self.script.index(predecessor_status_check), self.script.index(predecessor_publish))
+        self.assertLess(self.script.index(deactivate), self.script.index(update_definition))
+        self.assertLess(self.script.index(update_definition), self.script.rindex(final_publish))
+        self.assertLess(self.script.index(reactivate), self.script.rindex(final_publish))
+        self.assertIn("El flujo no quedo publicado", self.script)
 
     def test_can_deploy_one_named_flow_without_touching_the_others(self):
         self.assertIn("[string[]] $FlowName", self.script)

@@ -788,7 +788,13 @@ function Create-DisabledFlow {
         # to Draft first, replace the definition, then let -Activate publish it
         # again below. This keeps deployments repeatable for edited flows.
         if ([int] $existing.statecode -eq 1) {
-            Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)
+            # Publish only an ActiveUnpublished predecessor. Publishing a flow
+            # already in state/status Published before the PATCH is redundant
+            # and can fail after Dataverse has accepted the request, preventing
+            # the actual definition update from running.
+            if ([int] $existing.statuscode -ne 2) {
+                Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)
+            }
             Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($($existing.workflowid))" -Body ([ordered]@{
                 statecode = 0
                 statuscode = 1
@@ -858,11 +864,17 @@ foreach ($flow in $flows.GetEnumerator()) {
                 statuscode = 2
                 clientdata = [string] $currentFlow.clientdata
             }) | Out-Null
-            Write-Output "Activado: $($flow.Key)"
         }
-        else {
-            Write-Output "Ya publicado: $($flow.Key)"
+
+        # Publish after PATCH and activation. Without this final publication,
+        # the service can retain the preceding runtime definition even though
+        # workflow.clientdata contains a newer draft.
+        Publish-WorkflowDraft -WorkflowId $id
+        $publishedFlow = Get-WorkflowByName -Name $flow.Key
+        if ([int] $publishedFlow.statecode -ne 1 -or [int] $publishedFlow.statuscode -ne 2) {
+            throw "El flujo no quedo publicado: $($flow.Key) ($id)."
         }
+        Write-Output "Publicado: $($flow.Key)"
     }
 }
 
