@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -28,6 +28,7 @@ BATCH_STATE_PREFIX = "estado/lotes"
 BATCH_INPUT_PREFIX = "ingresos"
 BATCH_RESULT_PREFIX = "resultados"
 _SAFE_OBJECT_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+DEFAULT_ORCHESTRATION_LEASE_SECONDS = 3 * 60 * 60
 
 FILE_PENDING = "PENDIENTE"
 FILE_UPLOADING = "SUBIENDO"
@@ -101,8 +102,24 @@ def _environment_positive_int(name: str, default: int) -> int:
     return parsed
 
 
+def orchestration_lease_seconds() -> int:
+    """Duración renovable del claim de un único orquestador de lote."""
+    return _environment_positive_int(
+        "BATCH_ORCHESTRATION_LEASE_SECONDS",
+        DEFAULT_ORCHESTRATION_LEASE_SECONDS,
+    )
+
+
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def utc_timestamp_after(seconds: int, *, now: str | None = None) -> str:
+    """Construye una marca UTC futura sin depender del reloj local del flujo."""
+    reference = _parse_utc_timestamp(now) if now else None
+    if reference is None:
+        reference = datetime.now(timezone.utc)
+    return (reference + timedelta(seconds=seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_utc_timestamp(value: Any) -> datetime | None:
@@ -294,6 +311,17 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
         "resultado_objeto": batch_result_object_name(batch_id),
         "resultado_disponible": False,
         "ejecucion_job": "",
+        # Este bloque es la reserva persistida que hace seguro recibir más de
+        # un evento de creación para el mismo control de OneDrive. No cambia
+        # el estado de negocio del lote ni contiene contenido documental.
+        "orquestacion": {
+            "propietario": "",
+            "lease_hasta": "",
+            "fase": "PENDIENTE",
+            "intentos": 0,
+            "ultimo_error": "",
+            "actualizado_en": now,
+        },
         "archivos": files,
     }
     refresh_manifest_progress(manifest)
@@ -339,6 +367,22 @@ def public_batch_status(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def orchestration_status(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Resumen seguro del claim para auditoría, sin exponer al propietario."""
+    claim = manifest.get("orquestacion")
+    if not isinstance(claim, dict):
+        claim = {}
+    lease_until = str(claim.get("lease_hasta") or "")
+    active = bool(claim.get("propietario")) and (_parse_utc_timestamp(lease_until) or datetime.min.replace(tzinfo=timezone.utc)) > datetime.now(timezone.utc)
+    return {
+        "activo": active,
+        "lease_hasta": lease_until,
+        "fase": str(claim.get("fase") or "PENDIENTE"),
+        "intentos": int(claim.get("intentos") or 0),
+        "ultimo_error": str(claim.get("ultimo_error") or ""),
+    }
+
+
 def batch_registration_status(manifest: dict[str, Any]) -> dict[str, Any]:
     """Respuesta de registro para que el orquestador relacione cada PDF con su ticket."""
     status = public_batch_status(manifest)
@@ -353,6 +397,7 @@ def batch_registration_status(manifest: dict[str, Any]) -> dict[str, Any]:
         }
         for item in manifest.get("archivos", [])
     ]
+    status["orquestacion"] = orchestration_status(manifest)
     return status
 
 

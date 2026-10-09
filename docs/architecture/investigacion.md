@@ -33,6 +33,12 @@ conector y evita una transferencia única de 1 GiB.
 - `PARA_PROCESAR`, `REVISION_IA`, `CONTROL`, `tblParaProcesar` e `ID_CASO`
   permanecen sin cambios.
 - La ruta ZIP vigente queda aislada como fallback hasta validar la nueva ruta.
+- Un JSON de control pequeño en `/auto-tasaciones/Controles` activa un único
+  orquestador por lote. Un claim persistido en GCS evita que eventos duplicados
+  de OneDrive dupliquen cargas, Jobs o entregas.
+- El orquestador espera solo su propio lote con backoff y máximo de dos horas
+  después de iniciar el Job; no hay flujos recurrentes sin trabajo en la ruta
+  nueva.
 
 ## Prueba pendiente
 

@@ -13,7 +13,8 @@ alimenta la automatización IBM 3270. El contrato de salida se conserva:
 ```text
 PDFs individuales en OneDrive /auto-tasaciones/PDFs
   -> Power Apps selecciona metadatos
-  -> Power Automate carga cada PDF individual a GCS
+  -> crea control en OneDrive /auto-tasaciones/Controles
+  -> Power Automate orquesta ese lote y carga cada PDF individual a GCS
   -> Cloud Run Job procesa PDFs confirmados uno por uno
   -> Resultado_Final_<ID_LOTE>.xlsx
   -> OneDrive -> Power Automate Desktop -> IBM 3270
@@ -25,6 +26,8 @@ lote completo. La arquitectura no usa Microsoft Graph para leer OneDrive.
 
 La descripción operativa está en
 [flujo Power Platform de lotes masivos](docs/architecture/flujo-power-platform-lotes-masivos.md).
+La migración y reversión de la ruta por evento están en
+[migración del orquestador](docs/operacion/migracion-orquestador-eventos.md).
 
 El estado de despliegue, pruebas y pendientes está en
 [estado de implementación](docs/operacion/estado-implementacion-2026-10-07.md).

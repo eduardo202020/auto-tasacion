@@ -6,30 +6,29 @@ Validar la ruta operativa de PDFs individuales desde OneDrive hasta el Excel
 que consume PAD y, después, el seguimiento automático visible en Power Apps.
 La prueba no usa la ruta ZIP heredada.
 
-## Estado de la ruta de procesamiento
+## Ruta a validar con el orquestador por evento
 
-La ejecución de referencia con un PDF completó esta secuencia:
+La ejecución de referencia histórica completó la ruta recurrente. La siguiente
+validación debe comprobar la nueva secuencia orientada a eventos:
 
 ```text
-Power Apps -> iniciar lote -> control de OneDrive -> cargar lotes
--> Cloud Run Job -> entregar lote -> Resultado_Final_<ID_LOTE>.xlsx
+Power Apps -> iniciar lote -> control en /Controles -> orquestar lote
+-> Cloud Run Job -> entrega del mismo orquestador -> Resultado_Final_<ID_LOTE>.xlsx
 ```
 
-El Excel se creó en `/auto-tasaciones` y el control
-`_autotasacion_lote_<ID_LOTE>.json` se eliminó tras confirmar la entrega. Esto
-valida la ruta de procesamiento. También se observó manualmente que la
-Canvas App llega a `ENTREGADO` y deja `varMonitorearLote` en `false`. El
-stepper y el contador de esta versión requieren desplegar el contrato ampliado
-y aplicar la guía de Studio antes de validarlos en el entorno.
+El E2E nuevo no está ejecutado todavía. Su éxito requiere que el Excel se cree
+una sola vez en `/auto-tasaciones`, que el control de `/Controles` se elimine
+solo después de `ENTREGADO` y que no exista una ejecución recurrente que haya
+procesado ese lote.
 
 ## Precondiciones para la prueba de interfaz
 
 1. Aplicar y publicar las instrucciones de
    [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md) en
    `autoTasacionJG`.
-2. Ejecutar `deploy-mass-flows.ps1 -Activate`, que publica
-   `auto-tasacion-consultar-lote` con su contrato tipado, incluidos
-   `fecha_inicio`, `fecha_fin` y `duracion_segundos`.
+2. Desplegar primero el backend con los endpoints de claim y luego publicar
+   `auto-tasacion-iniciar-lote` y `auto-tasacion-orquestar-lote`, indicando el
+   ID de `/auto-tasaciones/Controles`.
 3. Confirmar que el origen de datos de la app contiene
    `auto-tasacion-listar-pdfs`, `auto-tasacion-iniciar-lote` y
    `auto-tasacion-consultar-lote`.
@@ -43,13 +42,14 @@ ningún PDF se transmite por la aplicación.
 2. Verificar que aparece `D01.pdf` y seleccionar solamente ese archivo.
 3. Pulsar **Ejecutar**.
 4. Confirmar que la app muestra un `ID_LOTE` y el estado inicial `RECIBIDO`.
-5. Sin pulsar otros botones ni ejecutar flujos manualmente, esperar las
-   consultas automáticas de 10 segundos.
+5. Confirmar en el historial que se inicia una ejecución de
+   `auto-tasacion-orquestar-lote` por el JSON creado, sin esperar una
+   recurrencia de carga.
 6. Verificar que la interfaz actualiza el estado y los conteos a medida que el
    backend avanza: `CARGANDO_PDFS`, `LISTO_PARA_PROCESAR`, `EN_PROCESO` y,
    transitoriamente, `COMPLETADO`.
-7. Esperar la siguiente recurrencia de entrega y confirmar que la app pasa a
-   `ENTREGADO`.
+7. Confirmar que el mismo orquestador espera el resultado con backoff y que la
+   app pasa a `ENTREGADO`, sin una recurrencia de entrega.
 8. Verificar `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` y comprobar sus
    hojas `PARA_PROCESAR`, `REVISION_IA` y `CONTROL`.
 9. Confirmar que el Timer deja de consultar después de `ENTREGADO`, todos los
@@ -62,11 +62,18 @@ puntual falla. Una advertencia de conectividad no equivale a un estado real
 ## Verificación de entrega
 
 Durante `COMPLETADO`, confirmar que `resultado_disponible` es `true` y que el
-Timer sigue consultando. En el historial de `auto-tasacion-entregar-lote`, el
-orden obligatorio es `Solicitar_ticket_resultado` -> `Descargar_resultado` ->
-`Crear_excel_final` -> `Confirmar_entrega`. La interfaz solo puede mostrar
-`ENTREGADO` después de que exista `Resultado_Final_<ID_LOTE>.xlsx` y la llamada
-de confirmación haya sido exitosa.
+Timer sigue consultando. En el historial de `auto-tasacion-orquestar-lote`, el
+orden normal es `Buscar_excel_final_existente` ->
+`Solicitar_ticket_resultado` -> `Descargar_resultado` -> `Crear_excel_final` ->
+`Confirmar_entrega_nuevo` -> `Eliminar_control_lote_nuevo`. La interfaz solo
+puede mostrar `ENTREGADO` despu?s de que exista
+`Resultado_Final_<ID_LOTE>.xlsx` y la llamada de confirmaci?n haya sido exitosa.
+
+Para probar la recuperaci?n de entrega, detener una ejecuci?n de prueba despu?s
+de `Crear_excel_final` y antes de `Confirmar_entrega_nuevo`, y recrear el mismo
+control. El reintento debe tomar la rama `Excel_final_ya_existe`, ejecutar
+`Confirmar_entrega_existente` y `Eliminar_control_lote_existente`, sin descargar
+ni crear un segundo XLSX.
 
 ## Casos adicionales de interfaz
 
@@ -110,6 +117,10 @@ nombre del Excel entregado.
   `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`.
 - El Excel final se crea una sola vez y el control se elimina solo después de
   la entrega confirmada.
+- Crear nuevamente el mismo control de prueba mientras el primer orquestador
+  está activo debe devolver `OCUPADO`; no debe haber un segundo Job, carga ni
+  Excel. Para una recuperación manual tras timeout, se recrea el control con el
+  mismo `id_lote` después de verificar `REINTENTO_REQUERIDO` en el manifiesto.
 - Power Apps no recibe `archivos`, contenido de PDF, rutas GCS ni URLs firmadas.
 
 ## Regresiones ya corregidas

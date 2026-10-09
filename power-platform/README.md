@@ -6,16 +6,16 @@ El operador carga PDFs individuales en `/auto-tasaciones/PDFs`. Power Apps lista
 metadatos y permite seleccionar uno o varios archivos. No usa adjuntos ni
 transmite `contentBytes`.
 
-Power Automate orquesta cinco flujos:
+Power Automate orquesta seis flujos:
 
 1. `auto-tasacion-listar-pdfs`: lista solo PDFs y devuelve metadatos.
 2. `auto-tasacion-iniciar-lote`: valida metadatos, eTag y registra el
    manifiesto mediante `POST /v1/lotes`.
-3. `auto-tasacion-cargar-lotes`: por cada PDF, obtiene contenido, solicita un
-   ticket de carga, hace `PUT` binario, compara eTag final y confirma.
+3. `auto-tasacion-orquestar-lote`: se inicia al crear un control pequeno de un
+   lote, obtiene un claim atomico y opera exclusivamente ese `ID_LOTE`.
 4. `auto-tasacion-consultar-lote`: consulta estado y progreso.
-5. `auto-tasacion-entregar-lote`: solicita un ticket temporal, descarga solo el
-   XLSX final, lo guarda en OneDrive y confirma entrega.
+5. `auto-tasacion-cargar-lotes`: flujo recurrente legado durante la migracion.
+6. `auto-tasacion-entregar-lote`: flujo recurrente legado durante la migracion.
 
 El `Apply to each` procesa cada PDF de forma independiente, con concurrencia
 inicial de 1 a 3. No se deben guardar PDFs en arrays, variables, JSON o Base64. Los HTTP hacia la
@@ -30,17 +30,25 @@ crea o actualiza en la solución `autoTasacion` estos flujos:
 
 1. `auto-tasacion-iniciar-lote`;
 2. `auto-tasacion-consultar-lote`;
-3. `auto-tasacion-cargar-lotes`;
-4. `auto-tasacion-entregar-lote`.
+3. `auto-tasacion-orquestar-lote`;
+4. `auto-tasacion-cargar-lotes` (legado);
+5. `auto-tasacion-entregar-lote` (legado).
 
 El script obtiene el token de control desde Secret Manager durante su ejecución;
-no lo guarda en el repositorio. Los dos flujos programados se ejecutan cada cinco
-minutos y usan archivos de control `_autotasacion_lote_<ID_LOTE>.json` dentro de
-`/auto-tasaciones/PDFs`. La lista de PDFs de Power Apps los excluye por extensión.
+no lo guarda en el repositorio. La ruta nueva crea
+`_autotasacion_lote_<ID_LOTE>.json` con solo `{"id_lote":"..."}` en
+`/auto-tasaciones/Controles`. El orquestador usa el trigger de OneDrive for
+Business **When a file is created (properties only)** (`OnNewFilesV2`) sobre
+esa carpeta y procesa un solo lote por ejecución. Se debe suministrar el ID de
+esa carpeta mediante `-ControlFolderId` o `AUTOTASACION_CONTROLS_FOLDER_ID`.
+
+Los dos flujos recurrentes se conservan sin cambios para una migración
+reversible. Sus controles antiguos permanecen en `/auto-tasaciones/PDFs`; no
+deben procesar controles creados en la carpeta nueva.
 
 `GetFileContentByPath` devuelve el archivo de control como contenido binario.
-Antes de `ParseJson`, los flujos `auto-tasacion-cargar-lotes` y
-`auto-tasacion-entregar-lote` convierten `body.$content` de Base64 a texto JSON:
+Antes de `ParseJson`, todos los flujos que consumen un control convierten
+`body.$content` de Base64 a texto JSON:
 
 ```text
 @json(base64ToString(outputs('Obtener_control_lote')?['body']?['$content']))
@@ -48,28 +56,29 @@ Antes de `ParseJson`, los flujos `auto-tasacion-cargar-lotes` y
 
 No se debe pasar `@body('Obtener_control_lote')` directamente a `ParseJson`.
 
-Ejecutar sin activar los flujos:
+Crear o actualizar las definiciones de la ruta nueva sin activarlas:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-.\power-platform\scripts\deploy-mass-flows.ps1
+$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID de /auto-tasaciones/Controles>'
+.\power-platform\scripts\deploy-mass-flows.ps1 -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
-Para aplicar las definiciones y dejar los cuatro flujos publicados, ejecutar:
+Para publicar solo la ruta nueva después de revisar el E2E:
 
 ```powershell
-.\power-platform\scripts\deploy-mass-flows.ps1 -Activate
+$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID de /auto-tasaciones/Controles>'
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
 Para recuperar o actualizar solo un flujo, se puede indicar `-FlowName`. Por
-ejemplo, para actualizar el cargador sin modificar los otros tres:
+ejemplo, para actualizar solo el orquestador:
 
 ```powershell
-.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-cargar-lotes
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-orquestar-lote -ControlFolderId '<ID de /auto-tasaciones/Controles>'
 ```
 
-`-Activate` conserva las recurrencias y la concurrencia definidas en cada
-flujo. Si un flujo publicado tiene un borrador activo sin publicar, el script lo
+`-Activate` conserva la definicion de cada flujo. Si un flujo publicado tiene un borrador activo sin publicar, el script lo
 publica de forma dirigida, lo desactiva brevemente, actualiza la definición y
 lo vuelve a publicar. Así evita el error de Dataverse `0x80040203` al
 actualizar `clientdata`, sin publicar cambios ajenos del entorno. En particular,
@@ -89,8 +98,8 @@ fecha_fin, duracion_segundos
 
 El arreglo operativo `archivos`, las URLs firmadas, rutas de GCS y el contenido
 documental no se devuelven a la aplicación. `archivos` queda disponible solo
-para `auto-tasacion-cargar-lotes`, que lo necesita para localizar PDFs
-`PENDIENTE`.
+para los flujos internos de carga, incluido el orquestador, que localizan PDFs
+`PENDIENTE` o una transferencia interrumpida en `SUBIENDO`.
 
 `fecha_inicio` se registra al crear el manifiesto. `fecha_fin` se fija una sola
 vez cuando el lote llega a `ENTREGADO`, `FALLIDO` o

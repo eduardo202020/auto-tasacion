@@ -426,6 +426,182 @@ class BatchControlApiTests(unittest.TestCase):
         self.assertEqual(self.store.get(manifest["id_lote"])["estado"], BATCH_FAILED)
 
 
+class OrchestrationClaimTests(unittest.TestCase):
+    """Pruebas del claim que protege al trigger de eventos duplicados."""
+
+    def setUp(self):
+        self.store = InMemoryBatchStore()
+        self.storage = FakeStorageClient()
+        self.job_calls = []
+        self.api = BatchControlApi(
+            self.store,
+            upload_bucket="tasaciones-prueba",
+            storage_client=self.storage,
+            signed_url_factory=lambda name: f"https://signed.invalid/{name}",
+            job_launcher=lambda manifest: self.job_calls.append(manifest["id_lote"]) or "operations/prueba",
+        )
+
+    def _batch(self, *indices):
+        # These orchestration tests exercise manifest transitions, not PDF
+        # parsing. A fixed payload keeps the GCS-size verification deterministic.
+        files = [file_item(index, size=len(b"%PDF-orchestration-test")) for index in indices]
+        manifest, created = self.api.create_batch(payload(files))
+        self.assertTrue(created)
+        return manifest
+
+    def _confirm_all_files(self, manifest):
+        bucket = self.storage.bucket("tasaciones-prueba")
+        for item in manifest["archivos"]:
+            content = b"%PDF-orchestration-test"
+            self.api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+            blob = bucket.blob(item["objeto_gcs"])
+            blob.data = content
+            blob.content_type = "application/pdf"
+            self.api.confirm_upload(manifest["id_lote"], item["id_archivo"], {"etag_confirmado": item["etag"]})
+
+    def test_one_pdf_claim_is_atomic_and_duplicate_event_is_occupied(self):
+        manifest = self._batch(1)
+        first = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        duplicate = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-b"})
+        self.assertTrue(first["reclamado"])
+        self.assertEqual(first["resultado"], "RECLAMADO")
+        self.assertFalse(duplicate["reclamado"])
+        self.assertEqual(duplicate["resultado"], "OCUPADO")
+        persisted = self.store.get(manifest["id_lote"])["orquestacion"]
+        self.assertEqual(persisted["intentos"], 1)
+        self.assertEqual(persisted["propietario"], "run-a")
+
+    def test_repeated_execution_id_reuses_claim_without_new_attempt(self):
+        manifest = self._batch(1)
+        self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        repeated = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        self.assertTrue(repeated["reclamado"])
+        self.assertEqual(repeated["resultado"], "REUTILIZADO")
+        self.assertEqual(self.store.get(manifest["id_lote"])["orquestacion"]["intentos"], 1)
+
+    def test_http_claim_and_renew_routes_require_the_same_execution_owner(self):
+        manifest = self._batch(1)
+        app = Flask(__name__)
+        with app.test_request_context(
+            f"/v1/lotes/{manifest['id_lote']}/orquestacion/reclamar",
+            method="POST",
+            json={"id_ejecucion": "run-a"},
+        ):
+            claimed = handle_request(request, self.api)
+        self.assertEqual(claimed.status_code, 200)
+        self.assertTrue(claimed.get_json()["reclamado"])
+        with app.test_request_context(
+            f"/v1/lotes/{manifest['id_lote']}/orquestacion/renovar",
+            method="POST",
+            json={"id_ejecucion": "run-b"},
+        ):
+            denied = handle_request(request, self.api)
+        self.assertEqual(denied.status_code, 409)
+        self.assertEqual(denied.get_json()["codigo"], "ORQUESTACION_NO_PROPIETARIA")
+
+    def test_multiple_pdfs_and_double_start_launch_exactly_one_job(self):
+        manifest = self._batch(1, 2)
+        claim = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        self.assertTrue(claim["reclamado"])
+        self._confirm_all_files(manifest)
+        first = self.api.start_batch(manifest["id_lote"])
+        repeated = self.api.start_batch(manifest["id_lote"])
+        self.assertEqual(first["estado"], BATCH_PROCESSING)
+        self.assertEqual(repeated["estado"], BATCH_PROCESSING)
+        self.assertEqual(self.job_calls, [manifest["id_lote"]])
+
+    def test_expired_or_released_claim_can_be_recovered_by_a_new_execution(self):
+        manifest = self._batch(1)
+        with patch("batch_api.utc_timestamp", return_value="2026-10-09T10:00:00Z"):
+            self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        with patch("batch_api.utc_timestamp", return_value="2026-10-09T10:01:00Z"):
+            self.assertEqual(
+                self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-b"})["resultado"],
+                "OCUPADO",
+            )
+        with patch("batch_api.utc_timestamp", return_value="2026-10-09T13:01:00Z"):
+            recovered = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-b"})
+        self.assertTrue(recovered["reclamado"])
+        self.assertEqual(recovered["resultado"], "RECLAMADO")
+        self.assertEqual(self.store.get(manifest["id_lote"])["orquestacion"]["intentos"], 2)
+
+    def test_release_records_retry_reason_without_demoting_batch_state(self):
+        manifest = self._batch(1)
+        self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        released = self.api.release_orchestration(
+            manifest["id_lote"],
+            {"id_ejecucion": "run-a", "motivo": "TIEMPO_DE_ESPERA_AGOTADO"},
+        )
+        self.assertTrue(released["liberado"])
+        saved = self.store.get(manifest["id_lote"])
+        self.assertEqual(saved["estado"], "RECIBIDO")
+        self.assertEqual(saved["orquestacion"]["fase"], "REINTENTO_REQUERIDO")
+        self.assertIn("TIEMPO_DE_ESPERA_AGOTADO", saved["mensaje"])
+        self.assertTrue(self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-b"})["reclamado"])
+
+    def test_interrupted_upload_reuses_verified_gcs_object_then_confirms(self):
+        manifest = self._batch(1)
+        item = manifest["archivos"][0]
+        self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        first_ticket = self.api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+        self.assertTrue(first_ticket["requiere_carga"])
+        blob = self.storage.bucket("tasaciones-prueba").blob(item["objeto_gcs"])
+        blob.data = b"%PDF-orchestration-test"
+        blob.content_type = "application/pdf"
+        recovered_ticket = self.api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+        self.assertFalse(recovered_ticket["requiere_carga"])
+        self.assertIn(item["objeto_gcs"], recovered_ticket["url_carga"])
+        status = self.api.confirm_upload(manifest["id_lote"], item["id_archivo"], {"etag_confirmado": item["etag"]})
+        self.assertEqual(status["estado"], BATCH_READY)
+
+    def test_double_delivery_is_idempotent_and_already_delivered_is_not_claimed(self):
+        manifest = self._batch(1)
+        self._confirm_all_files(manifest)
+        self.api.start_batch(manifest["id_lote"])
+
+        def completed(current):
+            current["estado"] = BATCH_COMPLETED
+            current["resultado_disponible"] = True
+
+        update_manifest(self.store, manifest["id_lote"], completed)
+        self.assertEqual(self.api.confirm_delivery(manifest["id_lote"])["estado"], BATCH_DELIVERED)
+        self.assertEqual(self.api.confirm_delivery(manifest["id_lote"])["estado"], BATCH_DELIVERED)
+        already_delivered = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-after"})
+        self.assertFalse(already_delivered["reclamado"])
+        self.assertEqual(already_delivered["resultado"], "TERMINAL")
+
+    def test_upload_and_job_failures_remain_terminal_for_orchestrator_retries(self):
+        manifest = self._batch(1)
+        item = manifest["archivos"][0]
+        self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        self.api.upload_ticket(manifest["id_lote"], item["id_archivo"])
+        with self.assertRaisesRegex(BatchError, "no existe"):
+            self.api.confirm_upload(manifest["id_lote"], item["id_archivo"], {"etag_confirmado": item["etag"]})
+        retry = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-b"})
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], BATCH_FAILED)
+        self.assertFalse(retry["reclamado"])
+        self.assertEqual(retry["resultado"], "TERMINAL")
+
+    def test_job_failure_leaves_a_terminal_manifest_for_a_duplicate_event(self):
+        manifest = self._batch(2)
+        self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-a"})
+        self._confirm_all_files(manifest)
+        failing_api = BatchControlApi(
+            self.store,
+            upload_bucket="tasaciones-prueba",
+            storage_client=self.storage,
+            signed_url_factory=lambda _name: "https://signed.invalid/upload",
+            job_launcher=lambda _manifest: (_ for _ in ()).throw(
+                BatchError("Job no disponible", code="JOB_NO_INICIADO", status=503)
+            ),
+        )
+        with self.assertRaisesRegex(BatchError, "Job no disponible"):
+            failing_api.start_batch(manifest["id_lote"])
+        duplicate = self.api.claim_orchestration(manifest["id_lote"], {"id_ejecucion": "run-b"})
+        self.assertEqual(self.store.get(manifest["id_lote"])["estado"], BATCH_FAILED)
+        self.assertEqual(duplicate["resultado"], "TERMINAL")
+
+
 class BatchWorkerTests(unittest.TestCase):
     def setUp(self):
         self.store = InMemoryBatchStore()

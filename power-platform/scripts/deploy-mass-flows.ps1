@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch] $Activate,
-    [string[]] $FlowName
+    [string[]] $FlowName,
+    [string] $ControlFolderId = $env:AUTOTASACION_CONTROLS_FOLDER_ID
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,6 +14,7 @@ $SolutionUniqueName = 'autoTasacion'
 $EnvironmentId = 'Default-3048dc87-43f0-4100-9acb-ae1971c79395'
 $ServiceUrl = 'https://demo-tasaciones-ia-h75cd5qm2q-nn.a.run.app'
 $SourceFolder = '/auto-tasaciones/PDFs'
+$ControlFolder = '/auto-tasaciones/Controles'
 $PdfFolderId = 'b!ana6TpGRu0a2hKHjlUBacJlpM_jFZw1Ag7HCRmtA2cvfU_73uexKT44DJr0wIKqF.01NAERNYGYDB4D2NACL5FYP7EE2UHEZXFR'
 $OneDriveConnectionId = 'shared-onedriveforbu-192895c8-7959-4901-bdd9-0dd1cc6a1c6f'
 $OneDriveConnectionReference = 'tasatest_sharedonedriveforbusiness_132da'
@@ -158,6 +160,41 @@ function New-RecurrenceTrigger {
     }
 }
 
+function New-OneDriveControlCreatedTrigger {
+    param([Parameter(Mandatory)] [string] $FolderId)
+
+    if ([string]::IsNullOrWhiteSpace($FolderId)) {
+        throw 'AUTOTASACION_CONTROLS_FOLDER_ID o -ControlFolderId es obligatorio para desplegar auto-tasacion-orquestar-lote.'
+    }
+
+    # OneDrive for Business: OnNewFilesV2 is "When a file is created
+    # (properties only)". It returns metadata and Split On creates one flow
+    # run per control file; it does not put a PDF in the trigger payload.
+    return [ordered]@{
+        Al_crear_control_lote = [ordered]@{
+            type = 'OpenApiConnection'
+            # Connector polling configuration; it does not create a workflow
+            # run when there is no new control. The business flow itself is
+            # event-driven and has no Recurrence trigger.
+            recurrence = [ordered]@{ frequency = 'Minute'; interval = 1 }
+            splitOn = "@triggerOutputs()?['body/value']"
+            inputs = [ordered]@{
+                host = [ordered]@{
+                    apiId = '/providers/Microsoft.PowerApps/apis/shared_onedriveforbusiness'
+                    connectionName = 'shared_onedriveforbusiness'
+                    operationId = 'OnNewFilesV2'
+                }
+                parameters = [ordered]@{
+                    folderId = $FolderId
+                    includeSubfolders = $false
+                    maxFileCount = 1
+                }
+                authentication = "@parameters('`$authentication')"
+            }
+        }
+    }
+}
+
 function New-InvokerOneDriveReference {
     return [ordered]@{
         shared_onedriveforbusiness = [ordered]@{
@@ -261,7 +298,7 @@ function New-FlowDefinition {
                     archivos = "@json(triggerBody()?['text'])"
                 }) -Secure
                 Crear_control_lote = New-OneDriveAction -OperationId 'CreateFile' -Invoker -RunAfter ([ordered]@{ HTTP_Registrar_Lote = @('Succeeded') }) -Parameters ([ordered]@{
-                    folderPath = $SourceFolder
+                    folderPath = $ControlFolder
                     name = "@concat('_autotasacion_lote_', body('HTTP_Registrar_Lote')?['id_lote'], '.json')"
                     body = '@concat(''{"id_lote":"'', body(''HTTP_Registrar_Lote'')?[''id_lote''], ''"}'')'
                 })
@@ -334,6 +371,237 @@ function New-FlowDefinition {
                 }
             }
             return [ordered]@{ connectionReferences = @{}; definition = New-BaseDefinition -Triggers (New-PowerAppsTrigger -Title 'IdLote') -Actions $actions }
+        }
+        'auto-tasacion-orquestar-lote' {
+            # This flow is intentionally event-driven. Its dedicated OneDrive
+            # folder contains only small control JSON files, never PDFs.
+            $actions = [ordered]@{
+                Inicializar_estado_lote = [ordered]@{
+                    runAfter = @{}
+                    type = 'InitializeVariable'
+                    inputs = [ordered]@{ variables = @([ordered]@{ name = 'estado_lote'; type = 'string'; value = '' }) }
+                }
+                Inicializar_resultado_disponible = [ordered]@{
+                    runAfter = [ordered]@{ Inicializar_estado_lote = @('Succeeded') }
+                    type = 'InitializeVariable'
+                    inputs = [ordered]@{ variables = @([ordered]@{ name = 'resultado_disponible'; type = 'boolean'; value = $false }) }
+                }
+                Inicializar_espera_segundos = [ordered]@{
+                    runAfter = [ordered]@{ Inicializar_resultado_disponible = @('Succeeded') }
+                    type = 'InitializeVariable'
+                    inputs = [ordered]@{ variables = @([ordered]@{ name = 'espera_segundos'; type = 'integer'; value = 30 }) }
+                }
+                Inicializar_intentos_espera = [ordered]@{
+                    runAfter = [ordered]@{ Inicializar_espera_segundos = @('Succeeded') }
+                    type = 'InitializeVariable'
+                    inputs = [ordered]@{ variables = @([ordered]@{ name = 'intentos_espera'; type = 'integer'; value = 0 }) }
+                }
+                Es_control_de_lote = [ordered]@{
+                    runAfter = [ordered]@{ Inicializar_intentos_espera = @('Succeeded') }
+                    type = 'If'
+                    expression = "@and(startsWith(triggerBody()?['Name'], '_autotasacion_lote_'), endsWith(toLower(triggerBody()?['Name']), '.json'), equals(triggerBody()?['IsFolder'], false))"
+                    actions = [ordered]@{
+                        Obtener_control_lote = New-OneDriveAction -OperationId 'GetFileContentByPath' -Parameters ([ordered]@{ path = "@triggerBody()?['Path']" })
+                        Leer_control_lote = [ordered]@{
+                            runAfter = [ordered]@{ Obtener_control_lote = @('Succeeded') }
+                            type = 'ParseJson'
+                            inputs = [ordered]@{
+                                content = Get-ControlJsonContentExpression
+                                schema = [ordered]@{ type = 'object'; properties = [ordered]@{ id_lote = [ordered]@{ type = 'string' } }; required = @('id_lote') }
+                            }
+                        }
+                        Reclamar_orquestacion = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/reclamar')" -Headers $controlHeaders -Body ([ordered]@{
+                            id_ejecucion = "@workflow()?['run']?['name']"
+                        }) -RunAfter ([ordered]@{ Leer_control_lote = @('Succeeded') }) -Secure
+                        Es_propietario_del_lote = [ordered]@{
+                            runAfter = [ordered]@{ Reclamar_orquestacion = @('Succeeded') }
+                            type = 'If'
+                            expression = "@equals(body('Reclamar_orquestacion')?['reclamado'], true)"
+                            actions = [ordered]@{
+                                HTTP_Consultar_Lote_inicial = New-HttpAction -Method 'GET' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'])" -Headers $controlHeaders -Secure
+                                Lote_requiere_carga = [ordered]@{
+                                    runAfter = [ordered]@{ HTTP_Consultar_Lote_inicial = @('Succeeded') }
+                                    type = 'If'
+                                    expression = "@or(equals(body('HTTP_Consultar_Lote_inicial')?['estado'], 'RECIBIDO'), equals(body('HTTP_Consultar_Lote_inicial')?['estado'], 'CARGANDO_PDFS'), equals(body('HTTP_Consultar_Lote_inicial')?['estado'], 'LISTO_PARA_PROCESAR'))"
+                                    actions = [ordered]@{
+                                        Filtrar_archivos_por_cargar = [ordered]@{
+                                            runAfter = @{}
+                                            type = 'Query'
+                                            inputs = [ordered]@{
+                                                from = "@body('HTTP_Consultar_Lote_inicial')?['archivos']"
+                                                # SUBIENDO is an interrupted individual transfer. It is
+                                                # safe to resume because the ticket and confirmation APIs
+                                                # remain idempotent for the same manifest entry.
+                                                where = "@or(equals(item()?['estado'], 'PENDIENTE'), equals(item()?['estado'], 'SUBIENDO'))"
+                                            }
+                                        }
+                                        Por_cada_archivo = [ordered]@{
+                                            runAfter = [ordered]@{ Filtrar_archivos_por_cargar = @('Succeeded') }
+                                            type = 'Foreach'
+                                            foreach = "@body('Filtrar_archivos_por_cargar')"
+                                            actions = [ordered]@{
+                                                Renovar_claim_antes_de_archivo = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/renovar')" -Headers $controlHeaders -Body ([ordered]@{ id_ejecucion = "@workflow()?['run']?['name']" }) -Secure
+                                                Metadatos_iniciales = New-OneDriveAction -OperationId 'GetFileMetadataByPath' -RunAfter ([ordered]@{ Renovar_claim_antes_de_archivo = @('Succeeded') }) -Parameters ([ordered]@{ path = "@concat('$SourceFolder/', items('Por_cada_archivo')?['nombre'])" })
+                                                Solicitar_ticket_de_carga = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/archivos/', items('Por_cada_archivo')?['id_archivo'], '/upload-ticket')" -Headers $controlHeaders -Body @{} -RunAfter ([ordered]@{ Metadatos_iniciales = @('Succeeded') }) -Secure
+                                                Carga_PDF_requerida = [ordered]@{
+                                                    runAfter = [ordered]@{ Solicitar_ticket_de_carga = @('Succeeded') }
+                                                    type = 'If'
+                                                    expression = "@equals(body('Solicitar_ticket_de_carga')?['requiere_carga'], true)"
+                                                    actions = [ordered]@{
+                                                        Obtener_contenido_del_PDF = New-OneDriveAction -OperationId 'GetFileContentByPath' -Parameters ([ordered]@{ path = "@concat('$SourceFolder/', items('Por_cada_archivo')?['nombre'])" })
+                                                        Subir_PDF_a_GCS = New-HttpAction -Method 'PUT' -Uri "@body('Solicitar_ticket_de_carga')?['url_carga']" -Headers ([ordered]@{ 'Content-Type' = 'application/pdf' }) -Body "@body('Obtener_contenido_del_PDF')" -RunAfter ([ordered]@{ Obtener_contenido_del_PDF = @('Succeeded') }) -Secure
+                                                    }
+                                                    else = [ordered]@{ actions = @{} }
+                                                }
+                                                Metadatos_finales = New-OneDriveAction -OperationId 'GetFileMetadataByPath' -RunAfter ([ordered]@{ Carga_PDF_requerida = @('Succeeded') }) -Parameters ([ordered]@{ path = "@concat('$SourceFolder/', items('Por_cada_archivo')?['nombre'])" })
+                                                Confirmar_carga = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/archivos/', items('Por_cada_archivo')?['id_archivo'], '/confirmar')" -Headers $controlHeaders -Body ([ordered]@{ etag_confirmado = "@outputs('Metadatos_finales')?['body/ETag']" }) -RunAfter ([ordered]@{ Metadatos_finales = @('Succeeded') }) -Secure
+                                            }
+                                            runtimeConfiguration = [ordered]@{ concurrency = [ordered]@{ repetitions = 1 } }
+                                        }
+                                        Renovar_claim_antes_de_iniciar_job = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/renovar')" -Headers $controlHeaders -Body ([ordered]@{ id_ejecucion = "@workflow()?['run']?['name']" }) -RunAfter ([ordered]@{ Por_cada_archivo = @('Succeeded') }) -Secure
+                                        HTTP_Iniciar_Job = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/iniciar')" -Headers $controlHeaders -Body @{} -RunAfter ([ordered]@{ Renovar_claim_antes_de_iniciar_job = @('Succeeded') }) -Secure
+                                    }
+                                    else = [ordered]@{ actions = @{} }
+                                }
+                                HTTP_Consultar_Lote_para_espera = New-HttpAction -Method 'GET' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'])" -Headers $controlHeaders -RunAfter ([ordered]@{ Lote_requiere_carga = @('Succeeded') }) -Secure
+                                Asignar_estado_lote_inicial = [ordered]@{
+                                    runAfter = [ordered]@{ HTTP_Consultar_Lote_para_espera = @('Succeeded') }
+                                    type = 'SetVariable'
+                                    inputs = [ordered]@{ name = 'estado_lote'; value = "@body('HTTP_Consultar_Lote_para_espera')?['estado']" }
+                                }
+                                Asignar_resultado_disponible_inicial = [ordered]@{
+                                    runAfter = [ordered]@{ Asignar_estado_lote_inicial = @('Succeeded') }
+                                    type = 'SetVariable'
+                                    inputs = [ordered]@{ name = 'resultado_disponible'; value = "@body('HTTP_Consultar_Lote_para_espera')?['resultado_disponible']" }
+                                }
+                                Reiniciar_espera_segundos = [ordered]@{
+                                    runAfter = [ordered]@{ Asignar_resultado_disponible_inicial = @('Succeeded') }
+                                    type = 'SetVariable'
+                                    inputs = [ordered]@{ name = 'espera_segundos'; value = 30 }
+                                }
+                                Reiniciar_intentos_espera = [ordered]@{
+                                    runAfter = [ordered]@{ Reiniciar_espera_segundos = @('Succeeded') }
+                                    type = 'SetVariable'
+                                    inputs = [ordered]@{ name = 'intentos_espera'; value = 0 }
+                                }
+                                Esperar_resultado_del_lote = [ordered]@{
+                                    runAfter = [ordered]@{ Reiniciar_intentos_espera = @('Succeeded') }
+                                    type = 'Until'
+                                    expression = "@or(equals(variables('estado_lote'), 'COMPLETADO'), equals(variables('estado_lote'), 'ENTREGADO'), equals(variables('estado_lote'), 'FALLIDO'), equals(variables('estado_lote'), 'FALLIDO_ORIGEN_CAMBIO'))"
+                                    limit = [ordered]@{ count = 30; timeout = 'PT2H' }
+                                    actions = [ordered]@{
+                                        Esperar_con_backoff = [ordered]@{
+                                            runAfter = @{}
+                                            type = 'Wait'
+                                            inputs = [ordered]@{ interval = "@concat('PT', string(variables('espera_segundos')), 'S')" }
+                                        }
+                                        Renovar_claim_en_espera = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/renovar')" -Headers $controlHeaders -Body ([ordered]@{ id_ejecucion = "@workflow()?['run']?['name']" }) -RunAfter ([ordered]@{ Esperar_con_backoff = @('Succeeded') }) -Secure
+                                        HTTP_Consultar_Lote_en_espera = New-HttpAction -Method 'GET' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'])" -Headers $controlHeaders -RunAfter ([ordered]@{ Renovar_claim_en_espera = @('Succeeded') }) -Secure
+                                        Actualizar_estado_lote = [ordered]@{
+                                            runAfter = [ordered]@{ HTTP_Consultar_Lote_en_espera = @('Succeeded') }
+                                            type = 'SetVariable'
+                                            inputs = [ordered]@{ name = 'estado_lote'; value = "@body('HTTP_Consultar_Lote_en_espera')?['estado']" }
+                                        }
+                                        Actualizar_resultado_disponible = [ordered]@{
+                                            runAfter = [ordered]@{ Actualizar_estado_lote = @('Succeeded') }
+                                            type = 'SetVariable'
+                                            inputs = [ordered]@{ name = 'resultado_disponible'; value = "@body('HTTP_Consultar_Lote_en_espera')?['resultado_disponible']" }
+                                        }
+                                        Incrementar_intentos_espera = [ordered]@{
+                                            runAfter = [ordered]@{ Actualizar_resultado_disponible = @('Succeeded') }
+                                            type = 'IncrementVariable'
+                                            inputs = [ordered]@{ name = 'intentos_espera'; value = 1 }
+                                        }
+                                        Aumentar_espera_hasta_cinco_minutos = [ordered]@{
+                                            runAfter = [ordered]@{ Incrementar_intentos_espera = @('Succeeded') }
+                                            type = 'SetVariable'
+                                            inputs = [ordered]@{
+                                                name = 'espera_segundos'
+                                                value = "@if(less(variables('espera_segundos'), 60), 60, if(less(variables('espera_segundos'), 120), 120, 300))"
+                                            }
+                                        }
+                                    }
+                                }
+                                Lote_alcanzo_estado_terminal = [ordered]@{
+                                    runAfter = [ordered]@{ Esperar_resultado_del_lote = @('Succeeded') }
+                                    type = 'If'
+                                    expression = "@or(equals(variables('estado_lote'), 'COMPLETADO'), equals(variables('estado_lote'), 'ENTREGADO'), equals(variables('estado_lote'), 'FALLIDO'), equals(variables('estado_lote'), 'FALLIDO_ORIGEN_CAMBIO'))"
+                                    actions = [ordered]@{
+                                        Lote_completado_con_resultado = [ordered]@{
+                                            runAfter = @{}
+                                            type = 'If'
+                                            expression = "@and(equals(variables('estado_lote'), 'COMPLETADO'), equals(variables('resultado_disponible'), true))"
+                                            actions = [ordered]@{
+                                                Renovar_claim_antes_de_entrega = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/renovar')" -Headers $controlHeaders -Body ([ordered]@{ id_ejecucion = "@workflow()?['run']?['name']" }) -Secure
+                                                # A previous run may have created the deterministic XLSX and failed before
+                                                # confirming delivery. Search first so a recovery run confirms that exact
+                                                # artifact instead of creating it again. FindFilesByPath returns an array.
+                                                Buscar_excel_final_existente = New-OneDriveAction -OperationId 'FindFilesByPath' -RunAfter ([ordered]@{ Renovar_claim_antes_de_entrega = @('Succeeded') }) -Parameters ([ordered]@{
+                                                    path = '/auto-tasaciones'
+                                                    query = "@concat('^Resultado_Final_', body('Leer_control_lote')?['id_lote'], '\.xlsx$')"
+                                                    findMode = 'RegularExpressionPatternMatch'
+                                                    maxFileCount = 1
+                                                })
+                                                Excel_final_ya_existe = [ordered]@{
+                                                    runAfter = [ordered]@{ Buscar_excel_final_existente = @('Succeeded') }
+                                                    type = 'If'
+                                                    expression = "@greater(length(body('Buscar_excel_final_existente')), 0)"
+                                                    actions = [ordered]@{
+                                                        Confirmar_entrega_existente = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/entrega')" -Headers $controlHeaders -Body @{} -Secure
+                                                        Eliminar_control_lote_existente = New-OneDriveAction -OperationId 'DeleteFile' -RunAfter ([ordered]@{ Confirmar_entrega_existente = @('Succeeded') }) -Parameters ([ordered]@{ id = "@triggerBody()?['Id']" })
+                                                    }
+                                                    else = [ordered]@{
+                                                        actions = [ordered]@{
+                                                            Solicitar_ticket_resultado = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/resultado-ticket')" -Headers $controlHeaders -Body @{} -Secure
+                                                            Descargar_resultado = New-HttpAction -Method 'GET' -Uri "@body('Solicitar_ticket_resultado')?['url_descarga']" -RunAfter ([ordered]@{ Solicitar_ticket_resultado = @('Succeeded') }) -Secure
+                                                            Crear_excel_final = New-OneDriveAction -OperationId 'CreateFile' -RunAfter ([ordered]@{ Descargar_resultado = @('Succeeded') }) -Parameters ([ordered]@{
+                                                                folderPath = '/auto-tasaciones'
+                                                                name = "@concat('Resultado_Final_', body('Leer_control_lote')?['id_lote'], '.xlsx')"
+                                                                body = "@body('Descargar_resultado')"
+                                                            })
+                                                            Confirmar_entrega_nuevo = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/entrega')" -Headers $controlHeaders -Body @{} -RunAfter ([ordered]@{ Crear_excel_final = @('Succeeded') }) -Secure
+                                                            Eliminar_control_lote_nuevo = New-OneDriveAction -OperationId 'DeleteFile' -RunAfter ([ordered]@{ Confirmar_entrega_nuevo = @('Succeeded') }) -Parameters ([ordered]@{ id = "@triggerBody()?['Id']" })
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            else = [ordered]@{ actions = @{} }
+                                        }
+                                    }
+                                    else = [ordered]@{
+                                        actions = [ordered]@{
+                                            Liberar_claim_por_timeout = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/liberar')" -Headers $controlHeaders -Body ([ordered]@{
+                                                id_ejecucion = "@workflow()?['run']?['name']"
+                                                motivo = 'TIEMPO_DE_ESPERA_AGOTADO'
+                                            }) -Secure
+                                        }
+                                    }
+                                }
+                            }
+                            else = [ordered]@{
+                                # If a prior owner reached ENTREGADO but stopped before deleting
+                                # the control, a duplicate event safely performs only that cleanup.
+                                actions = [ordered]@{
+                                    Limpiar_control_de_lote_entregado = [ordered]@{
+                                        runAfter = @{}
+                                        type = 'If'
+                                        expression = "@equals(body('Reclamar_orquestacion')?['estado'], 'ENTREGADO')"
+                                        actions = [ordered]@{
+                                            Eliminar_control_lote_entregado = New-OneDriveAction -OperationId 'DeleteFile' -Parameters ([ordered]@{ id = "@triggerBody()?['Id']" })
+                                        }
+                                        else = [ordered]@{ actions = @{} }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else = [ordered]@{ actions = @{} }
+                }
+            }
+            return [ordered]@{
+                connectionReferences = New-EmbeddedOneDriveReference
+                definition = New-BaseDefinition -Triggers (New-OneDriveControlCreatedTrigger -FolderId $ControlFolderId) -Actions $actions
+            }
         }
         'auto-tasacion-cargar-lotes' {
             $actions = [ordered]@{
@@ -545,6 +813,7 @@ Add-SolutionComponent -ComponentId ([string] $OneDriveConnectionReferenceId) -Co
 $flows = [ordered]@{
     'auto-tasacion-iniciar-lote' = 'Registra un lote de PDFs seleccionado desde Power Apps y crea su control operativo.'
     'auto-tasacion-consultar-lote' = 'Consulta el estado y progreso de un lote de tasaciones en Cloud Run.'
+    'auto-tasacion-orquestar-lote' = 'Orquesta un único lote al crearse su control de OneDrive, con claim persistido e idempotencia.'
     'auto-tasacion-cargar-lotes' = 'Carga PDFs individuales pendientes desde OneDrive hacia GCS y arranca el Job.'
     'auto-tasacion-entregar-lote' = 'Entrega el XLSX final en OneDrive cuando Cloud Run completa el lote.'
 }

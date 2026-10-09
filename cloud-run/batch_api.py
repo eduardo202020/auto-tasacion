@@ -23,6 +23,7 @@ from batch_lotes import (
     BATCH_FAILED,
     BATCH_PROCESSING,
     BATCH_READY,
+    BATCH_SOURCE_CHANGED,
     FILE_FAILED,
     FILE_SOURCE_CHANGED,
     FILE_UPLOADED,
@@ -34,9 +35,12 @@ from batch_lotes import (
     batch_registration_status,
     build_manifest,
     find_file,
+    orchestration_lease_seconds,
     public_batch_status,
     refresh_manifest_progress,
     state_store_from_environment,
+    utc_timestamp,
+    utc_timestamp_after,
     update_manifest,
 )
 
@@ -53,6 +57,9 @@ _CONFIRM_PATH = re.compile(r"^/v1/lotes/([^/]+)/archivos/([^/]+)/confirmar$")
 _START_PATH = re.compile(r"^/v1/lotes/([^/]+)/iniciar$")
 _RESULT_TICKET_PATH = re.compile(r"^/v1/lotes/([^/]+)/resultado-ticket$")
 _DELIVERY_PATH = re.compile(r"^/v1/lotes/([^/]+)/entrega$")
+_ORCHESTRATION_CLAIM_PATH = re.compile(r"^/v1/lotes/([^/]+)/orquestacion/reclamar$")
+_ORCHESTRATION_RENEW_PATH = re.compile(r"^/v1/lotes/([^/]+)/orquestacion/renovar$")
+_ORCHESTRATION_RELEASE_PATH = re.compile(r"^/v1/lotes/([^/]+)/orquestacion/liberar$")
 
 
 def _json_response(payload: dict[str, Any], status: int = 200) -> Response:
@@ -147,6 +154,140 @@ class BatchControlApi:
             raise BatchError("El lote no existe", code="LOTE_NO_ENCONTRADO", status=404)
         return manifest
 
+    def claim_orchestration(self, batch_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Reserva de forma atómica un lote para una ejecución del orquestador.
+
+        Los triggers de OneDrive tienen entrega *at least once*. El claim vive
+        en el mismo manifiesto con control optimista de generación, por lo que
+        dos ejecuciones concurrentes no pueden ser propietarias del lote a la
+        vez. El propietario debe renovar la lease durante transferencias y
+        polling largos.
+        """
+        owner = self._orchestration_owner(payload)
+        now = utc_timestamp()
+        lease_until = utc_timestamp_after(orchestration_lease_seconds(), now=now)
+
+        def claim(manifest: dict[str, Any]) -> dict[str, Any]:
+            state = str(manifest.get("estado") or "")
+            if state in {BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED}:
+                return {"reclamado": False, "resultado": "TERMINAL"}
+
+            control = self._orchestration_block(manifest, now=now)
+            current_owner = str(control.get("propietario") or "")
+            current_lease = str(control.get("lease_hasta") or "")
+            lease_active = self._lease_is_active(current_lease, now=now)
+            if current_owner and current_owner != owner and lease_active:
+                return {"reclamado": False, "resultado": "OCUPADO"}
+            if current_owner == owner and lease_active:
+                control["fase"] = "ORQUESTANDO"
+                control["actualizado_en"] = now
+                return {"reclamado": True, "resultado": "REUTILIZADO"}
+
+            control.update({
+                "propietario": owner,
+                "lease_hasta": lease_until,
+                "fase": "ORQUESTANDO",
+                "intentos": int(control.get("intentos") or 0) + 1,
+                "ultimo_error": "",
+                "actualizado_en": now,
+            })
+            return {"reclamado": True, "resultado": "RECLAMADO"}
+
+        saved, result = update_manifest(self.store, batch_id, claim)
+        return {
+            "id_lote": saved["id_lote"],
+            "estado": saved["estado"],
+            **result,
+            "lease_hasta": str(saved.get("orquestacion", {}).get("lease_hasta") or ""),
+        }
+
+    def renew_orchestration(self, batch_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Extiende un claim solo si la misma ejecución aún es propietaria."""
+        owner = self._orchestration_owner(payload)
+        now = utc_timestamp()
+        lease_until = utc_timestamp_after(orchestration_lease_seconds(), now=now)
+
+        def renew(manifest: dict[str, Any]) -> None:
+            if manifest.get("estado") in {BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED}:
+                raise BatchError(
+                    "El lote ya alcanzó un estado terminal",
+                    code="ORQUESTACION_FINALIZADA",
+                    status=409,
+                )
+            control = self._orchestration_block(manifest, now=now)
+            if str(control.get("propietario") or "") != owner:
+                raise BatchError(
+                    "Otra ejecución ya posee la orquestación del lote",
+                    code="ORQUESTACION_NO_PROPIETARIA",
+                    status=409,
+                )
+            control.update({
+                "lease_hasta": lease_until,
+                "fase": "ORQUESTANDO",
+                "actualizado_en": now,
+            })
+
+        saved, _ = update_manifest(self.store, batch_id, renew)
+        return {
+            "id_lote": saved["id_lote"],
+            "renovado": True,
+            "lease_hasta": str(saved.get("orquestacion", {}).get("lease_hasta") or ""),
+        }
+
+    def release_orchestration(self, batch_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Libera un claim interrumpido sin retroceder el estado del lote."""
+        owner = self._orchestration_owner(payload)
+        reason = str(payload.get("motivo") or "ORQUESTACION_INTERRUMPIDA").strip()[:240]
+        now = utc_timestamp()
+
+        def release(manifest: dict[str, Any]) -> bool:
+            if manifest.get("estado") in {BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED}:
+                return False
+            control = self._orchestration_block(manifest, now=now)
+            if str(control.get("propietario") or "") != owner:
+                return False
+            control.update({
+                "lease_hasta": now,
+                "fase": "REINTENTO_REQUERIDO",
+                "ultimo_error": reason,
+                "actualizado_en": now,
+            })
+            if manifest.get("estado") not in {BATCH_DELIVERED, BATCH_FAILED, BATCH_SOURCE_CHANGED}:
+                manifest["mensaje"] = "La orquestación requiere reintento: " + reason
+            return True
+
+        saved, released = update_manifest(self.store, batch_id, release)
+        return {"id_lote": saved["id_lote"], "liberado": released, "estado": saved["estado"]}
+
+    @staticmethod
+    def _orchestration_owner(payload: dict[str, Any]) -> str:
+        if not isinstance(payload, dict):
+            raise BatchError("El cuerpo JSON debe ser un objeto")
+        owner = str(payload.get("id_ejecucion") or "").strip()
+        if not owner or len(owner) > 512:
+            raise BatchError("id_ejecucion es obligatorio", code="EJECUCION_INVALIDA")
+        return owner
+
+    @staticmethod
+    def _orchestration_block(manifest: dict[str, Any], *, now: str) -> dict[str, Any]:
+        control = manifest.get("orquestacion")
+        if not isinstance(control, dict):
+            control = {}
+            manifest["orquestacion"] = control
+        control.setdefault("propietario", "")
+        control.setdefault("lease_hasta", "")
+        control.setdefault("fase", "PENDIENTE")
+        control.setdefault("intentos", 0)
+        control.setdefault("ultimo_error", "")
+        control.setdefault("actualizado_en", now)
+        return control
+
+    @staticmethod
+    def _lease_is_active(lease_until: str, *, now: str) -> bool:
+        # ISO UTC is lexicographically ordered. Both values originate in this
+        # module and use the same canonical format, avoiding a second clock.
+        return bool(lease_until) and lease_until > now
+
     def upload_ticket(self, batch_id: str, file_id: str) -> dict[str, Any]:
         def mark_uploading(manifest: dict[str, Any]) -> dict[str, Any]:
             if manifest.get("estado") in {BATCH_FAILED, "FALLIDO_ORIGEN_CAMBIO", BATCH_PROCESSING, BATCH_COMPLETED, BATCH_DELIVERED}:
@@ -156,19 +297,30 @@ class BatchControlApi:
                 raise BatchError("El PDF ya fue confirmado", code="ARCHIVO_YA_CARGADO", status=409)
             if item.get("estado") in {FILE_FAILED, FILE_SOURCE_CHANGED}:
                 raise BatchError("El PDF falló y no se puede cargar", code="ARCHIVO_NO_DISPONIBLE", status=409)
+            was_uploading = item.get("estado") == FILE_UPLOADING
             item["estado"] = FILE_UPLOADING
             item["mensaje"] = ""
             refresh_manifest_progress(manifest)
-            return item
+            return {"item": item, "was_uploading": was_uploading}
 
-        manifest, item = update_manifest(self.store, batch_id, mark_uploading)
+        manifest, operation = update_manifest(self.store, batch_id, mark_uploading)
+        item = operation["item"]
         object_name = str(item.get("objeto_gcs") or "")
         if not object_name:
             raise BatchError("El manifiesto no contiene destino para el PDF", code="ESTADO_CORRUPTO", status=500)
+        # A retry can arrive after the PUT succeeded but before Power Automate
+        # called confirmar. Reuse only an object that already matches the
+        # declared size and MIME type; the final OneDrive eTag is still checked
+        # by confirm_upload before the item becomes CARGADO.
+        reuse_existing_object = operation["was_uploading"] and self._is_expected_uploaded_pdf(item)
         return {
             "id_lote": manifest["id_lote"],
             "id_archivo": item["id_archivo"],
             "estado": item["estado"],
+            "requiere_carga": not reuse_existing_object,
+            # Preserve the ticket contract for the recurrent migration flows.
+            # The event orchestrator obeys requiere_carga and skips this URL
+            # when it can safely reuse the object.
             "url_carga": self._signed_pdf_upload_url(object_name),
             "encabezados_carga": {"Content-Type": PDF_CONTENT_TYPE},
             "vence_en_segundos": UPLOAD_TTL_SECONDS,
@@ -294,6 +446,13 @@ class BatchControlApi:
                 raise BatchError("El resultado del lote aún no está disponible", code="RESULTADO_NO_DISPONIBLE", status=409)
             manifest["estado"] = BATCH_DELIVERED
             manifest["mensaje"] = ""
+            control = self._orchestration_block(manifest, now=utc_timestamp())
+            control.update({
+                "lease_hasta": utc_timestamp(),
+                "fase": "ENTREGADO",
+                "ultimo_error": "",
+                "actualizado_en": utc_timestamp(),
+            })
 
         saved, _ = update_manifest(self.store, batch_id, mark_delivered)
         return public_batch_status(saved)
@@ -322,6 +481,20 @@ class BatchControlApi:
         content_type = getattr(blob, "content_type", None)
         if isinstance(content_type, str) and content_type and content_type.lower() != PDF_CONTENT_TYPE:
             raise BatchError("El objeto cargado no tiene tipo PDF", code="OBJETO_NO_PDF", status=409)
+
+    def _is_expected_uploaded_pdf(self, item: dict[str, Any]) -> bool:
+        """Indica si una transferencia interrumpida dejó un objeto reutilizable."""
+        object_name = str(item.get("objeto_gcs") or "")
+        if not object_name:
+            return False
+        blob = self.bucket.blob(object_name)
+        if not blob.exists():
+            return False
+        blob.reload()
+        if int(blob.size or 0) != int(item["tamano_bytes"]):
+            return False
+        content_type = getattr(blob, "content_type", None)
+        return not isinstance(content_type, str) or not content_type or content_type.lower() == PDF_CONTENT_TYPE
 
     def _signed_result_download_url(self, object_name: str) -> str:
         if self.signed_url_factory is not None:
@@ -420,6 +593,15 @@ def handle_request(
         matched = _DELIVERY_PATH.fullmatch(path)
         if request.method == "POST" and matched:
             return _json_response(api.confirm_delivery(matched.group(1)))
+        matched = _ORCHESTRATION_CLAIM_PATH.fullmatch(path)
+        if request.method == "POST" and matched:
+            return _json_response(api.claim_orchestration(matched.group(1), _request_payload(request)))
+        matched = _ORCHESTRATION_RENEW_PATH.fullmatch(path)
+        if request.method == "POST" and matched:
+            return _json_response(api.renew_orchestration(matched.group(1), _request_payload(request)))
+        matched = _ORCHESTRATION_RELEASE_PATH.fullmatch(path)
+        if request.method == "POST" and matched:
+            return _json_response(api.release_orchestration(matched.group(1), _request_payload(request)))
         raise BatchError("Ruta o método no permitido", code="RUTA_NO_ENCONTRADA", status=404)
     except BatchError as error:
         return _error_response(error)

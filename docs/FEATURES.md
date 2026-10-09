@@ -24,6 +24,7 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F17 | Prueba E2E de lote masivo | E2E de un PDF confirmado | La ruta llego a Excel y entrega; faltan pruebas de capacidad con 10, 150 y 300 archivos. |
 | F18 | Stepper visual del lote | Implementado en fuente; pendiente de publicacion Canvas | `POLLING.md` define cinco pasos, colores de avance/error y un Timer visual sin llamadas adicionales. |
 | F19 | Tiempo persistente de lote | Implementado en fuente; pendiente de despliegue | El manifiesto guarda inicio y fin inmutables; consulta tipada expone fechas y segundos. |
+| F20 | Orquestación de lote por evento | Implementado en fuente; pendiente de despliegue | Un control pequeño en `/auto-tasaciones/Controles` dispara un solo orquestador con claim GCS, carga serial, Job, backoff y entrega idempotente. |
 
 ## Ciclo de alta seguro
 

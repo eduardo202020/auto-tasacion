@@ -26,6 +26,7 @@ firmadas de un PDF por vez; no recibe contenido de PDFs en sus endpoints JSON.
 | `BATCH_MAX_PDFS` | Máximo de PDFs, por defecto 300. |
 | `BATCH_MAX_TOTAL_BYTES` | Máximo total del manifiesto, por defecto 2 GiB. |
 | `BATCH_MAX_PDF_BYTES` | Máximo por PDF, por defecto 90 000 000 bytes. |
+| `BATCH_ORCHESTRATION_LEASE_SECONDS` | Reserva renovable del orquestador, por defecto 10 800 segundos (3 horas). |
 | `BATCH_JOB_NAME`, `BATCH_JOB_REGION` | Job que procesa el manifiesto; requiere `GOOGLE_CLOUD_PROJECT`. |
 | `BATCH_CONTROL_API_TOKEN` | Secreto requerido en `X-Batch-Control-Token` para habilitar la API de control. |
 
@@ -57,6 +58,21 @@ una sola vez si el lote queda `ENTREGADO`, `FALLIDO` o
 `FALLIDO_ORIGEN_CAMBIO`. `GET /v1/lotes/{id_lote}` devuelve estas fechas en
 ISO-8601 UTC y `duracion_segundos`; durante la ejecución la duración se
 calcula contra el reloj UTC y al terminar queda fija.
+
+### Orquestación por evento e idempotencia
+
+`POST /v1/lotes/{id}/orquestacion/reclamar` recibe un `id_ejecucion` de Power
+Automate y registra una reserva atómica en el manifiesto. Mientras la reserva
+está vigente, otro evento del mismo control recibe `OCUPADO` y no puede cargar
+PDFs, iniciar otro Job ni entregar otro XLSX. La misma ejecución puede renovar
+la reserva mediante `POST /v1/lotes/{id}/orquestacion/renovar` antes de cada
+PDF, antes del Job y durante la espera del resultado.
+
+`POST /v1/lotes/{id}/orquestacion/liberar` registra un reintento requerido sin
+retroceder el estado del lote. Se usa al superar la ventana de espera del flujo;
+el control de OneDrive permanece para que una intervención operativa lo vuelva
+a disparar. Los estados de negocio siguen siendo monotónicos y `ENTREGADO`,
+`FALLIDO` y `FALLIDO_ORIGEN_CAMBIO` no vuelven a ser reclamables.
 
 ## Pruebas locales
 

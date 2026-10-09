@@ -43,6 +43,12 @@ precondiciones de generación de GCS para evitar que cargas concurrentes pierdan
 actualizaciones. Los resultados usan
 `resultados/<ID_LOTE>/Resultado_Final_<ID_LOTE>.xlsx`.
 
+El manifiesto conserva además una reserva de orquestación con propietario,
+vencimiento, fase, intentos y último error. `POST /orquestacion/reclamar` la
+actualiza mediante la misma precondición de generación: un solo evento puede
+ser dueño del lote. La reserva se renueva durante cargas y espera; una ejecución
+duplicada termina sin transferir, iniciar un Job o entregar otro XLSX.
+
 Cada manifiesto registra `fecha_inicio` al crearse. Cuando alcanza
 `ENTREGADO`, `FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`, registra `fecha_fin` una sola
 vez. `GET /v1/lotes/{id_lote}` expone ambas marcas y `duracion_segundos`, sin
@@ -74,7 +80,7 @@ El código local incluye el manifiesto, las APIs de control y el worker. Falta:
 2. crear el Cloud Run Job con el mismo contenedor y permisos para leer/escribir
    el bucket;
 3. proteger la API de control según el mecanismo corporativo aprobado;
-4. construir y publicar los cinco flujos de Power Automate y la pantalla de
+4. construir y publicar los seis flujos de Power Automate y la pantalla de
    Power Apps;
 5. ejecutar y aprobar la prueba E2E sintética masiva.
 

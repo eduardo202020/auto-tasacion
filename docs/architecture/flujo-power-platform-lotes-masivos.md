@@ -1,10 +1,8 @@
 # Flujo Power Platform para lotes masivos de PDFs
 
-> **Estado al 8 de octubre de 2026:** la ruta OneDrive → Cloud Run Job → Excel
-> ya completó una prueba E2E y la Canvas App consulta el estado hasta
-> `ENTREGADO`. La extensión de seguimiento visual y tiempo está versionada en
-> [`POLLING.md`](../../power-platform/canvas/autoTasacionJG/POLLING.md) y debe
-> aplicarse y publicarse desde Power Apps Studio junto con el nuevo contrato.
+> **Estado al 9 de octubre de 2026:** el orquestador orientado a eventos está
+> implementado en el repositorio y pendiente de revisión y despliegue. Los
+> flujos recurrentes se mantienen como ruta de migración hasta aprobar el E2E.
 
 ## Decisión
 
@@ -17,10 +15,10 @@ Operador carga PDFs individuales en OneDrive
   -> Power Apps lista y selecciona metadatos
   -> Power Automate registra el manifiesto
   -> API de control crea ID_LOTE
-  -> Power Automate carga un PDF por vez a GCS
-  -> API confirma cada PDF y arranca Cloud Run Job
-  -> Job procesa PDFs individuales y genera XLSX
-  -> Power Automate entrega Resultado_Final_<ID_LOTE>.xlsx a OneDrive
+  -> OneDrive crea control pequeño en /auto-tasaciones/Controles
+  -> Orquestador reclama ese ID_LOTE y carga un PDF por vez a GCS
+  -> API confirma cada PDF y arranca exactamente un Cloud Run Job
+  -> Orquestador consulta solo ese lote, descarga y entrega el XLSX
   -> PC sincronizada -> PAD -> IBM 3270
 ```
 
@@ -30,6 +28,7 @@ convierte a Base64 ni mantiene en memoria el lote completo.
 ## Carpetas y resultado
 
 - Origen operativo: `/auto-tasaciones/PDFs`.
+- Controles de evento: `/auto-tasaciones/Controles/_autotasacion_lote_<ID_LOTE>.json`.
 - Objetos de ingreso: `ingresos/<ID_LOTE>/pdfs/<ID_ARCHIVO>_<nombre>.pdf`.
 - Resultado: `resultados/<ID_LOTE>/Resultado_Final_<ID_LOTE>.xlsx`.
 - Entrega final: `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
@@ -69,25 +68,51 @@ Responde de inmediato con `id_lote`, estado y `fecha_inicio`. No obtiene
 contenido de ningún PDF y no espera la transferencia ni el procesamiento.
 `fecha_inicio` queda persistida en el manifiesto y no cambia con las consultas.
 
-### 3. `auto-tasacion-cargar-lotes`
+### 3. `auto-tasacion-orquestar-lote`
 
-Se ejecuta de forma separada o recurrente. Para cada archivo pendiente:
+El trigger de OneDrive for Business **When a file is created (properties
+only)** (`OnNewFilesV2`) escucha únicamente `/auto-tasaciones/Controles`.
+`Split On` crea una ejecución por JSON y el flujo decodifica su único campo:
 
-1. obtiene metadatos y conserva el eTag inicial;
-2. solicita `POST /v1/lotes/{id}/archivos/{archivo}/upload-ticket`;
-3. obtiene el contenido binario de **un solo PDF** desde OneDrive;
-4. hace `PUT` binario a la URL firmada con `Content-Type: application/pdf`;
-5. consulta otra vez los metadatos de OneDrive;
-6. compara el eTag inicial y final;
-7. llama a `POST /confirmar` con el eTag final.
+```json
+{"id_lote":"TAS-..."}
+```
 
-La concurrencia inicial debe configurarse entre 1 y 3 archivos. Si el eTag
-cambia, se detiene el lote con `FALLIDO_ORIGEN_CAMBIO`. Cuando todos están
-confirmados, el flujo invoca `POST /v1/lotes/{id}/iniciar`.
+El conector conserva su comprobación interna de un minuto; no es un flujo de
+negocio recurrente y no crea ejecuciones de carga ni entrega cuando no hay un
+control nuevo.
 
-Antes de solicitar el Cloud Run Job, la API persiste `EN_PROCESO`. De esta
-forma un Job que arranque inmediatamente no puede leer el manifiesto todavía en
-`LISTO_PARA_PROCESAR` y rechazarse por una carrera de inicio.
+Antes de transferir, llama a `POST /v1/lotes/{id}/orquestacion/reclamar` con el
+ID de ejecución de Power Automate. La reserva se persiste atómicamente en el
+manifiesto GCS. Un evento duplicado obtiene `OCUPADO` y termina sin efectos.
+El propietario renueva su reserva antes de cada PDF, antes del Job, antes de
+entregar y en cada consulta de espera.
+
+Para los archivos `PENDIENTE` —o un `SUBIENDO` que quedó interrumpido— el flujo:
+
+1. obtiene metadatos y solicita un `upload-ticket`;
+2. obtiene un único PDF binario desde OneDrive;
+3. hace `PUT` a la URL firmada con `Content-Type: application/pdf`;
+4. vuelve a leer metadatos y llama a `confirmar` con el eTag final.
+
+Si un `SUBIENDO` ya dejó en GCS un objeto con tamaño y MIME esperados, el
+`upload-ticket` devuelve `requiere_carga = false`: el orquestador no realiza
+otro `PUT` y solo confirma el objeto tras comprobar el eTag de OneDrive.
+
+La concurrencia es uno. Cuando todos están confirmados, `POST /iniciar`
+persiste `EN_PROCESO` antes de solicitar el Cloud Run Job; reintentos del mismo
+estado no inician otra ejecución. El flujo consulta solamente ese ID con espera
+30 s, 60 s, 120 s y luego 300 s, con máximo de dos horas después del inicio del
+Job. Al completarse busca primero
+`/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` por patr?n exacto. Si existe
+por una ca?da entre la creaci?n y la confirmaci?n, confirma ese archivo sin
+crear otro; si no existe, descarga el XLSX, lo crea, confirma la entrega y borra
+el JSON de control.
+
+Si se agota la espera sin un estado terminal, no altera el estado de negocio:
+libera el claim, registra `REINTENTO_REQUERIDO` y deja el control para una
+reanudación operativa. Si falla una carga o el Job, el backend deja el lote en
+`FALLIDO` o `FALLIDO_ORIGEN_CAMBIO`; los estados no retroceden.
 
 ### 4. `auto-tasacion-consultar-lote`
 
@@ -109,18 +134,12 @@ sigue activo en `COMPLETADO`, porque la entrega del XLSX aún debe cambiar el
 lote a `ENTREGADO`, y se detiene solo en `ENTREGADO`, `FALLIDO` o
 `FALLIDO_ORIGEN_CAMBIO`.
 
-### 5. `auto-tasacion-entregar-lote`
+### 5. Flujos recurrentes de migración
 
-La rama de entrega requiere `estado = COMPLETADO` y
-`resultado_disponible = true`. Primero descarga el resultado y crea el XLSX en
-OneDrive. Solo después de una creación exitosa llama a `POST /entrega`, que es
-la única operación que persiste `ENTREGADO`; el control se elimina después de
-esa confirmación.
-
-Cuando el estado es `COMPLETADO`, descarga únicamente el XLSX final, lo crea en
-la carpeta operativa de OneDrive y confirma `POST /entrega`. Solo después de
-`ENTREGADO` se entrega la ruta a PAD, que procesa exclusivamente
-`tblParaProcesar`.
+`auto-tasacion-cargar-lotes` y `auto-tasacion-entregar-lote` permanecen en el
+repositorio y en el entorno actual para permitir reversión. No forman parte de
+la ruta de controles nueva y no deben desactivarse hasta un E2E aprobado del
+orquestador.
 
 ## Power Apps
 
@@ -154,6 +173,9 @@ transición separado para lotes de hasta 90 MB.
 | `POST /v1/lotes/{id}/archivos/{archivo}/confirmar` | Comprueba eTag y tamaño del objeto GCS. |
 | `POST /v1/lotes/{id}/iniciar` | Inicia el Job únicamente si todos los PDFs están confirmados. |
 | `POST /v1/lotes/{id}/entrega` | Registra que el XLSX fue creado en OneDrive. |
+| `POST /v1/lotes/{id}/orquestacion/reclamar` | Reserva atómicamente un lote para una ejecución de orquestador. |
+| `POST /v1/lotes/{id}/orquestacion/renovar` | Renueva la reserva del mismo propietario. |
+| `POST /v1/lotes/{id}/orquestacion/liberar` | Registra un reintento requerido sin cambiar el estado del lote. |
 
 La clave de idempotencia es `SHA256(carpeta + lista ordenada itemId:eTag)`. Un
 eTag distinto representa una versión nueva. La API no utiliza `driveId` ni
