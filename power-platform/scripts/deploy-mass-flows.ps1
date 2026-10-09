@@ -542,7 +542,9 @@ function New-FlowDefinition {
                                                 Buscar_excel_final_existente = New-OneDriveAction -OperationId 'FindFilesByPath' -RunAfter ([ordered]@{ Renovar_claim_antes_de_entrega = @('Succeeded') }) -Parameters ([ordered]@{
                                                     path = '/auto-tasaciones'
                                                     query = "@concat('^Resultado_Final_', body('Leer_control_lote')?['id_lote'], '\.xlsx$')"
-                                                    findMode = 'RegularExpressionPatternMatch'
+                                                    # The connector exposes regular-expression matching with the
+                                                    # `Pattern` enum value, rather than its display label.
+                                                    findMode = 'Pattern'
                                                     maxFileCount = 1
                                                 })
                                                 Excel_final_ya_existe = [ordered]@{

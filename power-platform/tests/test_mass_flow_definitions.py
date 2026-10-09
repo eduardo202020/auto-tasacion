@@ -184,7 +184,8 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
 
     def test_recovery_after_creating_the_xlsx_confirms_the_existing_artifact(self):
         self.assertIn("OperationId 'FindFilesByPath'", self.definition)
-        self.assertIn("findMode = 'RegularExpressionPatternMatch'", self.definition)
+        self.assertIn("findMode = 'Pattern'", self.definition)
+        self.assertNotIn("findMode = 'RegularExpressionPatternMatch'", self.definition)
         self.assertIn("@greater(length(body('Buscar_excel_final_existente')), 0)", self.definition)
         self.assertIn("Confirmar_entrega_existente", self.definition)
         self.assertIn("Eliminar_control_lote_existente", self.definition)
