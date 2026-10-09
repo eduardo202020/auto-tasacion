@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch] $Activate
+    [switch] $Activate,
+    [string[]] $FlowName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -546,6 +547,21 @@ $flows = [ordered]@{
     'auto-tasacion-consultar-lote' = 'Consulta el estado y progreso de un lote de tasaciones en Cloud Run.'
     'auto-tasacion-cargar-lotes' = 'Carga PDFs individuales pendientes desde OneDrive hacia GCS y arranca el Job.'
     'auto-tasacion-entregar-lote' = 'Entrega el XLSX final en OneDrive cuando Cloud Run completa el lote.'
+}
+
+if ($FlowName) {
+    # A partial deployment is useful to recover a single flow without
+    # touching the others. Validate names explicitly so an unknown name is
+    # never silently ignored.
+    $unknownFlowNames = @($FlowName | Where-Object { -not $flows.Contains($_) })
+    if ($unknownFlowNames.Count -gt 0) {
+        throw "Flujo no reconocido: $($unknownFlowNames -join ', ')"
+    }
+    $selectedFlows = [ordered]@{}
+    foreach ($name in $FlowName) {
+        $selectedFlows[$name] = $flows[$name]
+    }
+    $flows = $selectedFlows
 }
 
 foreach ($flow in $flows.GetEnumerator()) {

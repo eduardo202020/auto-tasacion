@@ -72,6 +72,12 @@ class FlowDeploymentLifecycleTests(unittest.TestCase):
             self.script.index(update_definition),
         )
 
+    def test_can_deploy_one_named_flow_without_touching_the_others(self):
+        self.assertIn("[string[]] $FlowName", self.script)
+        self.assertIn("if ($FlowName)", self.script)
+        self.assertIn("$unknownFlowNames", self.script)
+        self.assertIn("$selectedFlows[$name] = $flows[$name]", self.script)
+
 
 class ConsultarLoteDefinitionTests(unittest.TestCase):
     def setUp(self):

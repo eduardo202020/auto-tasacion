@@ -61,6 +61,13 @@ Para aplicar las definiciones y dejar los cuatro flujos publicados, ejecutar:
 .\power-platform\scripts\deploy-mass-flows.ps1 -Activate
 ```
 
+Para recuperar o actualizar solo un flujo, se puede indicar `-FlowName`. Por
+ejemplo, para actualizar el cargador sin modificar los otros tres:
+
+```powershell
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-cargar-lotes
+```
+
 `-Activate` conserva las recurrencias y la concurrencia definidas en cada
 flujo. Si un flujo publicado tiene un borrador activo sin publicar, el script lo
 publica de forma dirigida, lo desactiva brevemente, actualiza la definición y
