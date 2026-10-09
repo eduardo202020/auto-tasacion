@@ -175,6 +175,13 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertLess(self.definition.index("Crear_excel_final"), self.definition.index("Confirmar_entrega_nuevo"))
         self.assertLess(self.definition.index("Confirmar_entrega_nuevo"), self.definition.index("Eliminar_control_lote_nuevo"))
 
+    def test_backoff_update_does_not_self_reference_the_target_variable(self):
+        start = self.definition.index("Aumentar_espera_hasta_cinco_minutos")
+        end = self.definition.index("Lote_alcanzo_estado_terminal", start)
+        backoff_update = self.definition[start:end]
+        self.assertIn("variables('intentos_espera')", backoff_update)
+        self.assertNotIn("variables('espera_segundos')", backoff_update)
+
     def test_recovery_after_creating_the_xlsx_confirms_the_existing_artifact(self):
         self.assertIn("OperationId 'FindFilesByPath'", self.definition)
         self.assertIn("findMode = 'RegularExpressionPatternMatch'", self.definition)

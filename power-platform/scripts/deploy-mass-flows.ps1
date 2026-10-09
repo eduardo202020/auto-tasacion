@@ -517,7 +517,10 @@ function New-FlowDefinition {
                                             type = 'SetVariable'
                                             inputs = [ordered]@{
                                                 name = 'espera_segundos'
-                                                value = "@if(less(variables('espera_segundos'), 60), 60, if(less(variables('espera_segundos'), 120), 120, 300))"
+                                                # SetVariable cannot read its own target variable. The step is
+                                                # calculated from the independent attempt counter: 30, 60, 120,
+                                                # then 300 seconds for subsequent polls.
+                                                value = "@if(lessOrEquals(variables('intentos_espera'), 1), 60, if(equals(variables('intentos_espera'), 2), 120, 300))"
                                             }
                                         }
                                     }
