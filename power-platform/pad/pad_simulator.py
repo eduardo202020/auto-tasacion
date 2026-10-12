@@ -952,6 +952,54 @@ def command_run_job(settings: Settings, job_path: Path) -> int:
     return 0 if status.startswith("SIMULADO") or outcome in {"terminal", "busy"} else 1
 
 
+def run_cycle(settings: Settings) -> dict[str, Any]:
+    """Ejecuta una vuelta local: detecta XLSX y consume solo trabajos pendientes.
+
+    PAD invoca este punto de entrada una vez. No mantiene un bucle propio, no
+    abre Excel y no interactúa con 3270. La reserva atómica del simulador sigue
+    siendo la única autoridad para impedir una doble ejecución de un lote.
+    """
+    detection_results = LocalMonitor(settings).scan_once()
+    simulator = Mock3270Simulator(settings)
+    job_results: list[dict[str, str]] = []
+    errors = 0
+
+    for job_path in sorted(settings.pending_directory.glob("*.json")):
+        try:
+            status, outcome = simulator.run_job(job_path)
+        except Exception:
+            # El detalle técnico queda en el estado del lote cuando el trabajo
+            # pudo reclamarse. La salida de consola no incluye datos del Excel.
+            status, outcome = "ERROR_TECNICO", "unhandled_job_error"
+        job_results.append({"status": status, "outcome": outcome})
+        if status == "ERROR_TECNICO" or outcome in {"error", "unhandled_job_error", "diagnostic_persistence_failed"}:
+            errors += 1
+
+    detected_outcomes: dict[str, int] = {}
+    for result in detection_results:
+        outcome = result["outcome"]
+        detected_outcomes[outcome] = detected_outcomes.get(outcome, 0) + 1
+    job_outcomes: dict[str, int] = {}
+    for result in job_results:
+        key = f"{result['status']}:{result['outcome']}"
+        job_outcomes[key] = job_outcomes.get(key, 0) + 1
+
+    return {
+        "mode": "SIMULACION",
+        "detected_files": len(detection_results),
+        "detection_outcomes": detected_outcomes,
+        "pending_jobs_seen": len(job_results),
+        "job_outcomes": job_outcomes,
+        "technical_errors": errors,
+    }
+
+
+def command_run_cycle(settings: Settings) -> int:
+    summary = run_cycle(settings)
+    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    return 0 if summary["technical_errors"] == 0 else 1
+
+
 def command_reprocess(settings: Settings, lot_id: str, digest: str, reason: str) -> int:
     record = StateStore(settings).reprocess(lot_id, digest, reason)
     print(json.dumps({"status": record["status"], "execution_id": record["execution_id"]}, ensure_ascii=False))
@@ -966,6 +1014,10 @@ def main() -> int:
     monitor_parser.add_argument("--once", action="store_true")
     job_parser = subcommands.add_parser("run-job")
     job_parser.add_argument("--job", required=True, type=Path)
+    subcommands.add_parser(
+        "run-cycle",
+        help="Detecta XLSX y ejecuta una vez todos los trabajos locales pendientes en modo simulación.",
+    )
     reprocess_parser = subcommands.add_parser("reprocess")
     reprocess_parser.add_argument("--lot", required=True)
     reprocess_parser.add_argument("--sha256", required=True)
@@ -976,6 +1028,8 @@ def main() -> int:
         return command_monitor(settings, arguments.once)
     if arguments.command == "run-job":
         return command_run_job(settings, arguments.job)
+    if arguments.command == "run-cycle":
+        return command_run_cycle(settings)
     return command_reprocess(settings, arguments.lot, arguments.sha256, arguments.reason)
 
 

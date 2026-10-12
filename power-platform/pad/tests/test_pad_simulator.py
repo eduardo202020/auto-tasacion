@@ -138,6 +138,9 @@ class PadSimulationTestCase(unittest.TestCase):
         job_path = pad.StateStore(self.settings).job_path(lot_id, state["sha256"])
         return pad.Mock3270Simulator(self.settings).run_job(job_path)
 
+    def run_cycle(self) -> dict:
+        return pad.run_cycle(self.settings)
+
     def test_one_pdf_is_validated_simulated_and_preserves_original(self) -> None:
         source = self.create_workbook("TAS-ONE")
         self.assertEqual(self.scan()[0]["outcome"], "VALIDADO")
@@ -156,6 +159,47 @@ class PadSimulationTestCase(unittest.TestCase):
         self.assertEqual({item["outcome"] for item in self.scan()}, {"VALIDADO"})
         self.assertEqual(self.run_single_job("TAS-A")[0], "SIMULADO_FINALIZADO")
         self.assertEqual(self.run_single_job("TAS-B")[0], "SIMULADO_FINALIZADO")
+
+    def test_run_cycle_detects_and_consumes_one_pending_job(self) -> None:
+        self.create_workbook("TAS-CYCLE-ONE")
+
+        summary = self.run_cycle()
+
+        self.assertEqual(summary["mode"], "SIMULACION")
+        self.assertEqual(summary["detected_files"], 1)
+        self.assertEqual(summary["detection_outcomes"], {"VALIDADO": 1})
+        self.assertEqual(summary["pending_jobs_seen"], 1)
+        self.assertEqual(summary["job_outcomes"], {"SIMULADO_FINALIZADO:claimed": 1})
+        self.assertEqual(summary["technical_errors"], 0)
+        self.assertEqual(self.read_state("TAS-CYCLE-ONE")["status"], "SIMULADO_FINALIZADO")
+        self.assertFalse(list(self.settings.pending_directory.glob("*.json")))
+        self.assertEqual(len(list(self.settings.completed_jobs_directory.glob("*.json"))), 1)
+
+    def test_run_cycle_processes_multiple_jobs_once_and_is_idempotent(self) -> None:
+        self.create_workbook("TAS-CYCLE-A")
+        self.create_workbook("TAS-CYCLE-B", rows=[self.valid_values("TAS-CYCLE-CASE-B")])
+
+        first = self.run_cycle()
+        operation_events = {
+            lot_id: len([
+                event for event in self.read_state(lot_id)["events"]
+                if event["event"] == "ALTA_SEGURO_INMUEBLE_SIMULADA"
+            ])
+            for lot_id in ("TAS-CYCLE-A", "TAS-CYCLE-B")
+        }
+        second = self.run_cycle()
+
+        self.assertEqual(first["pending_jobs_seen"], 2)
+        self.assertEqual(first["technical_errors"], 0)
+        self.assertEqual(second["detection_outcomes"], {"duplicate": 2})
+        self.assertEqual(second["pending_jobs_seen"], 0)
+        self.assertEqual(second["technical_errors"], 0)
+        for lot_id, first_count in operation_events.items():
+            second_count = len([
+                event for event in self.read_state(lot_id)["events"]
+                if event["event"] == "ALTA_SEGURO_INMUEBLE_SIMULADA"
+            ])
+            self.assertEqual(second_count, first_count)
 
     def test_duplicate_event_does_not_create_a_second_state_or_job(self) -> None:
         self.create_workbook("TAS-DUP")
