@@ -1,0 +1,27 @@
+﻿{
+  "schema_version": 1,
+  "automation": "auto-tasacion",
+  "onedrive": {
+    "base_folder": "/automatizaciones-jhglazar/auto-tasaciones",
+    "subfolders": {
+      "pdfs": "PDFs",
+      "controls": "Controles",
+      "archives": "Archivos"
+    },
+    "result_folder": "/automatizaciones-jhglazar/auto-tasaciones"
+  },
+  "pad": {
+    "profiles": {
+      "development": {
+        "input_directory": "C:\\Users\\jhglazar\\OneDrive - NTT DATA EMEAL\\Archivos de Bbva.bpo - automatizaciones-jhglazar\\auto-tasaciones",
+        "runtime_directory": "C:\\Users\\jhglazar\\AppData\\Local\\NTT DATA EMEAL\\auto-tasacion\\pad-runtime",
+        "install_directory": "C:\\Users\\jhglazar\\OneDrive - NTT DATA EMEAL\\Escritorio\\automatizaciones\\auto-tasacion\\power-platform\\pad"
+      },
+      "production": {
+        "input_directory": "C:\\Users\\mailbox_27530\\OneDrive - NTT DATA EMEAL\\automatizaciones-jhglazar\\auto-tasaciones",
+        "runtime_directory": "C:\\ProgramData\\NTT DATA EMEAL\\auto-tasacion\\pad-runtime",
+        "install_directory": "C:\\ProgramData\\NTT DATA EMEAL\\auto-tasacion\\pad"
+      }
+    }
+  }
+}

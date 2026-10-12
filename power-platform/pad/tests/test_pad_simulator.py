@@ -27,7 +27,7 @@ class PadSimulationTestCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.input_directory = self.root / "tasaciones"
-        self.runtime_directory = self.input_directory / "_pad_3270_simulado"
+        self.runtime_directory = self.root / "pad-runtime"
         self.input_directory.mkdir()
         self.config_path = self.root / "config.json"
         self.write_config()
@@ -222,6 +222,18 @@ class PadSimulationTestCase(unittest.TestCase):
         self.create_workbook("TAS-NAME").rename(self.input_directory / "resultado.xlsx")
         (self.input_directory / "~$Resultado_Final_TAS-TEMP.xlsx").write_bytes(b"temporary")
         self.assertEqual(self.scan(), [])
+
+    def test_rejects_runtime_inside_the_shared_input_directory(self) -> None:
+        self.write_config(runtime_directory=str(self.input_directory / "_pad_3270_simulado"))
+        with self.assertRaisesRegex(ValueError, "fuera de input_directory"):
+            pad.Settings.load(self.config_path)
+
+    def test_development_profile_resolves_paths_from_the_shared_location_config(self) -> None:
+        development_config = MODULE_PATH.parent / "config.development.json"
+        settings = pad.Settings.load(development_config)
+        self.assertIn("Archivos de Bbva.bpo - automatizaciones-jhglazar", str(settings.input_directory))
+        self.assertIn("AppData", str(settings.runtime_directory))
+        self.assertNotEqual(settings.input_directory, settings.runtime_directory)
 
     def test_corrupt_xlsx_is_structural_error(self) -> None:
         path = self.input_directory / "Resultado_Final_TAS-CORRUPT.xlsx"

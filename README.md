@@ -1,4 +1,4 @@
-# Automatización de tasaciones hipotecarias
+﻿# Automatización de tasaciones hipotecarias
 
 Este repositorio extrae información de tasaciones PDF y genera el Excel que
 alimenta la automatización IBM 3270. El contrato de salida se conserva:
@@ -11,9 +11,9 @@ alimenta la automatización IBM 3270. El contrato de salida se conserva:
 ## Arquitectura objetivo masiva
 
 ```text
-PDFs individuales en OneDrive /auto-tasaciones/PDFs
+PDFs individuales en OneDrive /automatizaciones-jhglazar/auto-tasaciones/PDFs
   -> Power Apps selecciona metadatos
-  -> crea control en OneDrive /auto-tasaciones/Controles
+  -> crea control en OneDrive /automatizaciones-jhglazar/auto-tasaciones/Controles
   -> Power Automate orquesta ese lote y carga cada PDF individual a GCS
   -> Cloud Run Job procesa PDFs confirmados uno por uno
   -> Resultado_Final_<ID_LOTE>.xlsx

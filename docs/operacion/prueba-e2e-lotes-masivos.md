@@ -1,3 +1,5 @@
+﻿> **Configuración de rutas:** la ruta lógica vigente se declara en [config/automation-locations.json](../../config/automation-locations.json); los IDs de OneDrive se verifican manualmente antes de desplegar.
+
 # Prueba E2E: lotes masivos de tasaciones
 
 ## Propósito
@@ -17,7 +19,7 @@ Power Apps -> iniciar lote -> control en /Controles -> orquestar lote
 ```
 
 El E2E nuevo no está ejecutado todavía. Su éxito requiere que el Excel se cree
-una sola vez en `/auto-tasaciones`, que el control de `/Controles` se elimine
+una sola vez en `/automatizaciones-jhglazar/auto-tasaciones`, que el control de `/Controles` se elimine
 solo después de `ENTREGADO` y que no exista una ejecución recurrente que haya
 procesado ese lote.
 
@@ -28,7 +30,7 @@ procesado ese lote.
    `autoTasacionJG`.
 2. Desplegar primero el backend con los endpoints de claim y luego publicar
    `auto-tasacion-iniciar-lote` y `auto-tasacion-orquestar-lote`, indicando el
-   ID de `/auto-tasaciones/Controles`.
+   ID de `/automatizaciones-jhglazar/auto-tasaciones/Controles`.
 3. Confirmar que el origen de datos de la app contiene
    `auto-tasacion-listar-pdfs`, `auto-tasacion-iniciar-lote` y
    `auto-tasacion-consultar-lote`.
@@ -50,7 +52,7 @@ ningún PDF se transmite por la aplicación.
    transitoriamente, `COMPLETADO`.
 7. Confirmar que el mismo orquestador espera el resultado con backoff y que la
    app pasa a `ENTREGADO`, sin una recurrencia de entrega.
-8. Verificar `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` y comprobar sus
+8. Verificar `/automatizaciones-jhglazar/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` y comprobar sus
    hojas `PARA_PROCESAR`, `REVISION_IA` y `CONTROL`.
 9. Confirmar que el Timer deja de consultar después de `ENTREGADO`, todos los
    pasos quedan verdes y `lblTiempoLote` queda fijo.

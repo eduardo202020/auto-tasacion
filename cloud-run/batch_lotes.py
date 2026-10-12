@@ -23,7 +23,10 @@ MAX_PDFS_PER_BATCH = 300
 MAX_BATCH_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
 MAX_PDF_BYTES = 90_000_000
 PDF_CONTENT_TYPE = "application/pdf"
-DEFAULT_SOURCE_FOLDER = "/auto-tasaciones/PDFs"
+# OneDrive is still read exclusively by Power Automate.  The backend only
+# authorizes the logical source path that it receives in a manifest.
+DEFAULT_ONEDRIVE_BASE_FOLDER = "/automatizaciones-jhglazar/auto-tasaciones"
+DEFAULT_SOURCE_FOLDER = f"{DEFAULT_ONEDRIVE_BASE_FOLDER}/PDFs"
 BATCH_STATE_PREFIX = "estado/lotes"
 BATCH_INPUT_PREFIX = "ingresos"
 BATCH_RESULT_PREFIX = "resultados"
@@ -164,7 +167,19 @@ def refresh_lifecycle_timestamps(manifest: dict[str, Any], *, now: str) -> None:
 
 
 def configured_source_folder() -> str:
-    return normalize_folder(os.getenv("BATCH_ALLOWED_SOURCE_FOLDER", DEFAULT_SOURCE_FOLDER))
+    """Returns the authorized PDF folder without coupling it to a Windows path.
+
+    BATCH_ALLOWED_SOURCE_FOLDER remains an explicit migration override for a
+    deployed service.  New deployments derive the PDF directory from the same
+    configurable OneDrive base folder used by the Power Automate generator.
+    """
+    explicit_source = os.getenv("BATCH_ALLOWED_SOURCE_FOLDER", "").strip()
+    if explicit_source:
+        return normalize_folder(explicit_source)
+    base = normalize_folder(
+        os.getenv("AUTOTASACION_ONEDRIVE_BASE_FOLDER", DEFAULT_ONEDRIVE_BASE_FOLDER)
+    )
+    return f"{base}/PDFs"
 
 
 def normalize_folder(value: Any) -> str:
@@ -554,4 +569,3 @@ def _validate_batch_state_transition(previous: str, current: str) -> None:
             code="TRANSICION_ESTADO_INVALIDA",
             status=409,
         )
-

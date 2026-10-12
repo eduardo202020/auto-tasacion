@@ -1,3 +1,5 @@
+﻿> **Nota histórica:** las rutas de este documento describen la ubicación anterior. La preparación actual para /automatizaciones-jhglazar/auto-tasaciones está en [migracion-rutas-onedrive.md](migracion-rutas-onedrive.md).
+
 # Estado de implementación: Auto Tasación
 
 > **Corte:** 8 de octubre de 2026

@@ -1,3 +1,5 @@
+﻿> **Nota histórica:** las rutas de este documento describen la ubicación anterior. La preparación actual para /automatizaciones-jhglazar/auto-tasaciones está en [migracion-rutas-onedrive.md](migracion-rutas-onedrive.md).
+
 # Migracion segura al orquestador por evento
 
 ## Estado

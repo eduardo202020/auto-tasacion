@@ -1,4 +1,4 @@
-# Integración Power Platform
+﻿# Integración Power Platform
 
 ## Piloto local de Power Automate Desktop
 
@@ -11,7 +11,9 @@ la solución existente `autoTasacion` está descrita en
 
 ## Ruta masiva objetivo: PDFs individuales
 
-El operador carga PDFs individuales en `/auto-tasaciones/PDFs`. Power Apps lista
+Las rutas se derivan de [../config/automation-locations.json](../config/automation-locations.json). Los IDs opacos no se versionan: se comprueban con metadata de la conexión activa antes del despliegue, según la [guía de migración](../docs/operacion/migracion-rutas-onedrive.md).
+
+El operador carga PDFs individuales en `/automatizaciones-jhglazar/auto-tasaciones/PDFs`. Power Apps lista
 metadatos y permite seleccionar uno o varios archivos. No usa adjuntos ni
 transmite `contentBytes`.
 
@@ -46,13 +48,22 @@ crea o actualiza en la solución `autoTasacion` estos flujos:
 El script obtiene el token de control desde Secret Manager durante su ejecución;
 no lo guarda en el repositorio. La ruta nueva crea
 `_autotasacion_lote_<ID_LOTE>.json` con solo `{"id_lote":"..."}` en
-`/auto-tasaciones/Controles`. El orquestador usa el trigger de OneDrive for
+`/automatizaciones-jhglazar/auto-tasaciones/Controles`. El orquestador usa el trigger de OneDrive for
 Business **When a file is created (properties only)** (`OnNewFilesV2`) sobre
 esa carpeta y procesa un solo lote por ejecución. Se debe suministrar el ID de
 esa carpeta mediante `-ControlFolderId` o `AUTOTASACION_CONTROLS_FOLDER_ID`.
 
+Antes de autenticarse o desplegar, valide la presencia y el formato de los IDs:
+
+```powershell
+.\power-platform\scripts\deploy-mass-flows.ps1 -ValidateOneDriveFolderIds
+```
+
+La comprobación es local. La asociación entre cada ID y su ruta solo se confirma
+con metadata desde la conexión OneDrive que usará el flujo.
+
 Los dos flujos recurrentes se conservan sin cambios para una migración
-reversible. Sus controles antiguos permanecen en `/auto-tasaciones/PDFs`; no
+reversible. Sus controles antiguos permanecen en `/automatizaciones-jhglazar/auto-tasaciones/PDFs`; no
 deben procesar controles creados en la carpeta nueva.
 
 `GetFileContentByPath` devuelve el archivo de control como contenido binario.
@@ -69,14 +80,16 @@ Crear o actualizar las definiciones de la ruta nueva sin activarlas:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID de /auto-tasaciones/Controles>'
+$env:AUTOTASACION_ONEDRIVE_BASE_FOLDER = '/automatizaciones-jhglazar/auto-tasaciones'
+$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
 .\power-platform\scripts\deploy-mass-flows.ps1 -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
 Para publicar solo la ruta nueva después de revisar el E2E:
 
 ```powershell
-$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID de /auto-tasaciones/Controles>'
+$env:AUTOTASACION_ONEDRIVE_BASE_FOLDER = '/automatizaciones-jhglazar/auto-tasaciones'
+$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
 .\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
@@ -84,7 +97,7 @@ Para recuperar o actualizar solo un flujo, se puede indicar `-FlowName`. Por
 ejemplo, para actualizar solo el orquestador:
 
 ```powershell
-.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-orquestar-lote -ControlFolderId '<ID de /auto-tasaciones/Controles>'
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-orquestar-lote -ControlFolderId '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
 ```
 
 `-Activate` conserva la definicion de cada flujo. Si un flujo publicado tiene un borrador activo sin publicar, el script lo
@@ -141,7 +154,7 @@ Eliminar de esta ruta `ControlAdjuntos`, **Cargar Zip**, `contentBytes` y
 ## Resultado y PAD
 
 El resultado se llama `Resultado_Final_<ID_LOTE>.xlsx` y se crea en
-`/auto-tasaciones`. PAD recibe su ruta y opera exclusivamente
+`/automatizaciones-jhglazar/auto-tasaciones`. PAD recibe su ruta y opera exclusivamente
 `tblParaProcesar`. `PRESTAMO` y `SEGURO INMUEBLE` se completan después, en el
 proceso IBM 3270. `tblRevisionIa` y `tblControl` nunca son colas para el banco.
 

@@ -1,3 +1,5 @@
+﻿> **Configuración de rutas:** la ruta lógica vigente se declara en [config/automation-locations.json](../../config/automation-locations.json); los IDs de OneDrive se verifican manualmente antes de desplegar.
+
 # Investigación y decisión para lotes masivos
 
 ## Pregunta resuelta
@@ -8,7 +10,7 @@ exceder los límites de mensajes de Power Apps y Power Automate?
 ## Decisión aprobada para implementación
 
 El lote será un manifiesto de PDFs individuales ya cargados por el operador en
-`/auto-tasaciones/PDFs`. Power Automate obtiene y carga cada PDF individualmente a
+`/automatizaciones-jhglazar/auto-tasaciones/PDFs`. Power Automate obtiene y carga cada PDF individualmente a
 Cloud Storage. Cloud Run Job procesa los objetos confirmados uno por uno.
 
 Esto mantiene el tamaño de cada mensaje dentro del límite individual del
@@ -33,7 +35,7 @@ conector y evita una transferencia única de 1 GiB.
 - `PARA_PROCESAR`, `REVISION_IA`, `CONTROL`, `tblParaProcesar` e `ID_CASO`
   permanecen sin cambios.
 - La ruta ZIP vigente queda aislada como fallback hasta validar la nueva ruta.
-- Un JSON de control pequeño en `/auto-tasaciones/Controles` activa un único
+- Un JSON de control pequeño en `/automatizaciones-jhglazar/auto-tasaciones/Controles` activa un único
   orquestador por lote. Un claim persistido en GCS evita que eventos duplicados
   de OneDrive dupliquen cargas, Jobs o entregas.
 - El orquestador espera solo su propio lote con backoff y máximo de dos horas

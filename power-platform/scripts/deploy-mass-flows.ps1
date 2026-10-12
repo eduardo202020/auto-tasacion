@@ -1,8 +1,13 @@
 [CmdletBinding()]
 param(
     [switch] $Activate,
+    [switch] $ValidateOneDriveFolderIds,
     [string[]] $FlowName,
-    [string] $ControlFolderId = $env:AUTOTASACION_CONTROLS_FOLDER_ID
+    [string] $LocationsConfigPath,
+    [string] $OneDriveBaseFolder = $env:AUTOTASACION_ONEDRIVE_BASE_FOLDER,
+    [string] $PdfFolderId = $env:AUTOTASACION_PDFS_FOLDER_ID,
+    [string] $ControlFolderId = $env:AUTOTASACION_CONTROLS_FOLDER_ID,
+    [string] $LegacyControlFolderId = $env:AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,13 +18,97 @@ $DataverseUrl = 'https://org9a4ef0e0.crm4.dynamics.com'
 $SolutionUniqueName = 'autoTasacion'
 $EnvironmentId = 'Default-3048dc87-43f0-4100-9acb-ae1971c79395'
 $ServiceUrl = 'https://demo-tasaciones-ia-h75cd5qm2q-nn.a.run.app'
-$SourceFolder = '/auto-tasaciones/PDFs'
-$ControlFolder = '/auto-tasaciones/Controles'
-$PdfFolderId = 'b!ana6TpGRu0a2hKHjlUBacJlpM_jFZw1Ag7HCRmtA2cvfU_73uexKT44DJr0wIKqF.01NAERNYGYDB4D2NACL5FYP7EE2UHEZXFR'
+
+if ([string]::IsNullOrWhiteSpace($LocationsConfigPath)) {
+    $LocationsConfigPath = Join-Path $PSScriptRoot '..\..\config\automation-locations.json'
+}
+$LocationsConfigPath = (Resolve-Path -LiteralPath $LocationsConfigPath).Path
+$AutomationLocations = Get-Content -LiteralPath $LocationsConfigPath -Raw | ConvertFrom-Json
+if ($AutomationLocations.schema_version -ne 1 -or $AutomationLocations.automation -ne 'auto-tasacion') {
+    throw 'El archivo de ubicaciones no corresponde a auto-tasacion schema_version=1.'
+}
+
+function Normalize-OneDriveLogicalPath {
+    param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Label)
+    $value = $Path.Trim().Replace('\', '/')
+    if (-not $value.StartsWith('/') -or $value -match '(^|/)\.\.($|/)' -or $value -eq '/') {
+        throw "$Label debe ser una ruta lógica absoluta sin '..'."
+    }
+    return '/' + (($value -split '/' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join '/')
+}
+
+function Get-OneDriveSubfolderName {
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] [string] $Label)
+    $value = $Name.Trim()
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -match '[\\/]' -or $value -in @('.', '..')) {
+        throw "$Label debe ser un nombre de subcarpeta, no una ruta."
+    }
+    return $value
+}
+
+function Assert-OneDriveFolderId {
+    param([string] $FolderId, [Parameter(Mandatory)] [string] $LogicalPath, [Parameter(Mandatory)] [string] $EnvironmentVariable)
+    if ([string]::IsNullOrWhiteSpace($FolderId)) {
+        throw "$EnvironmentVariable es obligatorio para la carpeta $LogicalPath. Obtenga el ID con la conexión OneDrive que desplegará el flujo."
+    }
+    $value = $FolderId.Trim()
+    if ($value.Length -lt 20 -or $value -match '[\\/\s]') {
+        throw "$EnvironmentVariable no parece un folderId opaco válido para $LogicalPath."
+    }
+    return $value
+}
+
+$BaseFolderOverridden = -not [string]::IsNullOrWhiteSpace($OneDriveBaseFolder)
+if (-not $BaseFolderOverridden) {
+    $OneDriveBaseFolder = [string] $AutomationLocations.onedrive.base_folder
+}
+$OneDriveBaseFolder = Normalize-OneDriveLogicalPath -Path $OneDriveBaseFolder -Label 'onedrive.base_folder'
+$PdfSubfolder = Get-OneDriveSubfolderName -Name ([string] $AutomationLocations.onedrive.subfolders.pdfs) -Label 'onedrive.subfolders.pdfs'
+$ControlSubfolder = Get-OneDriveSubfolderName -Name ([string] $AutomationLocations.onedrive.subfolders.controls) -Label 'onedrive.subfolders.controls'
+$ArchiveSubfolder = Get-OneDriveSubfolderName -Name ([string] $AutomationLocations.onedrive.subfolders.archives) -Label 'onedrive.subfolders.archives'
+$SourceFolder = "$OneDriveBaseFolder/$PdfSubfolder"
+$ControlFolder = "$OneDriveBaseFolder/$ControlSubfolder"
+$ArchiveFolder = "$OneDriveBaseFolder/$ArchiveSubfolder"
+$ResultFolderInput = if ($BaseFolderOverridden) { $OneDriveBaseFolder } else { [string] $AutomationLocations.onedrive.result_folder }
+$ResultFolder = Normalize-OneDriveLogicalPath -Path $ResultFolderInput -Label 'onedrive.result_folder'
+if ($ResultFolder -ne $OneDriveBaseFolder) {
+    throw 'onedrive.result_folder debe coincidir con la raíz lógica de auto-tasaciones.'
+}
+
+# Folder IDs are intentionally supplied at deployment time. A move in OneDrive
+# can preserve an ID, but only the active connection can prove its mapping.
 $OneDriveConnectionId = 'shared-onedriveforbu-192895c8-7959-4901-bdd9-0dd1cc6a1c6f'
 $OneDriveConnectionReference = 'tasatest_sharedonedriveforbusiness_132da'
 $OneDriveConnectionReferenceId = '2f2b17a0-68c2-f111-aaaf-7ced8d92a1ed'
 $Gcloud = 'C:\Users\jhglazar\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd'
+
+if ($ValidateOneDriveFolderIds) {
+    # This is deliberately offline: only metadata from the active OneDrive
+    # connection can prove the remote ID-to-path mapping. The preflight blocks
+    # malformed or missing deployment-time values before authentication or any
+    # Dataverse mutation is attempted.
+    $validatedPdfFolderId = Assert-OneDriveFolderId -FolderId $PdfFolderId -LogicalPath $SourceFolder -EnvironmentVariable 'AUTOTASACION_PDFS_FOLDER_ID'
+    $validatedControlFolderId = Assert-OneDriveFolderId -FolderId $ControlFolderId -LogicalPath $ControlFolder -EnvironmentVariable 'AUTOTASACION_CONTROLS_FOLDER_ID'
+    $validatedLegacyControlFolderId = if ([string]::IsNullOrWhiteSpace($LegacyControlFolderId)) {
+        $null
+    }
+    else {
+        Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath "$SourceFolder (controles heredados)" -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
+    }
+
+    [pscustomobject]@{
+        OneDriveBaseFolder = $OneDriveBaseFolder
+        PdfsLogicalPath = $SourceFolder
+        PdfsFolderId = $validatedPdfFolderId
+        ControlsLogicalPath = $ControlFolder
+        ControlsFolderId = $validatedControlFolderId
+        ArchivesLogicalPath = $ArchiveFolder
+        LegacyControlsFolderId = $validatedLegacyControlFolderId
+        RemoteMappingVerified = $false
+    } | Format-List
+    Write-Warning 'La validación es local. Confirme la relación ID/ruta con metadata de la conexión OneDrive antes de desplegar.'
+    return
+}
 
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 Import-Module MSAL.PS -Force
@@ -163,9 +252,7 @@ function New-RecurrenceTrigger {
 function New-OneDriveControlCreatedTrigger {
     param([Parameter(Mandatory)] [string] $FolderId)
 
-    if ([string]::IsNullOrWhiteSpace($FolderId)) {
-        throw 'AUTOTASACION_CONTROLS_FOLDER_ID o -ControlFolderId es obligatorio para desplegar auto-tasacion-orquestar-lote.'
-    }
+    $FolderId = Assert-OneDriveFolderId -FolderId $FolderId -LogicalPath $ControlFolder -EnvironmentVariable 'AUTOTASACION_CONTROLS_FOLDER_ID'
 
     # OneDrive for Business: OnNewFilesV2 is "When a file is created
     # (properties only)". In this connection its body is the array of metadata
@@ -547,7 +634,7 @@ function New-FlowDefinition {
                                                 # confirming delivery. Search first so a recovery run confirms that exact
                                                 # artifact instead of creating it again. FindFilesByPath returns an array.
                                                 Buscar_excel_final_existente = New-OneDriveAction -OperationId 'FindFilesByPath' -RunAfter ([ordered]@{ Renovar_claim_antes_de_entrega = @('Succeeded') }) -Parameters ([ordered]@{
-                                                    path = '/auto-tasaciones'
+                                                    path = $ResultFolder
                                                     query = "@concat('^Resultado_Final_', body('Leer_control_lote')?['id_lote'], '\.xlsx$')"
                                                     # The connector exposes regular-expression matching with the
                                                     # `Pattern` enum value, rather than its display label.
@@ -567,7 +654,7 @@ function New-FlowDefinition {
                                                             Solicitar_ticket_resultado = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/resultado-ticket')" -Headers $controlHeaders -Body @{} -Secure
                                                             Descargar_resultado = New-HttpAction -Method 'GET' -Uri "@body('Solicitar_ticket_resultado')?['url_descarga']" -RunAfter ([ordered]@{ Solicitar_ticket_resultado = @('Succeeded') }) -Secure
                                                             Crear_excel_final = New-OneDriveAction -OperationId 'CreateFile' -RunAfter ([ordered]@{ Descargar_resultado = @('Succeeded') }) -Parameters ([ordered]@{
-                                                                folderPath = '/auto-tasaciones'
+                                                                folderPath = $ResultFolder
                                                                 name = "@concat('Resultado_Final_', body('Leer_control_lote')?['id_lote'], '.xlsx')"
                                                                 body = "@body('Descargar_resultado')"
                                                             })
@@ -616,8 +703,9 @@ function New-FlowDefinition {
             }
         }
         'auto-tasacion-cargar-lotes' {
+            $LegacyControlFolderId = Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath "$SourceFolder (controles heredados)" -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
             $actions = [ordered]@{
-                Mostrar_controles_de_lote = New-OneDriveAction -OperationId 'ListFolderV2' -Parameters ([ordered]@{ id = $PdfFolderId })
+                Mostrar_controles_de_lote = New-OneDriveAction -OperationId 'ListFolderV2' -Parameters ([ordered]@{ id = $LegacyControlFolderId })
                 Filtrar_controles_de_lote = [ordered]@{
                     runAfter = [ordered]@{ Mostrar_controles_de_lote = @('Succeeded') }
                     type = 'Query'
@@ -679,8 +767,9 @@ function New-FlowDefinition {
             return [ordered]@{ connectionReferences = New-EmbeddedOneDriveReference; definition = New-BaseDefinition -Triggers (New-RecurrenceTrigger) -Actions $actions }
         }
         'auto-tasacion-entregar-lote' {
+            $LegacyControlFolderId = Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath "$SourceFolder (controles heredados)" -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
             $actions = [ordered]@{
-                Mostrar_controles_de_lote = New-OneDriveAction -OperationId 'ListFolderV2' -Parameters ([ordered]@{ id = $PdfFolderId })
+                Mostrar_controles_de_lote = New-OneDriveAction -OperationId 'ListFolderV2' -Parameters ([ordered]@{ id = $LegacyControlFolderId })
                 Filtrar_controles_de_lote = [ordered]@{
                     runAfter = [ordered]@{ Mostrar_controles_de_lote = @('Succeeded') }
                     type = 'Query'
@@ -712,7 +801,7 @@ function New-FlowDefinition {
                                 Solicitar_ticket_resultado = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/resultado-ticket')" -Headers $controlHeaders -Body @{} -Secure
                                 Descargar_resultado = New-HttpAction -Method 'GET' -Uri "@body('Solicitar_ticket_resultado')?['url_descarga']" -RunAfter ([ordered]@{ Solicitar_ticket_resultado = @('Succeeded') }) -Secure
                                 Crear_excel_final = New-OneDriveAction -OperationId 'CreateFile' -RunAfter ([ordered]@{ Descargar_resultado = @('Succeeded') }) -Parameters ([ordered]@{
-                                    folderPath = '/auto-tasaciones'
+                                    folderPath = $ResultFolder
                                     name = "@concat('Resultado_Final_', body('Leer_control_lote')?['id_lote'], '.xlsx')"
                                     body = "@body('Descargar_resultado')"
                                 })

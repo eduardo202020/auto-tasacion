@@ -7,6 +7,7 @@ import unittest
 SCRIPT = (
     Path(__file__).resolve().parents[1] / "scripts" / "deploy-mass-flows.ps1"
 )
+LOCATIONS = Path(__file__).resolve().parents[2] / "config" / "automation-locations.json"
 POLLING_GUIDE = (
     Path(__file__).resolve().parents[1] / "canvas" / "autoTasacionJG" / "POLLING.md"
 )
@@ -145,7 +146,7 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertIn("folderId = $FolderId", self.script)
         self.assertIn('splitOn = "@triggerBody()"', self.script)
         self.assertNotIn("splitOn = \"@triggerOutputs()?['body/value']\"", self.script)
-        self.assertIn("$ControlFolder = '/auto-tasaciones/Controles'", self.script)
+        self.assertIn("$ControlFolder = \"$OneDriveBaseFolder/$ControlSubfolder\"", self.script)
         self.assertIn("folderPath = $ControlFolder", self.script)
 
     def test_split_trigger_uses_one_control_as_trigger_body_without_scanning_batches(self):
@@ -219,6 +220,46 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertIn("@equals(body('Solicitar_ticket_de_carga')?['requiere_carga'], true)", self.definition)
         self.assertIn("Metadatos_finales", self.definition)
         self.assertLess(self.definition.index("Carga_PDF_requerida"), self.definition.index("Metadatos_finales"))
+
+
+class OneDriveLocationConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.script = SCRIPT.read_text(encoding="utf-8")
+        self.locations = LOCATIONS.read_text(encoding="utf-8")
+
+    def test_generator_derives_every_operational_path_from_the_shared_location_file(self):
+        self.assertIn("automation-locations.json", self.script)
+        self.assertIn('$SourceFolder = \"$OneDriveBaseFolder/$PdfSubfolder\"', self.script)
+        self.assertIn('$ControlFolder = \"$OneDriveBaseFolder/$ControlSubfolder\"', self.script)
+        self.assertIn('$ResultFolder = Normalize-OneDriveLogicalPath', self.script)
+        self.assertNotIn("'/auto-tasaciones", self.script)
+        self.assertIn('"base_folder": "/automatizaciones-jhglazar/auto-tasaciones"', self.locations)
+        self.assertIn('"pdfs": "PDFs"', self.locations)
+        self.assertIn('"controls": "Controles"', self.locations)
+
+    def test_generator_never_uses_a_committed_onedrive_folder_id(self):
+        self.assertIn("$PdfFolderId = $env:AUTOTASACION_PDFS_FOLDER_ID", self.script)
+        self.assertIn("$ControlFolderId = $env:AUTOTASACION_CONTROLS_FOLDER_ID", self.script)
+        self.assertIn("$LegacyControlFolderId = $env:AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID", self.script)
+        self.assertIn("function Assert-OneDriveFolderId", self.script)
+        self.assertNotIn("b!ana6TpGRu0a2hKHjlUBac", self.script)
+
+    def test_offline_preflight_requires_folder_ids_before_any_remote_authentication(self):
+        self.assertIn("[switch] $ValidateOneDriveFolderIds", self.script)
+        self.assertIn("$validatedPdfFolderId = Assert-OneDriveFolderId", self.script)
+        self.assertIn("$validatedControlFolderId = Assert-OneDriveFolderId", self.script)
+        self.assertIn("RemoteMappingVerified = $false", self.script)
+        self.assertLess(
+            self.script.index("if ($ValidateOneDriveFolderIds)"),
+            self.script.index("Import-Module MSAL.PS -Force"),
+        )
+
+    def test_legacy_flows_require_a_separate_verified_legacy_control_folder(self):
+        self.assertEqual(
+            self.script.count("id = $LegacyControlFolderId"),
+            2,
+        )
+        self.assertIn("AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID", self.script)
 
 
 class DeliveryFlowDefinitionTests(unittest.TestCase):
