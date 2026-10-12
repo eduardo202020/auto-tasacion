@@ -86,6 +86,31 @@ DETECTADO → VALIDANDO → VALIDADO → SIMULANDO_3270 → SIMULADO_FINALIZADO
 - `reprocess` es una acción explícita, exige un lote terminal y archiva el
   estado anterior antes de crear un nuevo trabajo.
 
+## Bloqueos transitorios y diagnóstico técnico
+
+El runtime está bajo una carpeta local sincronizada por OneDrive. En Windows,
+OneDrive puede retener brevemente un JSON, CSV o trabajo mientras detecta un
+cambio. Las operaciones de reemplazo atómico, escritura JSONL y movimiento de
+trabajos tienen cinco intentos por defecto con espera exponencial de 0.1, 0.2,
+0.4 y 0.8 segundos entre intentos. Se puede ajustar con
+`file_retry_attempts` y `file_retry_base_seconds` en la configuración.
+
+Las operaciones simuladas se agregan a la bitácora y al estado en un único lote
+por ejecución, en lugar de reescribir el JSON de estado por cada fila. Si los
+reintentos se agotan, el estado registra `technical_diagnostic` con:
+
+- tipo del error;
+- operación de almacenamiento;
+- ruta relativa dentro del runtime;
+- número de intentos;
+- traceback técnico sin valores del predio ni datos bancarios.
+
+Si la simulación ya llegó a un estado terminal y solo falla el archivado del
+trabajo o de la evidencia, el estado terminal se conserva y se registra una
+advertencia de posprocesamiento; nunca se relanza el lote automáticamente.
+Cada reproceso explícito usa un nuevo identificador de ejecución, por lo que no
+sobrescribe CSV o JSON de un intento anterior.
+
 ## Preparar y probar localmente
 
 Desde la raíz del repositorio:

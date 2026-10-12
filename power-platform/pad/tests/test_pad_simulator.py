@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -245,10 +246,80 @@ class PadSimulationTestCase(unittest.TestCase):
         self.scan()
         self.run_single_job("TAS-REPROCESS")
         state = self.read_state("TAS-REPROCESS")
+        first_reports = set(self.settings.results_directory.glob("*_operaciones.csv"))
         rebuilt = pad.StateStore(self.settings).reprocess("TAS-REPROCESS", state["sha256"], "prueba_auditada")
         self.assertEqual(rebuilt["status"], "VALIDADO")
         self.assertTrue(list(self.settings.history_directory.glob("*.json")))
         self.assertTrue(pad.StateStore(self.settings).job_path("TAS-REPROCESS", state["sha256"]).exists())
+        self.assertEqual(self.run_single_job("TAS-REPROCESS")[0], "SIMULADO_FINALIZADO")
+        self.assertTrue(first_reports.issubset(set(self.settings.results_directory.glob("*_operaciones.csv"))))
+        self.assertEqual(len(list(self.settings.results_directory.glob("*_operaciones.csv"))), 2)
+
+    def test_atomic_json_retries_a_transient_permission_error(self) -> None:
+        target = self.root / "locked-state.json"
+        original_replace = pad.os.replace
+        attempts = 0
+
+        def transient_replace(source, destination):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise PermissionError("synthetic transient lock")
+            return original_replace(source, destination)
+
+        with patch.object(pad.os, "replace", side_effect=transient_replace):
+            pad.atomic_json(target, {"ok": True}, attempts=3, base_delay_seconds=0)
+        self.assertEqual(attempts, 3)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"ok": True})
+
+    def test_operation_events_use_one_atomic_state_write(self) -> None:
+        self.create_workbook("TAS-BATCH-EVENTS")
+        self.scan()
+        state = self.read_state("TAS-BATCH-EVENTS")
+        store = pad.StateStore(self.settings)
+        original_atomic_json = pad.atomic_json
+        state_writes: list[Path] = []
+
+        def counted_atomic_json(path, value, *args, **kwargs):
+            if Path(path).parent == self.settings.states_directory:
+                state_writes.append(Path(path))
+            return original_atomic_json(path, value, *args, **kwargs)
+
+        events = [
+            {"id_caso": f"TAS-EVENT-{number}", "estado": "SIMULADO_OK"}
+            for number in range(4)
+        ]
+        with patch.object(pad, "atomic_json", side_effect=counted_atomic_json):
+            store.add_operation_events("TAS-BATCH-EVENTS", state["sha256"], events)
+        self.assertEqual(len(state_writes), 1)
+        updated = self.read_state("TAS-BATCH-EVENTS")
+        simulated = [event for event in updated["events"] if event["event"] == "ALTA_SEGURO_INMUEBLE_SIMULADA"]
+        self.assertEqual(len(simulated), 4)
+
+    def test_persistent_storage_error_records_safe_diagnostic_and_preserves_job(self) -> None:
+        self.create_workbook("TAS-DIAGNOSTIC")
+        self.scan()
+        state = self.read_state("TAS-DIAGNOSTIC")
+        store = pad.StateStore(self.settings)
+        job_path = store.job_path("TAS-DIAGNOSTIC", state["sha256"])
+        error = pad.FileOperationError(
+            "atomic_json.replace",
+            store.state_path("TAS-DIAGNOSTIC", state["sha256"]),
+            5,
+            PermissionError("synthetic persistent lock"),
+        )
+        with patch.object(pad.StateStore, "add_operation_events", side_effect=error):
+            result = pad.Mock3270Simulator(self.settings).run_job(job_path)
+        self.assertEqual(result, ("ERROR_TECNICO", "error"))
+        failed = self.read_state("TAS-DIAGNOSTIC")
+        self.assertEqual(failed["technical_error"], "PermissionError")
+        diagnostic = failed["technical_diagnostic"]
+        self.assertEqual(diagnostic["operation"], "atomic_json.replace")
+        self.assertEqual(diagnostic["cause_type"], "PermissionError")
+        self.assertEqual(diagnostic["retry_attempts"], 5)
+        self.assertTrue(diagnostic["affected_path"].startswith("estado\\lotes"))
+        self.assertIn("FileOperationError", diagnostic["traceback"])
+        self.assertTrue((self.settings.errors_directory / job_path.name).exists())
 
 
 if __name__ == "__main__":

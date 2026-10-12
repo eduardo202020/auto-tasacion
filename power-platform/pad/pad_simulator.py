@@ -22,8 +22,9 @@ import re
 import shutil
 import tempfile
 import time
+import traceback
 import uuid
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from openpyxl import load_workbook
 
@@ -52,8 +53,47 @@ def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", value)
 
 
-def atomic_json(path: Path, value: dict[str, Any]) -> None:
+class FileOperationError(RuntimeError):
+    """Fallo de almacenamiento con contexto seguro para la bitácora local."""
+
+    def __init__(self, operation: str, path: Path, attempts: int, cause: PermissionError):
+        self.operation = operation
+        self.path = path
+        self.attempts = attempts
+        self.cause = cause
+        super().__init__(f"{operation} no pudo completar la operación sobre {path.name} tras {attempts} intentos")
+
+
+def retry_permission_error(
+    operation: str,
+    path: Path,
+    callback: Callable[[], None],
+    attempts: int = 5,
+    base_delay_seconds: float = 0.1,
+) -> None:
+    """Reintenta bloqueos transitorios de Windows/OneDrive, con límite estricto."""
+    last_error: PermissionError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            callback()
+            return
+        except PermissionError as error:
+            last_error = error
+            if attempt == attempts:
+                break
+            time.sleep(base_delay_seconds * (2 ** (attempt - 1)))
+    assert last_error is not None
+    raise FileOperationError(operation, path, attempts, last_error) from last_error
+
+
+def atomic_json(
+    path: Path,
+    value: dict[str, Any],
+    attempts: int = 5,
+    base_delay_seconds: float = 0.1,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", newline="\n", dir=path.parent, delete=False
     ) as temporary:
@@ -61,7 +101,17 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
         temporary.flush()
         os.fsync(temporary.fileno())
         temporary_path = Path(temporary.name)
-    os.replace(temporary_path, path)
+    try:
+        retry_permission_error(
+            "atomic_json.replace", path, lambda: os.replace(temporary_path, path), attempts, base_delay_seconds
+        )
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                # El diagnóstico principal conserva la operación afectada; nunca se borra evidencia ajena.
+                pass
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -69,10 +119,60 @@ def read_json(path: Path) -> dict[str, Any]:
         return json.load(source)
 
 
-def append_jsonl(path: Path, event: dict[str, Any]) -> None:
+def append_jsonl(
+    path: Path,
+    events: dict[str, Any] | list[dict[str, Any]],
+    attempts: int = 5,
+    base_delay_seconds: float = 0.1,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as sink:
-        sink.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    entries = events if isinstance(events, list) else [events]
+
+    def append() -> None:
+        with path.open("a", encoding="utf-8", newline="\n") as sink:
+            for event in entries:
+                sink.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+    retry_permission_error("append_jsonl.write", path, append, attempts, base_delay_seconds)
+
+
+def move_file(
+    source: Path, destination: Path, attempts: int = 5, base_delay_seconds: float = 0.1
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    retry_permission_error(
+        "move_file.replace", destination, lambda: os.replace(source, destination), attempts, base_delay_seconds
+    )
+
+
+def atomic_csv(
+    path: Path,
+    fieldnames: tuple[str, ...],
+    rows: list[dict[str, Any]],
+    attempts: int = 5,
+    base_delay_seconds: float = 0.1,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8-sig", newline="", dir=path.parent, delete=False
+    ) as temporary:
+        writer = csv.DictWriter(temporary, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary_path = Path(temporary.name)
+    try:
+        retry_permission_error(
+            "atomic_csv.replace", path, lambda: os.replace(temporary_path, path), attempts, base_delay_seconds
+        )
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def sha256_file(path: Path) -> str:
@@ -106,6 +206,8 @@ class Settings:
     processing_lease_seconds: int
     suspicious_floors_threshold: int
     suspicious_basements_threshold: int
+    file_retry_attempts: int
+    file_retry_base_seconds: float
     synthetic_failure_case_ids: frozenset[str]
 
     @classmethod
@@ -130,6 +232,8 @@ class Settings:
             processing_lease_seconds=max(60, int(raw.get("processing_lease_seconds", 900))),
             suspicious_floors_threshold=max(1, int(raw.get("suspicious_floors_threshold", 100))),
             suspicious_basements_threshold=max(1, int(raw.get("suspicious_basements_threshold", 20))),
+            file_retry_attempts=max(1, int(raw.get("file_retry_attempts", 5))),
+            file_retry_base_seconds=max(0, float(raw.get("file_retry_base_seconds", 0.1))),
             synthetic_failure_case_ids=frozenset(
                 str(item) for item in raw.get("synthetic_failure_case_ids", [])
             ),
@@ -202,8 +306,53 @@ class StateStore:
     def log_path(self, lot_id: str, digest: str) -> Path:
         return self.settings.logs_directory / f"{safe_name(lot_id)}_{digest}.jsonl"
 
-    def result_prefix(self, lot_id: str, digest: str) -> str:
-        return f"{safe_name(lot_id)}_{digest[:12]}"
+    def result_prefix(self, lot_id: str, digest: str, execution_id: str | None = None) -> str:
+        prefix = f"{safe_name(lot_id)}_{digest[:12]}"
+        return f"{prefix}_{safe_name(execution_id)[:8]}" if execution_id else prefix
+
+    def _atomic_json(self, path: Path, value: dict[str, Any]) -> None:
+        atomic_json(
+            path,
+            value,
+            attempts=self.settings.file_retry_attempts,
+            base_delay_seconds=self.settings.file_retry_base_seconds,
+        )
+
+    def _append_jsonl(self, path: Path, events: dict[str, Any] | list[dict[str, Any]]) -> None:
+        append_jsonl(
+            path,
+            events,
+            attempts=self.settings.file_retry_attempts,
+            base_delay_seconds=self.settings.file_retry_base_seconds,
+        )
+
+    def diagnostic(self, error: Exception) -> dict[str, Any]:
+        """No incluye datos del predio; solo operación, ruta relativa y traceback."""
+        if isinstance(error, FileOperationError):
+            try:
+                affected_path = str(error.path.resolve().relative_to(self.settings.runtime_directory.resolve()))
+            except ValueError:
+                affected_path = error.path.name
+            operation = error.operation
+            retry_attempts = error.attempts
+            cause_type = type(error.cause).__name__
+        else:
+            affected_path = None
+            operation = "simulacion"
+            retry_attempts = 0
+            cause_type = type(error).__name__
+        return {
+            "error_type": type(error).__name__,
+            "cause_type": cause_type,
+            "operation": operation,
+            "affected_path": affected_path,
+            "retry_attempts": retry_attempts,
+            "traceback": traceback.format_exc(limit=12),
+        }
+
+    @staticmethod
+    def technical_error_name(error: Exception) -> str:
+        return type(error.cause).__name__ if isinstance(error, FileOperationError) else type(error).__name__
 
     def lot_records(self, lot_id: str) -> list[dict[str, Any]]:
         prefix = f"{safe_name(lot_id)}_"
@@ -241,12 +390,17 @@ class StateStore:
         try:
             yield
         finally:
-            lock_path.unlink(missing_ok=True)
+            try:
+                lock_path.unlink(missing_ok=True)
+            except OSError:
+                # Un bloqueo temporal del sincronizador no invalida una operación ya persistida.
+                # La detección de lease expirado permite recuperar este lock en una ejecución posterior.
+                pass
 
     def event(self, record: dict[str, Any], name: str, **detail: Any) -> None:
         event = {"at": utc_now(), "event": name, **detail}
         record.setdefault("events", []).append(event)
-        append_jsonl(self.log_path(record["id_lote"], record["sha256"]), {
+        self._append_jsonl(self.log_path(record["id_lote"], record["sha256"]), {
             "at": event["at"],
             "event": name,
             "id_lote": record["id_lote"],
@@ -256,7 +410,7 @@ class StateStore:
 
     def save(self, record: dict[str, Any]) -> None:
         record["updated_at"] = utc_now()
-        atomic_json(self.state_path(record["id_lote"], record["sha256"]), record)
+        self._atomic_json(self.state_path(record["id_lote"], record["sha256"]), record)
 
     def register(
         self, lot_id: str, digest: str, source: Path, working_copy: Path
@@ -321,11 +475,30 @@ class StateStore:
             self.save(current)
             return current
 
-    def add_event(self, lot_id: str, digest: str, name: str, **detail: Any) -> dict[str, Any]:
-        """Persiste eventos de ejecución y renueva el lease del lote activo."""
+    def add_operation_events(
+        self, lot_id: str, digest: str, operation_events: list[dict[str, str]]
+    ) -> dict[str, Any]:
+        """Guarda el lote de eventos con una sola escritura atómica del estado."""
         with self.lot_lock(lot_id):
             current = read_json(self.state_path(lot_id, digest))
-            self.event(current, name, **detail)
+            timestamp = utc_now()
+            state_events = [
+                {"at": timestamp, "event": "ALTA_SEGURO_INMUEBLE_SIMULADA", **event}
+                for event in operation_events
+            ]
+            log_events = [
+                {
+                    "at": event["at"],
+                    "event": event["event"],
+                    "id_lote": lot_id,
+                    "sha256": digest,
+                    "id_caso": event["id_caso"],
+                    "estado": event["estado"],
+                }
+                for event in state_events
+            ]
+            self._append_jsonl(self.log_path(lot_id, digest), log_events)
+            current.setdefault("events", []).extend(state_events)
             self.save(current)
             return current
 
@@ -381,6 +554,17 @@ class StateStore:
             fresh["reprocess_of"] = record["execution_id"]
             fresh["reprocess_reason"] = reason
             fresh["events"] = []
+            fresh["reprocess_at"] = utc_now()
+            for obsolete_key in (
+                "technical_error",
+                "technical_diagnostic",
+                "simulation",
+                "lease_until",
+                "postprocessing_warning",
+                "report_warning",
+                "error_job_warning",
+            ):
+                fresh.pop(obsolete_key, None)
             self.event(fresh, "REPROCESO_EXPLICITO", motivo=reason)
             self.save(fresh)
             job = {
@@ -394,7 +578,7 @@ class StateStore:
                 "revision_ia_count": fresh.get("validation", {}).get("revision_ia_count", 0),
                 "created_at": utc_now(),
             }
-            atomic_json(self.job_path(lot_id, digest), job)
+            self._atomic_json(self.job_path(lot_id, digest), job)
             return fresh
 
 
@@ -558,7 +742,12 @@ class LocalMonitor:
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary_copy = destination.with_suffix(".copying")
             shutil.copy2(source, temporary_copy)
-            os.replace(temporary_copy, destination)
+            move_file(
+                temporary_copy,
+                destination,
+                attempts=self.settings.file_retry_attempts,
+                base_delay_seconds=self.settings.file_retry_base_seconds,
+            )
             record = self.store.update(record, "VALIDANDO")
             validation = self.validator.validate(destination)
             if validation["structural_issues"]:
@@ -586,11 +775,16 @@ class LocalMonitor:
                 "revision_ia_count": validation["revision_ia_count"],
                 "created_at": utc_now(),
             }
-            atomic_json(self.store.job_path(lot_id, digest), job)
+            self.store._atomic_json(self.store.job_path(lot_id, digest), job)
             self.store.update(record, "VALIDADO")
             return "VALIDADO"
         except Exception as error:
-            self.store.update(record, "ERROR_TECNICO", technical_error=type(error).__name__)
+            self.store.update(
+                record,
+                "ERROR_TECNICO",
+                technical_error=self.store.technical_error_name(error),
+                technical_diagnostic=self.store.diagnostic(error),
+            )
             return "ERROR_TECNICO"
 
     def _write_validation_report(self, record: dict[str, Any]) -> None:
@@ -601,8 +795,8 @@ class LocalMonitor:
             "validation": record.get("validation", {}),
             "created_at": utc_now(),
         }
-        atomic_json(
-            self.settings.results_directory / f"{self.store.result_prefix(record['id_lote'], record['sha256'])}_validacion.json",
+        self.store._atomic_json(
+            self.settings.results_directory / f"{self.store.result_prefix(record['id_lote'], record['sha256'], record['execution_id'])}_validacion.json",
             payload,
         )
 
@@ -623,7 +817,9 @@ class Mock3270Simulator:
         if outcome != "claimed" and outcome != "recovered":
             return record["status"], outcome
         rows: list[dict[str, Any]] = []
+        operation_events: list[dict[str, str]] = []
         started = time.perf_counter()
+        finalized = False
         try:
             for case_id in job["case_ids"]:
                 time.sleep(0.001)
@@ -643,13 +839,8 @@ class Mock3270Simulator:
                     "TIEMPO_MS": elapsed_ms,
                     "CODIGO": code,
                 })
-                record = self.store.add_event(
-                    lot_id,
-                    digest,
-                    "ALTA_SEGURO_INMUEBLE_SIMULADA",
-                    id_caso=str(case_id),
-                    estado=status,
-                )
+                operation_events.append({"id_caso": str(case_id), "estado": status})
+            record = self.store.add_operation_events(lot_id, digest, operation_events)
             failures = sum(1 for row in rows if row["ESTADO"] != "SIMULADO_OK")
             incidents = failures + int(job.get("manual_count", 0)) + int(job.get("revision_ia_count", 0))
             final_status = "SIMULADO_CON_INCIDENCIAS" if incidents else "SIMULADO_FINALIZADO"
@@ -665,28 +856,73 @@ class Mock3270Simulator:
                     "mode": "SIMULACION",
                 },
             )
+            finalized = True
             self._write_reports(record, rows)
             destination = self.settings.completed_jobs_directory / job_path.name
-            os.replace(job_path, destination)
+            move_file(
+                job_path,
+                destination,
+                attempts=self.settings.file_retry_attempts,
+                base_delay_seconds=self.settings.file_retry_base_seconds,
+            )
             return record["status"], outcome
         except Exception as error:
-            record = self.store.update(record, "ERROR_TECNICO", technical_error=type(error).__name__)
-            self._write_reports(record, rows)
+            diagnostic = self.store.diagnostic(error)
+            if finalized:
+                # El resultado ya es terminal. Un bloqueo al guardar/mover evidencia no relanza el lote.
+                try:
+                    self.store.update(record, postprocessing_warning=diagnostic)
+                except Exception:
+                    pass
+                return record["status"], "cleanup_pending"
+            try:
+                record = self.store.update(
+                    record,
+                    "ERROR_TECNICO",
+                    technical_error=self.store.technical_error_name(error),
+                    technical_diagnostic=diagnostic,
+                )
+            except Exception:
+                return "ERROR_TECNICO", "diagnostic_persistence_failed"
+            try:
+                self._write_reports(record, rows)
+            except Exception as report_error:
+                try:
+                    self.store.update(
+                        record,
+                        report_warning=self.store.diagnostic(report_error),
+                    )
+                except Exception:
+                    pass
             error_job = self.settings.errors_directory / job_path.name
             if job_path.exists():
-                os.replace(job_path, error_job)
+                try:
+                    move_file(
+                        job_path,
+                        error_job,
+                        attempts=self.settings.file_retry_attempts,
+                        base_delay_seconds=self.settings.file_retry_base_seconds,
+                    )
+                except Exception as move_error:
+                    try:
+                        self.store.update(record, error_job_warning=self.store.diagnostic(move_error))
+                    except Exception:
+                        pass
             return record["status"], "error"
 
     def _write_reports(self, record: dict[str, Any], rows: list[dict[str, Any]]) -> None:
-        prefix = self.store.result_prefix(record["id_lote"], record["sha256"])
+        prefix = self.store.result_prefix(record["id_lote"], record["sha256"], record["execution_id"])
         csv_path = self.settings.results_directory / f"{prefix}_operaciones.csv"
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as output:
-            writer = csv.DictWriter(output, fieldnames=(
+        atomic_csv(
+            csv_path,
+            (
                 "ID_LOTE", "ID_CASO", "OPERACION", "DESTINO", "ESTADO", "SIMULACION", "TIEMPO_MS", "CODIGO"
-            ))
-            writer.writeheader()
-            writer.writerows(rows)
-        atomic_json(self.settings.results_directory / f"{prefix}_resumen.json", {
+            ),
+            rows,
+            attempts=self.settings.file_retry_attempts,
+            base_delay_seconds=self.settings.file_retry_base_seconds,
+        )
+        self.store._atomic_json(self.settings.results_directory / f"{prefix}_resumen.json", {
             "id_lote": record["id_lote"],
             "sha256": record["sha256"],
             "status": record["status"],

@@ -9,5 +9,7 @@
   "processing_lease_seconds": 900,
   "suspicious_floors_threshold": 100,
   "suspicious_basements_threshold": 20,
+  "file_retry_attempts": 5,
+  "file_retry_base_seconds": 0.1,
   "synthetic_failure_case_ids": []
 }
