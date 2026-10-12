@@ -22,3 +22,6 @@ cloud-run/.pytest_cache/
 
 # Soluciones empaquetadas localmente para Power Platform.
 power-platform/solutions/
+
+# Estado y reportes locales del piloto de Power Automate Desktop.
+power-platform/pad/runtime/

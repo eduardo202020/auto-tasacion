@@ -1,5 +1,14 @@
 # Integración Power Platform
 
+## Piloto local de Power Automate Desktop
+
+El paso posterior a la generación de `Resultado_Final_<ID_LOTE>.xlsx` está
+preparado como un piloto seguro en [pad/](pad/). Valida el contrato del libro y
+simula operaciones contra `IBM_3270_MOCK`; no cambia los Cloud Flows, Power Apps
+ni la integración bancaria. La incorporación manual del Desktop Flow dentro de
+la solución existente `autoTasacion` está descrita en
+[pad/MANUAL_SOLUTION_INTEGRATION.md](pad/MANUAL_SOLUTION_INTEGRATION.md).
+
 ## Ruta masiva objetivo: PDFs individuales
 
 El operador carga PDFs individuales en `/auto-tasaciones/PDFs`. Power Apps lista

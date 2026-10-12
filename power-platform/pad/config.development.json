@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "mode": "SIMULACION",
+  "input_directory": "C:\\Users\\jhglazar\\OneDrive - NTT DATA EMEAL\\Escritorio\\tasaciones",
+  "runtime_directory": "C:\\Users\\jhglazar\\OneDrive - NTT DATA EMEAL\\Escritorio\\tasaciones\\_pad_3270_simulado",
+  "poll_seconds": 5,
+  "stability_checks": 3,
+  "stability_interval_seconds": 2,
+  "processing_lease_seconds": 900,
+  "suspicious_floors_threshold": 100,
+  "suspicious_basements_threshold": 20,
+  "synthetic_failure_case_ids": []
+}
