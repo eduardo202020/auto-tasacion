@@ -1,3 +1,5 @@
+> **Estado historico:** esta auditoria refleja el estado previo al despliegue. Consulte [el cierre de migracion OneDrive](cierre-migracion-onedrive-2026-10-13.md) para el estado operativo final.
+
 # Auditoría remota de la migración OneDrive — 2026-10-13
 
 ## Alcance y límites

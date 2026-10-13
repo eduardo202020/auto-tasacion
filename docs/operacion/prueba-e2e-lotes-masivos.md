@@ -1,3 +1,5 @@
+> **Resultado registrado (2026-10-13):** la prueba manual desde Power Apps sobre la ruta nueva completo y genero el Excel final esperado. Consulte [el cierre de migracion OneDrive](cierre-migracion-onedrive-2026-10-13.md). Las instrucciones siguientes se conservan para futuras regresiones controladas.
+
 ﻿> **Configuración de rutas:** la ruta lógica vigente se declara en [config/automation-locations.json](../../config/automation-locations.json); los IDs de OneDrive se verifican manualmente antes de desplegar.
 
 # Prueba E2E: lotes masivos de tasaciones

@@ -1,3 +1,5 @@
+> **Estado de cierre (2026-10-13):** el despliegue controlado retiro la accion y la referencia de prueba de Teams de la definicion publicada. Esta guia queda como configuracion para una futura integracion versionada.
+
 ﻿# Integración opcional de Microsoft Teams en el orquestador
 
 ## Estado actual

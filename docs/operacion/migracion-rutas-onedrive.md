@@ -1,3 +1,5 @@
+> **Estado de cierre (2026-10-13):** la migracion fue desplegada de forma controlada y la E2E manual desde Power Apps genero el Excel final esperado. Consulte [el cierre de migracion OneDrive](cierre-migracion-onedrive-2026-10-13.md). Las secciones siguientes conservan el procedimiento previo como referencia historica.
+
 # Migración de rutas OneDrive — `auto-tasacion`
 
 Este documento prepara la migración; no publica ni altera un componente remoto.
