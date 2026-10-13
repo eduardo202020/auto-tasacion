@@ -1,8 +1,8 @@
-{
+﻿{
   "schema_version": 1,
   "mode": "SIMULACION",
-  "input_directory": "C:\\Users\\jhglazar\\OneDrive - NTT DATA EMEAL\\Escritorio\\tasaciones",
-  "runtime_directory": "C:\\Users\\jhglazar\\OneDrive - NTT DATA EMEAL\\Escritorio\\tasaciones\\_pad_3270_simulado",
+  "location_profile": "development",
+  "locations_config_path": "../../config/automation-locations.json",
   "poll_seconds": 5,
   "stability_checks": 3,
   "stability_interval_seconds": 2,

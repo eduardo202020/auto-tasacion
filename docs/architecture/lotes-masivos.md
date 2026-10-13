@@ -1,3 +1,5 @@
+﻿> **Configuración de rutas:** la ruta lógica vigente se declara en [config/automation-locations.json](../../config/automation-locations.json); los IDs de OneDrive se verifican manualmente antes de desplegar.
+
 # Diseño: lotes masivos de tasaciones
 
 ## Objetivo
@@ -9,7 +11,7 @@ request HTTP.
 ## Arquitectura objetivo
 
 ```text
-OneDrive /auto-tasaciones/PDFs (PDFs individuales)
+OneDrive /automatizaciones-jhglazar/auto-tasaciones/PDFs (PDFs individuales)
   -> Power Apps (metadatos y selección)
   -> Power Automate (un PDF por iteración)
   -> Cloud Storage privado

@@ -32,11 +32,12 @@ no sigan exactamente este patrón:
 Resultado_Final_TAS-<ID_LOTE>.xlsx
 ```
 
-La configuración de desarrollo apunta a:
-
-```text
-C:\Users\jhglazar\OneDrive - NTT DATA EMEAL\Escritorio\tasaciones
-```
+Las rutas de entrada, instalación y runtime se declaran por perfil en
+[`../../config/automation-locations.json`](../../config/automation-locations.json).
+`config.development.json` y `config.production.example.json` resuelven sus
+rutas mediante esos perfiles. El runtime de desarrollo queda bajo
+`%LOCALAPPDATA%`, fuera de OneDrive; el de NTTD-MKEY queda en
+`C:\ProgramData`.
 
 Los originales no se cambian. Antes de validar se exige estabilidad de tamaño y
 fecha de modificación en tres lecturas; luego se calcula SHA-256 y se copia a
@@ -88,11 +89,11 @@ DETECTADO → VALIDANDO → VALIDADO → SIMULANDO_3270 → SIMULADO_FINALIZADO
 
 ## Bloqueos transitorios y diagnóstico técnico
 
-El runtime está bajo una carpeta local sincronizada por OneDrive. En Windows,
-OneDrive puede retener brevemente un JSON, CSV o trabajo mientras detecta un
-cambio. Las operaciones de reemplazo atómico, escritura JSONL y movimiento de
-trabajos tienen cinco intentos por defecto con espera exponencial de 0.1, 0.2,
-0.4 y 0.8 segundos entre intentos. Se puede ajustar con
+El runtime está fuera de la carpeta compartida de OneDrive. Aun así, Windows u
+otro proceso local puede retener brevemente un JSON, CSV o trabajo. Las
+operaciones de reemplazo atómico, escritura JSONL y movimiento de trabajos
+tienen cinco intentos por defecto con espera exponencial de 0.1, 0.2, 0.4 y 0.8
+segundos entre intentos. Se puede ajustar con
 `file_retry_attempts` y `file_retry_base_seconds` en la configuración.
 
 Las operaciones simuladas se agregan a la bitácora y al estado en un único lote
@@ -127,6 +128,14 @@ Para ejecutar el detector una sola vez y ver resultados en consola:
 power-platform/pad/.venv/Scripts/python.exe power-platform/pad/pad_simulator.py --config power-platform/pad/config.development.json monitor --once
 ```
 
+Para que PAD ejecute una sola vuelta sin duplicar las reglas en acciones
+visuales, use `run-cycle`. Detecta libros y consume los trabajos pendientes
+con la reserva idempotente existente:
+
+```powershell
+power-platform/pad/.venv/Scripts/python.exe power-platform/pad/pad_simulator.py --config power-platform/pad/config.development.json run-cycle
+```
+
 Para iniciarlo continuamente fuera de PAD:
 
 ```powershell
@@ -141,7 +150,8 @@ queda declarada como completada hasta verlo en `autoTasacion`.
 
 ## Salidas locales
 
-Todo se guarda bajo `_pad_3270_simulado/`, fuera del conjunto de entrada:
+Todo se guarda bajo el `runtime_directory` local configurado, fuera del
+OneDrive compartido y del conjunto de entrada:
 
 - `procesando/`: copia inmutable del XLSX por SHA;
 - `estado/lotes/`: estado durable y eventos de cada lote;

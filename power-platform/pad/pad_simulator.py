@@ -115,7 +115,9 @@ def atomic_json(
 
 
 def read_json(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as source:
+    # Windows PowerShell can write a UTF-8 BOM while Python tools normally omit
+    # it. Both encodings are accepted for local configuration and state files.
+    with path.open(encoding="utf-8-sig") as source:
         return json.load(source)
 
 
@@ -217,15 +219,50 @@ class Settings:
             raise ValueError("Este piloto solo admite mode=SIMULACION")
         root = config_path.parent
 
+        location_profile = raw.get("location_profile")
+        if location_profile:
+            locations_reference = Path(
+                str(raw.get("locations_config_path", "../../config/automation-locations.json"))
+            )
+            locations_path = (
+                locations_reference
+                if locations_reference.is_absolute()
+                else (root / locations_reference).resolve()
+            )
+            locations = read_json(locations_path)
+            try:
+                profile = locations["pad"]["profiles"][str(location_profile)]
+                input_value = profile["input_directory"]
+                runtime_value = profile["runtime_directory"]
+            except (KeyError, TypeError) as error:
+                raise ValueError(
+                    f"No existe el perfil PAD '{location_profile}' en {locations_path}"
+                ) from error
+            raw = {**raw, "input_directory": input_value, "runtime_directory": runtime_value}
+
         def to_path(key: str) -> Path:
+            if key not in raw or not str(raw[key]).strip():
+                raise ValueError(f"Falta {key} en la configuración PAD")
             candidate = Path(raw[key])
             return candidate if candidate.is_absolute() else (root / candidate).resolve()
+
+        input_directory = to_path("input_directory")
+        runtime_directory = to_path("runtime_directory")
+        try:
+            runtime_directory.relative_to(input_directory)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(
+                "runtime_directory debe estar fuera de input_directory para no persistir "
+                "estado técnico dentro de OneDrive compartido"
+            )
 
         return cls(
             config_path=config_path.resolve(),
             mode=raw["mode"],
-            input_directory=to_path("input_directory"),
-            runtime_directory=to_path("runtime_directory"),
+            input_directory=input_directory,
+            runtime_directory=runtime_directory,
             poll_seconds=float(raw.get("poll_seconds", 5)),
             stability_checks=max(1, int(raw.get("stability_checks", 3))),
             stability_interval_seconds=max(0, float(raw.get("stability_interval_seconds", 2))),

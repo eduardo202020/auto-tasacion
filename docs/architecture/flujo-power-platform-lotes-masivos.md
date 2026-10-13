@@ -1,3 +1,5 @@
+﻿> **Configuración de rutas:** la ruta lógica vigente se declara en [config/automation-locations.json](../../config/automation-locations.json); los IDs de OneDrive se verifican manualmente antes de desplegar.
+
 # Flujo Power Platform para lotes masivos de PDFs
 
 > **Estado al 9 de octubre de 2026:** el orquestador orientado a eventos está
@@ -7,7 +9,7 @@
 ## Decisión
 
 La ruta masiva no usa ZIP ni Microsoft Graph. El lote es un manifiesto de PDFs
-existentes en `/auto-tasaciones/PDFs`. Power Automate es el único componente que lee
+existentes en `/automatizaciones-jhglazar/auto-tasaciones/PDFs`. Power Automate es el único componente que lee
 cada PDF desde OneDrive y lo carga individualmente a Cloud Storage.
 
 ```text
@@ -15,7 +17,7 @@ Operador carga PDFs individuales en OneDrive
   -> Power Apps lista y selecciona metadatos
   -> Power Automate registra el manifiesto
   -> API de control crea ID_LOTE
-  -> OneDrive crea control pequeño en /auto-tasaciones/Controles
+  -> OneDrive crea control pequeño en /automatizaciones-jhglazar/auto-tasaciones/Controles
   -> Orquestador reclama ese ID_LOTE y carga un PDF por vez a GCS
   -> API confirma cada PDF y arranca exactamente un Cloud Run Job
   -> Orquestador consulta solo ese lote, descarga y entrega el XLSX
@@ -27,11 +29,11 @@ convierte a Base64 ni mantiene en memoria el lote completo.
 
 ## Carpetas y resultado
 
-- Origen operativo: `/auto-tasaciones/PDFs`.
-- Controles de evento: `/auto-tasaciones/Controles/_autotasacion_lote_<ID_LOTE>.json`.
+- Origen operativo: `/automatizaciones-jhglazar/auto-tasaciones/PDFs`.
+- Controles de evento: `/automatizaciones-jhglazar/auto-tasaciones/Controles/_autotasacion_lote_<ID_LOTE>.json`.
 - Objetos de ingreso: `ingresos/<ID_LOTE>/pdfs/<ID_ARCHIVO>_<nombre>.pdf`.
 - Resultado: `resultados/<ID_LOTE>/Resultado_Final_<ID_LOTE>.xlsx`.
-- Entrega final: `/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
+- Entrega final: `/automatizaciones-jhglazar/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx`.
 
 La aplicación lista solamente archivos `.pdf`. Los Excel ya entregados no son
 seleccionables. El operador debe archivar lotes terminados para mantener la
@@ -52,7 +54,7 @@ Recibe la selección de la app, vuelve a consultar metadatos y envía a
 
 ```json
 {
-  "carpeta_origen": "/auto-tasaciones/PDFs",
+  "carpeta_origen": "/automatizaciones-jhglazar/auto-tasaciones/PDFs",
   "archivos": [
     {
       "item_id": "<id de OneDrive>",
@@ -71,7 +73,7 @@ contenido de ningún PDF y no espera la transferencia ni el procesamiento.
 ### 3. `auto-tasacion-orquestar-lote`
 
 El trigger de OneDrive for Business **When a file is created (properties
-only)** (`OnNewFilesV2`) escucha únicamente `/auto-tasaciones/Controles`.
+only)** (`OnNewFilesV2`) escucha únicamente `/automatizaciones-jhglazar/auto-tasaciones/Controles`.
 `Split On` crea una ejecución por JSON y el flujo decodifica su único campo:
 
 ```json
@@ -104,7 +106,7 @@ persiste `EN_PROCESO` antes de solicitar el Cloud Run Job; reintentos del mismo
 estado no inician otra ejecución. El flujo consulta solamente ese ID con espera
 30 s, 60 s, 120 s y luego 300 s, con máximo de dos horas después del inicio del
 Job. Al completarse busca primero
-`/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` por patr?n exacto. Si existe
+`/automatizaciones-jhglazar/auto-tasaciones/Resultado_Final_<ID_LOTE>.xlsx` por patr?n exacto. Si existe
 por una ca?da entre la creaci?n y la confirmaci?n, confirma ese archivo sin
 crear otro; si no existe, descarga el XLSX, lo crea, confirma la entrega y borra
 el JSON de control.

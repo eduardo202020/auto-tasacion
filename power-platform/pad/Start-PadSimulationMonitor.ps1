@@ -1,11 +1,39 @@
 [CmdletBinding()]
 param(
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.development.json'),
+    [string]$ConfigPath,
     [switch]$Foreground
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path $PSScriptRoot 'config.development.json'
+}
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+
+function Resolve-PadRuntimeDirectory {
+    param([Parameter(Mandatory)] $Configuration, [Parameter(Mandatory)] [string] $ConfigurationPath)
+
+    $runtimeDirectory = [string] $Configuration.runtime_directory
+    if ([string]::IsNullOrWhiteSpace($runtimeDirectory) -and -not [string]::IsNullOrWhiteSpace([string] $Configuration.location_profile)) {
+        $locationsReference = [string] $Configuration.locations_config_path
+        if ([string]::IsNullOrWhiteSpace($locationsReference)) {
+            $locationsReference = '../../config/automation-locations.json'
+        }
+        if (-not [System.IO.Path]::IsPathRooted($locationsReference)) {
+            $locationsReference = Join-Path (Split-Path -Parent $ConfigurationPath) $locationsReference
+        }
+        $locations = Get-Content -LiteralPath $locationsReference -Raw | ConvertFrom-Json
+        $runtimeDirectory = [string] $locations.pad.profiles.([string] $Configuration.location_profile).runtime_directory
+    }
+    if ([string]::IsNullOrWhiteSpace($runtimeDirectory)) {
+        throw 'La configuración PAD no define runtime_directory ni un location_profile válido.'
+    }
+    if (-not [System.IO.Path]::IsPathRooted($runtimeDirectory)) {
+        $runtimeDirectory = Join-Path (Split-Path -Parent $ConfigurationPath) $runtimeDirectory
+    }
+    return [System.IO.Path]::GetFullPath($runtimeDirectory)
+}
+
 $EntryPoint = Join-Path $PSScriptRoot 'pad_simulator.py'
 $VenvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 
@@ -29,10 +57,7 @@ if ($Foreground) {
 }
 
 $Settings = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-$RuntimeDirectory = [string]$Settings.runtime_directory
-if (-not [System.IO.Path]::IsPathRooted($RuntimeDirectory)) {
-    $RuntimeDirectory = Join-Path (Split-Path -Parent $ConfigPath) $RuntimeDirectory
-}
+$RuntimeDirectory = Resolve-PadRuntimeDirectory -Configuration $Settings -ConfigurationPath $ConfigPath
 $MonitorState = Join-Path $RuntimeDirectory 'estado\monitor.pid.json'
 if (Test-Path -LiteralPath $MonitorState) {
     $Existing = Get-Content -LiteralPath $MonitorState -Raw | ConvertFrom-Json

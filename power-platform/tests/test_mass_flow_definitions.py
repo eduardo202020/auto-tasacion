@@ -1,12 +1,14 @@
 """Regression checks for the Power Automate flow-definition generator."""
 
 from pathlib import Path
+import json
 import unittest
 
 
 SCRIPT = (
     Path(__file__).resolve().parents[1] / "scripts" / "deploy-mass-flows.ps1"
 )
+LOCATIONS = Path(__file__).resolve().parents[2] / "config" / "automation-locations.json"
 POLLING_GUIDE = (
     Path(__file__).resolve().parents[1] / "canvas" / "autoTasacionJG" / "POLLING.md"
 )
@@ -79,6 +81,104 @@ class FlowDeploymentLifecycleTests(unittest.TestCase):
         self.assertIn("$unknownFlowNames", self.script)
         self.assertIn("$selectedFlows[$name] = $flows[$name]", self.script)
 
+    def test_solution_target_is_explicit_and_preserves_legacy_default(self):
+        self.assertIn("[string] $SolutionUniqueName = 'autoTasacion'", self.script)
+        self.assertIn("SolutionUniqueName = $SolutionUniqueName", self.script)
+        self.assertNotIn("$SolutionUniqueName = 'autoTasacion'\n$EnvironmentId", self.script)
+
+
+    def test_default_and_explicit_dry_run_are_local_plans_before_remote_operations(self):
+        self.assertIn("[switch] $DryRun", self.script)
+        self.assertIn("$script:IsLocalPlan = [bool] ($DryRun -or -not $Activate)", self.script)
+        self.assertIn("if ($script:IsLocalPlan)", self.script)
+        self.assertIn("WillModifyRemote = $false", self.script)
+        self.assertIn("return '__LOCAL_PLAN_CONTROL_TOKEN__'", self.script)
+        local_plan = self.script.index("if ($script:IsLocalPlan)")
+        self.assertLess(local_plan, self.script.index("Import-Module MSAL.PS -Force"))
+        self.assertLess(local_plan, self.script.index("Add-SolutionComponent -ComponentId ([string] $OneDriveConnectionReferenceId)"))
+        self.assertLess(local_plan, self.script.index("Create-DisabledFlow -Name $flow.Key"))
+        self.assertLess(
+            self.script.index("if ($script:IsLocalPlan)", self.script.index("function Get-ControlToken")),
+            self.script.index("& $Gcloud secrets versions access"),
+        )
+
+    def test_dry_run_cannot_be_combined_with_activation(self):
+        self.assertIn("if ($Activate -and $DryRun)", self.script)
+        self.assertIn("-Activate y -DryRun no se pueden usar juntos.", self.script)
+
+
+class LocalPlanExecutionTests(unittest.TestCase):
+    """Execute the safe path with an opaque dummy ID and no remote credentials."""
+
+    DUMMY_FOLDER_ID = "b!local-plan-folder-id-000000000000000000000000000000"
+
+    def _run(self, *arguments: str):
+        import subprocess
+
+        return subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(SCRIPT),
+                *arguments,
+            ],
+            cwd=SCRIPT.parents[2],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    def test_dry_run_generates_a_definition_without_remote_access(self):
+        result = self._run(
+            "-DryRun",
+            "-FlowName",
+            "auto-tasacion-iniciar-lote",
+            "-ControlFolderId",
+            self.DUMMY_FOLDER_ID,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("DryRun", result.stdout)
+        self.assertIn("False", result.stdout)
+        self.assertNotIn("Get-MsalToken", result.stderr + result.stdout)
+
+    def test_omitting_activate_is_also_a_non_mutating_plan(self):
+        result = self._run(
+            "-FlowName",
+            "auto-tasacion-iniciar-lote",
+            "-ControlFolderId",
+            self.DUMMY_FOLDER_ID,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("Plan", result.stdout)
+        self.assertIn("False", result.stdout)
+
+
+class SerializedDefinitionTests(LocalPlanExecutionTests):
+    def test_serialized_wait_uses_nested_interval_with_dynamic_seconds(self):
+        result = self._run(
+            "-EmitDefinitionJson",
+            "-FlowName",
+            "auto-tasacion-orquestar-lote",
+            "-ControlFolderId",
+            self.DUMMY_FOLDER_ID,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        payload = json.loads(result.stdout)
+        wait = (
+            payload["definition"]["actions"]["Es_control_de_lote"]["actions"]
+            ["Es_propietario_del_lote"]["actions"]["Esperar_resultado_del_lote"]
+            ["actions"]["Esperar_con_backoff"]
+        )
+        self.assertEqual(wait["type"], "Wait")
+        self.assertEqual(
+            wait["inputs"],
+            {"interval": {"count": "@variables('espera_segundos')", "unit": "Second"}},
+        )
+
 
 class ConsultarLoteDefinitionTests(unittest.TestCase):
     def setUp(self):
@@ -145,7 +245,7 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertIn("folderId = $FolderId", self.script)
         self.assertIn('splitOn = "@triggerBody()"', self.script)
         self.assertNotIn("splitOn = \"@triggerOutputs()?['body/value']\"", self.script)
-        self.assertIn("$ControlFolder = '/auto-tasaciones/Controles'", self.script)
+        self.assertIn("$ControlFolder = \"$OneDriveBaseFolder/$ControlSubfolder\"", self.script)
         self.assertIn("folderPath = $ControlFolder", self.script)
 
     def test_split_trigger_uses_one_control_as_trigger_body_without_scanning_batches(self):
@@ -179,14 +279,15 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertLess(self.definition.index("Crear_excel_final"), self.definition.index("Confirmar_entrega_nuevo"))
         self.assertLess(self.definition.index("Confirmar_entrega_nuevo"), self.definition.index("Eliminar_control_lote_nuevo"))
 
-    def test_wait_uses_the_cloud_flow_count_and_unit_schema(self):
+    def test_wait_uses_the_cloud_flow_interval_count_and_unit_schema(self):
         start = self.definition.index("Esperar_con_backoff")
         end = self.definition.index("Renovar_claim_en_espera", start)
         wait_action = self.definition[start:end]
         self.assertIn("type = 'Wait'", wait_action)
+        self.assertIn("interval = [ordered]@{", wait_action)
         self.assertIn("count = \"@variables('espera_segundos')\"", wait_action)
         self.assertIn("unit = 'Second'", wait_action)
-        self.assertNotIn('interval = "@concat(', wait_action)
+        self.assertNotIn("inputs = [ordered]@{\n                                                count", wait_action)
 
     def test_backoff_update_does_not_self_reference_the_target_variable(self):
         start = self.definition.index("Aumentar_espera_hasta_cinco_minutos")
@@ -219,6 +320,64 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertIn("@equals(body('Solicitar_ticket_de_carga')?['requiere_carga'], true)", self.definition)
         self.assertIn("Metadatos_finales", self.definition)
         self.assertLess(self.definition.index("Carga_PDF_requerida"), self.definition.index("Metadatos_finales"))
+
+
+class OneDriveLocationConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.script = SCRIPT.read_text(encoding="utf-8")
+        self.locations = LOCATIONS.read_text(encoding="utf-8")
+
+    def test_generator_derives_every_operational_path_from_the_shared_location_file(self):
+        self.assertIn("automation-locations.json", self.script)
+        self.assertIn('$SourceFolder = \"$OneDriveBaseFolder/$PdfSubfolder\"', self.script)
+        self.assertIn('$ControlFolder = \"$OneDriveBaseFolder/$ControlSubfolder\"', self.script)
+        self.assertIn('$ResultFolder = Normalize-OneDriveLogicalPath', self.script)
+        self.assertNotIn("'/auto-tasaciones", self.script)
+        self.assertIn('"base_folder": "/automatizaciones-jhglazar/auto-tasaciones"', self.locations)
+        self.assertIn('"pdfs": "PDFs"', self.locations)
+        self.assertIn('"controls": "Controles"', self.locations)
+
+    def test_generator_never_uses_a_committed_onedrive_folder_id(self):
+        self.assertIn("$PdfFolderId = $env:AUTOTASACION_PDFS_FOLDER_ID", self.script)
+        self.assertIn("$ControlFolderId = $env:AUTOTASACION_CONTROLS_FOLDER_ID", self.script)
+        self.assertIn("$LegacyControlFolderId = $env:AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID", self.script)
+        self.assertIn("function Assert-OneDriveFolderId", self.script)
+        self.assertNotIn("b!ana6TpGRu0a2hKHjlUBac", self.script)
+
+    def test_offline_preflight_requires_folder_ids_before_any_remote_authentication(self):
+        self.assertIn("[switch] $ValidateOneDriveFolderIds", self.script)
+        self.assertIn("$validatedPdfFolderId = Assert-OneDriveFolderId", self.script)
+        self.assertIn("$validatedControlFolderId = Assert-OneDriveFolderId", self.script)
+        self.assertIn("RemoteMappingVerified = $false", self.script)
+        self.assertLess(
+            self.script.index("if ($ValidateOneDriveFolderIds)"),
+            self.script.index("Import-Module MSAL.PS -Force"),
+        )
+
+    def test_legacy_flows_require_a_separate_verified_legacy_control_folder(self):
+        self.assertEqual(
+            self.script.count("id = $LegacyControlFolderId"),
+            2,
+        )
+        self.assertIn("AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID", self.script)
+
+    def test_new_and_legacy_control_folder_ids_must_be_distinct(self):
+        self.assertIn(
+            "AUTOTASACION_CONTROLS_FOLDER_ID y AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID deben identificar carpetas distintas.",
+            self.script,
+        )
+        self.assertLess(
+            self.script.index("AUTOTASACION_CONTROLS_FOLDER_ID y AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID"),
+            self.script.index("function New-OneDriveControlCreatedTrigger"),
+        )
+
+    def test_folder_and_file_identifiers_are_not_interchanged(self):
+        self.assertIn("$LegacyControlFolder = $SourceFolder", self.script)
+        self.assertIn("LegacyControlsLogicalPath = $LegacyControlFolder", self.script)
+        self.assertEqual(self.script.count("id = $ControlFolderId"), 0)
+        self.assertEqual(self.script.count("id = $LegacyControlFolderId"), 2)
+        self.assertIn("@triggerBody()?['Id']", self.script)
+        self.assertIn('id = \"@triggerBody()?[\'Id\']\"', self.script)
 
 
 class DeliveryFlowDefinitionTests(unittest.TestCase):

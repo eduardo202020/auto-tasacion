@@ -1,4 +1,4 @@
-# Registro de features: perfiles e ingesta de tasaciones
+﻿# Registro de features: perfiles e ingesta de tasaciones
 
 Una feature se considera implementada solo cuando tiene prueba automática y no
 altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
@@ -24,7 +24,7 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F17 | Prueba E2E de lote masivo | E2E de un PDF confirmado | La ruta llego a Excel y entrega; faltan pruebas de capacidad con 10, 150 y 300 archivos. |
 | F18 | Stepper visual del lote | Implementado en fuente; pendiente de publicacion Canvas | `POLLING.md` define cinco pasos, colores de avance/error y un Timer visual sin llamadas adicionales. |
 | F19 | Tiempo persistente de lote | Implementado en fuente; pendiente de despliegue | El manifiesto guarda inicio y fin inmutables; consulta tipada expone fechas y segundos. |
-| F20 | Orquestación de lote por evento | Implementado y desplegado; E2E pendiente | Un control pequeño en `/auto-tasaciones/Controles` dispara un solo orquestador con claim GCS, carga serial, Job, backoff y entrega idempotente. |
+| F20 | Orquestación de lote por evento | Implementado en la rama de migración; despliegue de ruta pendiente | La definición preparada usa un control pequeño en `/automatizaciones-jhglazar/auto-tasaciones/Controles`, claim GCS, carga serial, Job, backoff y entrega idempotente. La auditoría remota del 2026-10-13 confirmó que el flujo publicado aún usa `/auto-tasaciones`; ver [auditoría de migración](operacion/auditoria-migracion-onedrive-2026-10-13.md). |
 
 ## Ciclo de alta seguro
 

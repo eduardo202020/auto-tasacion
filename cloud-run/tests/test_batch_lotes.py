@@ -1,4 +1,4 @@
-import contextlib
+﻿import contextlib
 import io
 import json
 import os
@@ -33,6 +33,7 @@ from batch_lotes import (
 )
 from batch_worker import process_batch_gcs
 from service import CONTROL_COLUMNS, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, process_pdf_entries
+import batch_lotes
 
 
 class FakeBlob:
@@ -99,7 +100,48 @@ def file_item(index, *, etag=None, size=1024, name=None):
 
 
 def payload(files):
-    return {"carpeta_origen": "/auto-tasaciones/PDFs", "archivos": files}
+    return {"carpeta_origen": batch_lotes.configured_source_folder(), "archivos": files}
+
+
+class BatchSourceFolderConfigurationTests(unittest.TestCase):
+    def test_versioned_locations_and_backend_default_cannot_drift(self):
+        locations_path = Path(__file__).resolve().parents[2] / "config" / "automation-locations.json"
+        locations = json.loads(locations_path.read_text(encoding="utf-8-sig"))
+        base = locations["onedrive"]["base_folder"]
+        self.assertEqual(batch_lotes.DEFAULT_ONEDRIVE_BASE_FOLDER, base)
+        self.assertEqual(
+            batch_lotes.DEFAULT_SOURCE_FOLDER,
+            f"{base}/{locations['onedrive']['subfolders']['pdfs']}",
+        )
+
+    def test_default_source_folder_uses_the_new_onedrive_base(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                batch_lotes.configured_source_folder(),
+                "/automatizaciones-jhglazar/auto-tasaciones/PDFs",
+            )
+
+    def test_source_folder_is_derived_from_configured_base_when_no_override_exists(self):
+        with patch.dict(
+            os.environ,
+            {"AUTOTASACION_ONEDRIVE_BASE_FOLDER": "/operaciones/auto-tasaciones"},
+            clear=True,
+        ):
+            self.assertEqual(
+                batch_lotes.configured_source_folder(),
+                "/operaciones/auto-tasaciones/PDFs",
+            )
+
+    def test_explicit_migration_override_remains_authoritative(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AUTOTASACION_ONEDRIVE_BASE_FOLDER": "/operaciones/auto-tasaciones",
+                "BATCH_ALLOWED_SOURCE_FOLDER": "/migracion/PDFs",
+            },
+            clear=True,
+        ):
+            self.assertEqual(batch_lotes.configured_source_folder(), "/migracion/PDFs")
 
 
 class BatchManifestTests(unittest.TestCase):
