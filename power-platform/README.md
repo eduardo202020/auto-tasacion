@@ -76,14 +76,17 @@ Antes de `ParseJson`, todos los flujos que consumen un control convierten
 
 No se debe pasar `@body('Obtener_control_lote')` directamente a `ParseJson`.
 
-Crear o actualizar las definiciones de la ruta nueva sin activarlas:
+Generar y revisar las definiciones sin autenticarse ni modificar recursos remotos:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 $env:AUTOTASACION_ONEDRIVE_BASE_FOLDER = '/automatizaciones-jhglazar/auto-tasaciones'
 $env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
-.\power-platform\scripts\deploy-mass-flows.ps1 -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
+.\power-platform\scripts\deploy-mass-flows.ps1 -DryRun -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
+
+Omitir `-Activate` tambien deja el script en modo **Plan**, sin modificaciones
+remotas. `-Activate` es la unica opcion que permite crear, actualizar, activar
+o desactivar flujos; nunca se combina con `-DryRun`.
 
 Para publicar solo la ruta nueva después de revisar el E2E:
 

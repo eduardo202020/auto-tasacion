@@ -86,9 +86,9 @@ la única que confirma la correspondencia ID/ruta.
 2. En Power Automate, verificar la conexión y obtener los IDs con metadata.
 3. Configurar en Cloud Run, todavía sin desplegar, `AUTOTASACION_ONEDRIVE_BASE_FOLDER`
    y `BATCH_ALLOWED_SOURCE_FOLDER` con la nueva ruta de PDFs.
-4. Generar definiciones de `auto-tasacion-iniciar-lote` y
-   `auto-tasacion-orquestar-lote` **sin activarlas**; inspeccionar las rutas
-   resultantes y el trigger.
+4. Generar un plan local con `-DryRun` para `auto-tasacion-iniciar-lote` y
+   `auto-tasacion-orquestar-lote`; inspeccionar rutas y trigger. Sin
+   `-Activate`, el script no autentica ni modifica un flujo remoto.
 5. Publicar ambos componentes solo tras autorización y realizar un lote
    sintético de un PDF en la nueva carpeta.
 6. Verificar control, carga individual, Job, XLSX en la raíz nueva y entrega.
@@ -121,3 +121,9 @@ El paquete conserva la estructura que necesita `pad_simulator.py` para cargar
 `config.local.json` con el perfil `production` y se valida con datos sintéticos.
 No se instala Git, no se copian PDFs y no se comparten estados o logs entre
 máquinas.
+
+
+La validacion detallada de la segunda fase, incluidos los IDs de archivo frente a
+folderIds, la prioridad de `BATCH_ALLOWED_SOURCE_FOLDER`, el aislamiento de los
+recurrentes y el procedimiento de inspeccion de Canvas esta en
+[`validacion-migracion-onedrive-fase-2.md`](validacion-migracion-onedrive-fase-2.md).

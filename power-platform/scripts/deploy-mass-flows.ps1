@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch] $Activate,
+    [switch] $DryRun,
     [switch] $ValidateOneDriveFolderIds,
     [string[]] $FlowName,
     [string] $LocationsConfigPath,
@@ -11,6 +12,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Activate -and $DryRun) {
+    throw '-Activate y -DryRun no se pueden usar juntos.'
+}
+
+# An explicit activation is the only path that may change Dataverse.  A call
+# without -Activate is intentionally a local plan, preserving existing flows.
+$script:IsLocalPlan = [bool] ($DryRun -or -not $Activate)
 
 # This script creates or updates mass-processing flows as solution-aware
 # components. No document content or control token is written to this repository.
@@ -69,6 +78,9 @@ $ArchiveSubfolder = Get-OneDriveSubfolderName -Name ([string] $AutomationLocatio
 $SourceFolder = "$OneDriveBaseFolder/$PdfSubfolder"
 $ControlFolder = "$OneDriveBaseFolder/$ControlSubfolder"
 $ArchiveFolder = "$OneDriveBaseFolder/$ArchiveSubfolder"
+# The two recurrent migration flows historically stored control JSON files in
+# the PDFs folder. This is a folder mapping, never a PDF item identifier.
+$LegacyControlFolder = $SourceFolder
 $ResultFolderInput = if ($BaseFolderOverridden) { $OneDriveBaseFolder } else { [string] $AutomationLocations.onedrive.result_folder }
 $ResultFolder = Normalize-OneDriveLogicalPath -Path $ResultFolderInput -Label 'onedrive.result_folder'
 if ($ResultFolder -ne $OneDriveBaseFolder) {
@@ -77,6 +89,13 @@ if ($ResultFolder -ne $OneDriveBaseFolder) {
 
 # Folder IDs are intentionally supplied at deployment time. A move in OneDrive
 # can preserve an ID, but only the active connection can prove its mapping.
+# The new event controls and the historical recurrent controls must never share
+# a folder ID, or both processing routes could react to the same JSON.
+if (-not [string]::IsNullOrWhiteSpace($ControlFolderId) -and
+    -not [string]::IsNullOrWhiteSpace($LegacyControlFolderId) -and
+    $ControlFolderId.Trim() -eq $LegacyControlFolderId.Trim()) {
+    throw 'AUTOTASACION_CONTROLS_FOLDER_ID y AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID deben identificar carpetas distintas.'
+}
 $OneDriveConnectionId = 'shared-onedriveforbu-192895c8-7959-4901-bdd9-0dd1cc6a1c6f'
 $OneDriveConnectionReference = 'tasatest_sharedonedriveforbusiness_132da'
 $OneDriveConnectionReferenceId = '2f2b17a0-68c2-f111-aaaf-7ced8d92a1ed'
@@ -93,7 +112,7 @@ if ($ValidateOneDriveFolderIds) {
         $null
     }
     else {
-        Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath "$SourceFolder (controles heredados)" -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
+        Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath $LegacyControlFolder -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
     }
 
     [pscustomobject]@{
@@ -103,15 +122,13 @@ if ($ValidateOneDriveFolderIds) {
         ControlsLogicalPath = $ControlFolder
         ControlsFolderId = $validatedControlFolderId
         ArchivesLogicalPath = $ArchiveFolder
+        LegacyControlsLogicalPath = $LegacyControlFolder
         LegacyControlsFolderId = $validatedLegacyControlFolderId
         RemoteMappingVerified = $false
     } | Format-List
     Write-Warning 'La validación es local. Confirme la relación ID/ruta con metadata de la conexión OneDrive antes de desplegar.'
     return
 }
-
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-Import-Module MSAL.PS -Force
 
 $script:DataverseHeaders = $null
 
@@ -186,6 +203,11 @@ function Invoke-DataverseRequest {
 }
 
 function Get-ControlToken {
+    if ($script:IsLocalPlan) {
+        # A plan still builds every definition but never invokes gcloud or reads
+        # Secret Manager. The placeholder is only serialized in memory/output.
+        return '__LOCAL_PLAN_CONTROL_TOKEN__'
+    }
     $value = (& $Gcloud secrets versions access 2 --secret 'batch-control-api-token' --project 'project-fe2e4c6a-b528-4bcf-aa1').Trim()
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw 'No se pudo obtener el token de control desde Secret Manager.'
@@ -703,7 +725,7 @@ function New-FlowDefinition {
             }
         }
         'auto-tasacion-cargar-lotes' {
-            $LegacyControlFolderId = Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath "$SourceFolder (controles heredados)" -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
+            $LegacyControlFolderId = Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath $LegacyControlFolder -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
             $actions = [ordered]@{
                 Mostrar_controles_de_lote = New-OneDriveAction -OperationId 'ListFolderV2' -Parameters ([ordered]@{ id = $LegacyControlFolderId })
                 Filtrar_controles_de_lote = [ordered]@{
@@ -767,7 +789,7 @@ function New-FlowDefinition {
             return [ordered]@{ connectionReferences = New-EmbeddedOneDriveReference; definition = New-BaseDefinition -Triggers (New-RecurrenceTrigger) -Actions $actions }
         }
         'auto-tasacion-entregar-lote' {
-            $LegacyControlFolderId = Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath "$SourceFolder (controles heredados)" -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
+            $LegacyControlFolderId = Assert-OneDriveFolderId -FolderId $LegacyControlFolderId -LogicalPath $LegacyControlFolder -EnvironmentVariable 'AUTOTASACION_LEGACY_CONTROLS_FOLDER_ID'
             $actions = [ordered]@{
                 Mostrar_controles_de_lote = New-OneDriveAction -OperationId 'ListFolderV2' -Parameters ([ordered]@{ id = $LegacyControlFolderId })
                 Filtrar_controles_de_lote = [ordered]@{
@@ -914,9 +936,6 @@ function Create-DisabledFlow {
     return $workflowId
 }
 
-Write-Output "Usando referencia de conexión: $OneDriveConnectionReferenceId"
-Add-SolutionComponent -ComponentId ([string] $OneDriveConnectionReferenceId) -ComponentType 10423
-
 $flows = [ordered]@{
     'auto-tasacion-iniciar-lote' = 'Registra un lote de PDFs seleccionado desde Power Apps y crea su control operativo.'
     'auto-tasacion-consultar-lote' = 'Consulta el estado y progreso de un lote de tasaciones en Cloud Run.'
@@ -939,6 +958,31 @@ if ($FlowName) {
     }
     $flows = $selectedFlows
 }
+
+if ($script:IsLocalPlan) {
+    # Never authenticate, read Secret Manager, call Dataverse, create a flow, or
+    # alter state in a local plan. -DryRun makes this safety intent explicit;
+    # omitting -Activate has the same no-remote-effect behavior.
+    $plan = foreach ($flow in $flows.GetEnumerator()) {
+        $flowDefinition = New-FlowDefinition -Name $flow.Key
+        [pscustomobject]@{
+            Name = $flow.Key
+            Mode = if ($DryRun) { 'DryRun' } else { 'Plan' }
+            WillModifyRemote = $false
+            TriggerNames = (@($flowDefinition.definition.triggers.Keys) -join ',')
+            ActionCount = @($flowDefinition.definition.actions.Keys).Count
+        }
+    }
+    $plan | Format-Table -AutoSize
+    Write-Warning 'No se autentico ni se modifico Power Platform, Secret Manager o Cloud Run. Use -Activate unicamente durante un despliegue autorizado.'
+    return
+}
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+Import-Module MSAL.PS -Force
+
+Write-Output "Usando referencia de conexion: $OneDriveConnectionReferenceId"
+Add-SolutionComponent -ComponentId ([string] $OneDriveConnectionReferenceId) -ComponentType 10423
 
 foreach ($flow in $flows.GetEnumerator()) {
     $id = Create-DisabledFlow -Name $flow.Key -Description $flow.Value
@@ -967,4 +1011,4 @@ foreach ($flow in $flows.GetEnumerator()) {
     }
 }
 
-Write-Output 'Flujos masivos creados correctamente.'
+Write-Output 'Flujos masivos creados y publicados correctamente.'

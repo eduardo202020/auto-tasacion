@@ -40,6 +40,13 @@ class PadHelperScriptTests(unittest.TestCase):
         self.assertIn(".venv", script)
         self.assertIn("runtime", script)
 
+    def test_host_location_validator_can_check_one_profile_without_creating_paths(self) -> None:
+        script = (PAD_ROOT / "Test-AutomationLocations.ps1").read_text(encoding="utf-8")
+        self.assertIn("[string] $Profile = 'all'", script)
+        self.assertIn("$profilesToCheck", script)
+        self.assertIn("foreach ($path in @($input, [string] $profile.install_directory, $runtime))", script)
+        self.assertIn("the validator never creates", script)
+
     def test_location_profiles_keep_runtime_outside_shared_input(self) -> None:
         locations = json.loads(LOCATIONS.read_text(encoding="utf-8-sig"))
         self.assertEqual(

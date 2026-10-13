@@ -104,6 +104,16 @@ def payload(files):
 
 
 class BatchSourceFolderConfigurationTests(unittest.TestCase):
+    def test_versioned_locations_and_backend_default_cannot_drift(self):
+        locations_path = Path(__file__).resolve().parents[2] / "config" / "automation-locations.json"
+        locations = json.loads(locations_path.read_text(encoding="utf-8-sig"))
+        base = locations["onedrive"]["base_folder"]
+        self.assertEqual(batch_lotes.DEFAULT_ONEDRIVE_BASE_FOLDER, base)
+        self.assertEqual(
+            batch_lotes.DEFAULT_SOURCE_FOLDER,
+            f"{base}/{locations['onedrive']['subfolders']['pdfs']}",
+        )
+
     def test_default_source_folder_uses_the_new_onedrive_base(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(

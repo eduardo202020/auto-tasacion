@@ -1,6 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string] $LocationsConfigPath,
+    [ValidateSet('all', 'development', 'production')]
+    [string] $Profile = 'all',
     [switch] $CheckLocalPaths
 )
 
@@ -30,7 +32,8 @@ foreach ($name in 'pdfs', 'controls', 'archives') {
         Add-Failure "onedrive.subfolders.$name debe ser un nombre de carpeta único."
     }
 }
-foreach ($profileName in 'development', 'production') {
+$profilesToCheck = if ($Profile -eq 'all') { @('development', 'production') } else { @($Profile) }
+foreach ($profileName in $profilesToCheck) {
     $profile = $locations.pad.profiles.$profileName
     if ($null -eq $profile) { Add-Failure "Falta el perfil PAD '$profileName'."; continue }
     $input = [System.IO.Path]::GetFullPath(([string] $profile.input_directory)).TrimEnd('\')
@@ -39,7 +42,9 @@ foreach ($profileName in 'development', 'production') {
         Add-Failure "El runtime PAD de '$profileName' no puede estar dentro de su input_directory OneDrive."
     }
     if ($CheckLocalPaths) {
-        foreach ($path in @($input, [string] $profile.install_directory)) {
+        # Read-only checks: the validator never creates the OneDrive input,
+        # local installation, or runtime directories.
+        foreach ($path in @($input, [string] $profile.install_directory, $runtime)) {
             if (-not (Test-Path -LiteralPath $path)) { Add-Failure "No existe en este equipo: $path" }
         }
     }
@@ -52,5 +57,6 @@ if ($failures.Count) { throw ($failures -join [Environment]::NewLine) }
     controls_folder = "$base/$($locations.onedrive.subfolders.controls)"
     archives_folder = "$base/$($locations.onedrive.subfolders.archives)"
     result_folder = $result
+    profiles_checked = $profilesToCheck -join ','
     checked_local_paths = [bool] $CheckLocalPaths
 } | Format-List
