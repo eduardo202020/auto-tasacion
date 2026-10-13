@@ -4,6 +4,8 @@ param(
     [switch] $DryRun,
     [switch] $ValidateOneDriveFolderIds,
     [string[]] $FlowName,
+    [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*$')]
+    [string] $SolutionUniqueName = 'autoTasacion',
     [string] $LocationsConfigPath,
     [string] $OneDriveBaseFolder = $env:AUTOTASACION_ONEDRIVE_BASE_FOLDER,
     [string] $PdfFolderId = $env:AUTOTASACION_PDFS_FOLDER_ID,
@@ -24,7 +26,6 @@ $script:IsLocalPlan = [bool] ($DryRun -or -not $Activate)
 # This script creates or updates mass-processing flows as solution-aware
 # components. No document content or control token is written to this repository.
 $DataverseUrl = 'https://org9a4ef0e0.crm4.dynamics.com'
-$SolutionUniqueName = 'autoTasacion'
 $EnvironmentId = 'Default-3048dc87-43f0-4100-9acb-ae1971c79395'
 $ServiceUrl = 'https://demo-tasaciones-ia-h75cd5qm2q-nn.a.run.app'
 

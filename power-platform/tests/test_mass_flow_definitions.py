@@ -80,6 +80,11 @@ class FlowDeploymentLifecycleTests(unittest.TestCase):
         self.assertIn("$unknownFlowNames", self.script)
         self.assertIn("$selectedFlows[$name] = $flows[$name]", self.script)
 
+    def test_solution_target_is_explicit_and_preserves_legacy_default(self):
+        self.assertIn("[string] $SolutionUniqueName = 'autoTasacion'", self.script)
+        self.assertIn("SolutionUniqueName = $SolutionUniqueName", self.script)
+        self.assertNotIn("$SolutionUniqueName = 'autoTasacion'\n$EnvironmentId", self.script)
+
 
     def test_default_and_explicit_dry_run_are_local_plans_before_remote_operations(self):
         self.assertIn("[switch] $DryRun", self.script)
