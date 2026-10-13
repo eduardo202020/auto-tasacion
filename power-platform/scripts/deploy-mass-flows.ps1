@@ -2,6 +2,7 @@
 param(
     [switch] $Activate,
     [switch] $DryRun,
+    [switch] $EmitDefinitionJson,
     [switch] $ValidateOneDriveFolderIds,
     [string[]] $FlowName,
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*$')]
@@ -17,6 +18,9 @@ $ErrorActionPreference = 'Stop'
 
 if ($Activate -and $DryRun) {
     throw '-Activate y -DryRun no se pueden usar juntos.'
+}
+if ($Activate -and $EmitDefinitionJson) {
+    throw '-Activate y -EmitDefinitionJson no se pueden usar juntos.'
 }
 
 # An explicit activation is the only path that may change Dataverse.  A call
@@ -601,15 +605,14 @@ function New-FlowDefinition {
                                     expression = "@or(equals(variables('estado_lote'), 'COMPLETADO'), equals(variables('estado_lote'), 'ENTREGADO'), equals(variables('estado_lote'), 'FALLIDO'), equals(variables('estado_lote'), 'FALLIDO_ORIGEN_CAMBIO'))"
                                     limit = [ordered]@{ count = 30; timeout = 'PT2H' }
                                     actions = [ordered]@{
-                                        # Power Automate Cloud Flows serializes the Delay action with
-                                        # top-level count/unit fields. The generic Logic Apps interval object
-                                        # is rejected by this runtime schema.
                                         Esperar_con_backoff = [ordered]@{
                                             runAfter = @{}
                                             type = 'Wait'
                                             inputs = [ordered]@{
-                                                count = "@variables('espera_segundos')"
-                                                unit = 'Second'
+                                                interval = [ordered]@{
+                                                    count = "@variables('espera_segundos')"
+                                                    unit = 'Second'
+                                                }
                                             }
                                         }
                                         Renovar_claim_en_espera = New-HttpAction -Method 'POST' -Uri "@concat('$ServiceUrl/v1/lotes/', body('Leer_control_lote')?['id_lote'], '/orquestacion/renovar')" -Headers $controlHeaders -Body ([ordered]@{ id_ejecucion = "@workflow()?['run']?['name']" }) -RunAfter ([ordered]@{ Esperar_con_backoff = @('Succeeded') }) -Secure
@@ -958,6 +961,20 @@ if ($FlowName) {
         $selectedFlows[$name] = $flows[$name]
     }
     $flows = $selectedFlows
+}
+
+if ($EmitDefinitionJson) {
+    if ($flows.Count -ne 1) {
+        throw '-EmitDefinitionJson requiere exactamente un -FlowName.'
+    }
+    $flow = $flows.GetEnumerator() | Select-Object -First 1
+    $flowDefinition = New-FlowDefinition -Name $flow.Key
+    [ordered]@{
+        name = $flow.Key
+        connectionReferences = $flowDefinition.connectionReferences
+        definition = $flowDefinition.definition
+    } | ConvertTo-Json -Depth 100
+    return
 }
 
 if ($script:IsLocalPlan) {

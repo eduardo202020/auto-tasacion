@@ -1,6 +1,7 @@
 """Regression checks for the Power Automate flow-definition generator."""
 
 from pathlib import Path
+import json
 import unittest
 
 
@@ -156,6 +157,29 @@ class LocalPlanExecutionTests(unittest.TestCase):
         self.assertIn("False", result.stdout)
 
 
+class SerializedDefinitionTests(LocalPlanExecutionTests):
+    def test_serialized_wait_uses_nested_interval_with_dynamic_seconds(self):
+        result = self._run(
+            "-EmitDefinitionJson",
+            "-FlowName",
+            "auto-tasacion-orquestar-lote",
+            "-ControlFolderId",
+            self.DUMMY_FOLDER_ID,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        payload = json.loads(result.stdout)
+        wait = (
+            payload["definition"]["actions"]["Es_control_de_lote"]["actions"]
+            ["Es_propietario_del_lote"]["actions"]["Esperar_resultado_del_lote"]
+            ["actions"]["Esperar_con_backoff"]
+        )
+        self.assertEqual(wait["type"], "Wait")
+        self.assertEqual(
+            wait["inputs"],
+            {"interval": {"count": "@variables('espera_segundos')", "unit": "Second"}},
+        )
+
+
 class ConsultarLoteDefinitionTests(unittest.TestCase):
     def setUp(self):
         self.script = SCRIPT.read_text(encoding="utf-8")
@@ -255,14 +279,15 @@ class EventOrchestratorDefinitionTests(unittest.TestCase):
         self.assertLess(self.definition.index("Crear_excel_final"), self.definition.index("Confirmar_entrega_nuevo"))
         self.assertLess(self.definition.index("Confirmar_entrega_nuevo"), self.definition.index("Eliminar_control_lote_nuevo"))
 
-    def test_wait_uses_the_cloud_flow_count_and_unit_schema(self):
+    def test_wait_uses_the_cloud_flow_interval_count_and_unit_schema(self):
         start = self.definition.index("Esperar_con_backoff")
         end = self.definition.index("Renovar_claim_en_espera", start)
         wait_action = self.definition[start:end]
         self.assertIn("type = 'Wait'", wait_action)
+        self.assertIn("interval = [ordered]@{", wait_action)
         self.assertIn("count = \"@variables('espera_segundos')\"", wait_action)
         self.assertIn("unit = 'Second'", wait_action)
-        self.assertNotIn('interval = "@concat(', wait_action)
+        self.assertNotIn("inputs = [ordered]@{\n                                                count", wait_action)
 
     def test_backoff_update_does_not_self_reference_the_target_variable(self):
         start = self.definition.index("Aumentar_espera_hasta_cinco_minutos")
