@@ -6,6 +6,12 @@ El servicio produce `Resultado_Final.xlsx` con las hojas `PARA_PROCESAR`,
 `REVISION_IA` y `CONTROL`. `tblParaProcesar` conserva sus 24 columnas y
 `ID_CASO` al final. Solo filas completas y validadas llegan a la tabla operable.
 
+En la ruta masiva, la aplicación puede adjuntar una proyección por PDF de la
+hoja de control: `id_ingreso`, `prestamo`, `moneda_operador`, `seguro_origen` y
+`nro_expediente`. El servicio valida el préstamo, concilia la moneda y escribe
+las referencias no personales en `CONTROL`. El contrato exacto está en
+[`../contracts/control-lote.md`](../contracts/control-lote.md).
+
 ## Ruta ZIP heredada
 
 `POST application/zip` y las operaciones JSON `iniciar_carga` /

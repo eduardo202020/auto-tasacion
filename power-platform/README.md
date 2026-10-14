@@ -158,8 +158,14 @@ Eliminar de esta ruta `ControlAdjuntos`, **Cargar Zip**, `contentBytes` y
 
 El resultado se llama `Resultado_Final_<ID_LOTE>.xlsx` y se crea en
 `/automatizaciones-jhglazar/auto-tasaciones`. PAD recibe su ruta y opera exclusivamente
-`tblParaProcesar`. `PRESTAMO` y `SEGURO INMUEBLE` se completan después, en el
-proceso IBM 3270. `tblRevisionIa` y `tblControl` nunca son colas para el banco.
+`tblParaProcesar`. En los lotes con hoja de control, `PRESTAMO` llega validado
+desde esa proyección; `SEGURO INMUEBLE` sigue siendo salida del proceso IBM
+3270. `tblRevisionIa` y `tblControl` nunca son colas para el banco.
+
+La hoja de entrada que usa Canvas se conserva en
+`/automatizaciones-jhglazar/auto-tasaciones/ControlEntrada`. No debe ubicarse
+en `Controles`, porque esa carpeta recibe los JSON técnicos que disparan la
+orquestación del lote.
 
 ## Ruta heredada ZIP
 

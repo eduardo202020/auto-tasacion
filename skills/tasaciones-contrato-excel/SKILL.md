@@ -22,8 +22,8 @@ Antes de tocar la salida, lee `AGENTS.md`, `contracts/masivo.md`,
 - Cada PDF tiene una fila en `tblControl`, incluso cuando falla la extracción.
 - Las excepciones permanecen en `tblRevisionIa` con estado, faltantes,
   incidencias, evidencia y siguiente acción.
-- `PRESTAMO` es posterior al procesamiento PDF y puede estar vacío en la cola
-  lista.
+- En lotes con control, `PRESTAMO` llega validado desde la fila operativa
+  autorizada; los lotes heredados pueden conservarlo vacío.
 - Una fila con un campo requerido vacío, código no autorizado o conflicto no
   llega a `tblParaProcesar`.
 

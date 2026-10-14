@@ -86,19 +86,21 @@ MACRO_COLUMNS = [
 # de IBM 3270 contra CONTROL.
 PARA_PROCESAR_COLUMNS = [*MACRO_COLUMNS, "ID_CASO"]
 
-# PRESTAMO se obtiene después de la operación en IBM 3270. VALOR DEL BIEN se
-# conserva vacío por compatibilidad histórica; IMPORTE contiene el valor PEN.
-# Las columnas COL_* son reservadas.
+# PRESTAMO llega de la proyección autorizada de la hoja de control cuando el
+# lote la incluye. Los lotes históricos pueden conservarlo vacío. VALOR DEL
+# BIEN se deja vacío por compatibilidad histórica; IMPORTE contiene el valor
+# extraído de la tasación. Las columnas COL_* son reservadas.
 REQUIRED_MACRO_COLUMNS = (
-    "TIPO DE INMUEBLE", "MONEDA", "IMPORTE",
-    "DIRECCION", "DIRECCION1", "MUNICIPIO", "DIST_COD", "PROV_COD",
-    "DEPT_COD", "CLASE", "PISOS", "SOTANOS", "AÑO",
+    "PRESTAMO", "TIPO DE INMUEBLE", "MONEDA", "IMPORTE",
+    "DIRECCION", "DIRECCION1", "EXTERIOR", "MUNICIPIO", "DIST_COD",
+    "PROV_COD", "DEPT_COD", "PISOS", "SOTANOS", "AÑO",
 )
 
 CONTROL_COLUMNS = [
     "ID_CASO", "ID / Codigo PDF", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Origen tasadora",
     "Perfil plantilla", "Version perfil", "Confianza perfil", "Coincidencias perfil",
-    "PRESTAMO", "Direccion extraida", "Pagina direccion",
+    "ID_INGRESO", "PRESTAMO", "MONEDA_OPERADOR", "SEGURO_ORIGEN", "NRO_EXPEDIENTE", "Observacion control",
+    "Direccion extraida", "Pagina direccion",
     "Tipo inmueble", "Tipo inmueble texto", "Pagina tipo inmueble", "Valor elegido tipo",
     "Valor elegido US$", "Valor elegido S/", "Valor comercial US$", "Valor comercial S/",
     "Pagina valor comercial", "Valor reconstruccion US$", "Valor reconstruccion S/",
@@ -112,7 +114,8 @@ CONTROL_COLUMNS = [
 ]
 
 REVIEW_COLUMNS = [
-    "ID_CASO", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Origen tasadora", "Perfil plantilla",
+    "ID_CASO", "PDF_Archivo", "ID_INGRESO", "PRESTAMO", "MONEDA_OPERADOR", "SEGURO_ORIGEN",
+    "Tasadora id", "Tasadora detectada", "Origen tasadora", "Perfil plantilla",
     "Version perfil", "Confianza perfil", "Coincidencias perfil", "Estado", "Campos faltantes", "Incidencias de validacion",
     "Campos enviados a IA", "Motivo IA", "Correcciones IA", "Evidencia IA", "Modelo IA",
     "Siguiente accion",
@@ -124,6 +127,7 @@ AI_TARGETS_BY_MACRO_FIELD = {
     "IMPORTE": ("Valor elegido US$", "Valor elegido S/"),
     "DIRECCION": ("Direccion extraida",),
     "DIRECCION1": ("Direccion extraida",),
+    "EXTERIOR": ("Direccion extraida",),
     "MUNICIPIO": ("Direccion extraida",),
     "DIST_COD": ("Direccion extraida",),
     "PROV_COD": ("Direccion extraida",),
@@ -259,6 +263,32 @@ def choose_importe(extracted: dict[str, Any]) -> tuple[Any, str]:
     return "", ""
 
 
+def apply_control_metadata(extracted: dict[str, Any], control: dict[str, Any] | None) -> None:
+    """Une la proyección operativa autorizada a un PDF ya extraído.
+
+    ``control`` procede del manifiesto validado por :mod:`batch_lotes`. No se
+    aceptan ni se reconstruyen datos personales, enlaces, ni campos no
+    proyectados desde la hoja original. El préstamo queda disponible en la
+    columna A de ``PARA_PROCESAR`` y la moneda se contrasta con el valor
+    documentado en la tasación antes de permitir la ruta automática.
+    """
+    if not control:
+        return
+
+    extracted["ID_INGRESO"] = str(control.get("id_ingreso") or "")
+    extracted["PRESTAMO"] = str(control.get("prestamo") or "")
+    extracted["MONEDA_OPERADOR"] = str(control.get("moneda_operador") or "")
+    extracted["SEGURO_ORIGEN"] = str(control.get("seguro_origen") or "")
+    extracted["NRO_EXPEDIENTE"] = str(control.get("nro_expediente") or "")
+
+    _, moneda_tasacion = choose_importe(extracted)
+    moneda_operador = str(extracted["MONEDA_OPERADOR"] or "")
+    if moneda_tasacion and moneda_operador and moneda_tasacion != moneda_operador:
+        extracted["Observacion control"] = "Conflicto moneda entre la hoja de control y la tasación"
+    else:
+        extracted["Observacion control"] = ""
+
+
 def format_importe(value: Any) -> str:
     """Emite el importe en el formato textual heredado de MASIVO.
 
@@ -320,8 +350,10 @@ def to_macro_row(extracted: dict[str, Any]) -> tuple[list[Any], list[str]]:
         observations.append("Moneda sin código autorizado en DATOS")
     if parsed.get("TIPO VIA 1") and not via_code:
         observations.append("Tipo de vía sin abreviatura autorizada en DATOS")
+    if parsed.get("UBICACION TIPO") and not ubicacion_code:
+        observations.append("Tipo de ubicación sin código autorizado en DATOS")
     row = [""] * len(MACRO_COLUMNS)
-    row[0] = ""
+    row[0] = as_excel_value(extracted.get("PRESTAMO", ""))
     # La hoja operativa conserva las etiquetas completas que usaba MASIVO;
     # los códigos del catálogo permanecen auditables en CONTROL.
     row[1] = tipo
@@ -349,6 +381,9 @@ def to_macro_row(extracted: dict[str, Any]) -> tuple[list[Any], list[str]]:
 def persistent_extraction_observations(extracted: dict[str, Any]) -> list[str]:
     """Conserva conflictos y errores, no vacíos que la IA podría corregir."""
     observations = [item.strip() for item in str(extracted.get("Observacion extraccion") or "").split(";") if item.strip()]
+    observations.extend(
+        item.strip() for item in str(extracted.get("Observacion control") or "").split(";") if item.strip()
+    )
     return [item for item in observations if not any(item.startswith(prefix) for prefix in TRANSIENT_EXTRACTION_OBSERVATIONS)]
 
 
@@ -618,8 +653,26 @@ def download_staged_zip(value: Any) -> bytes:
     return raw_data
 
 
+def unpack_pdf_entry(entry: tuple[Any, ...]) -> tuple[str, bytes, dict[str, Any]]:
+    """Acepta la entrada histórica de dos elementos y la entrada con control.
+
+    La ruta ZIP heredada no transporta control. El worker masivo añade la
+    proyección validada del manifiesto como tercer elemento sin cambiar la
+    interfaz de los consumidores históricos.
+    """
+    if len(entry) == 2:
+        source_filename, content = entry
+        return str(source_filename or ""), bytes(content), {}
+    if len(entry) == 3:
+        source_filename, content, control = entry
+        if not isinstance(control, dict):
+            raise ValueError("La metadata de control del PDF debe ser un objeto")
+        return str(source_filename or ""), bytes(content), dict(control)
+    raise ValueError("Cada PDF debe incluir nombre, contenido y control opcional")
+
+
 def process_pdf_entries(
-    pdf_entries: Iterable[tuple[str, bytes]],
+    pdf_entries: Iterable[tuple[Any, ...]],
     reviewer: CaseReviewer | None = None,
     *,
     use_environment_reviewer: bool = True,
@@ -641,8 +694,8 @@ def process_pdf_entries(
             reviewer_error = str(error)
     approved_rules = load_approved_rules()
 
-    for source_filename, content in pdf_entries:
-        source_filename = str(source_filename or "")
+    for entry in pdf_entries:
+        source_filename, content, control_metadata = unpack_pdf_entry(entry)
         filename = source_filename.rsplit("/", 1)[-1]
         case_id = build_case_id(source_filename, content)
         if not content.startswith(b"%PDF-"):
@@ -660,6 +713,7 @@ def process_pdf_entries(
             }
         else:
             extracted = extract_pdf(content, filename)
+        apply_control_metadata(extracted, control_metadata)
         extracted["ID_CASO"] = case_id
 
         deterministic = dict(extracted)
@@ -720,6 +774,10 @@ def process_pdf_entries(
         else:
             review_rows.append({
                 "ID_CASO": case_id, "PDF_Archivo": source_filename,
+                "ID_INGRESO": deterministic.get("ID_INGRESO", ""),
+                "PRESTAMO": deterministic.get("PRESTAMO", ""),
+                "MONEDA_OPERADOR": deterministic.get("MONEDA_OPERADOR", ""),
+                "SEGURO_ORIGEN": deterministic.get("SEGURO_ORIGEN", ""),
                 "Tasadora id": deterministic.get("Tasadora id", ""),
                 "Tasadora detectada": deterministic.get("Tasadora detectada", ""),
                 "Origen tasadora": deterministic.get("Origen tasadora", ""),

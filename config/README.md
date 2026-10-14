@@ -18,6 +18,11 @@ El resultado final se entrega en `onedrive.result_folder`, que debe ser igual a
 la raíz lógica de la automatización. Las subcarpetas se deben expresar como un
 solo nombre; los scripts rechazan rutas relativas, `..` y valores vacíos.
 
+`onedrive.subfolders.control_inputs` identifica la carpeta de libros que
+Canvas consulta para construir la proyección de control. Se mantiene separada
+de `onedrive.subfolders.controls`, que contiene los JSON técnicos que activan
+la orquestación.
+
 ## IDs de OneDrive
 
 No registre IDs opacos en Git. Antes de desplegar se deben proporcionar:

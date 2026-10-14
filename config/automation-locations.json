@@ -6,6 +6,7 @@
     "subfolders": {
       "pdfs": "PDFs",
       "controls": "Controles",
+      "control_inputs": "ControlEntrada",
       "archives": "Archivos"
     },
     "result_folder": "/automatizaciones-jhglazar/auto-tasaciones"

@@ -1,7 +1,8 @@
 # Flujo operador → Cloud → plantilla MASIVO → 3270
 
 **Fecha:** 2026-10-14
-**Estado:** modelo operativo corregido; inspección estática solamente
+**Estado:** contrato Cloud implementado localmente; pendiente publicar el
+cambio de Cloud Run y aplicar la configuración manual de Canvas
 
 ## Propósito
 
@@ -27,9 +28,10 @@ Cada fila de la hoja operativa contiene como mínimo:
 | `MONEDA` | Dato de origen que debe compararse con la moneda extraída del PDF. Una discrepancia se reporta, no se resuelve silenciosamente. |
 | Enlace de tasación | Referencia desde la que se materializa el PDF mediante un mecanismo autorizado. No se transporta como URL en el manifiesto de Cloud Run. |
 
-La llave de relación entre la fila y el PDF todavía debe formalizarse. Hasta
-definirla, ningún dato de la fila se puede asociar de forma segura a un
-`ID_CASO`.
+La relación se formaliza con una proyección de control que contiene
+`ID_INGRESO` y `ARCHIVO_PDF`. La proyección no incorpora DNI, nombre de cliente
+ni el enlace externo de tasación. Su contrato se mantiene en
+[`../../contracts/control-lote.md`](../../contracts/control-lote.md).
 
 ## Evidencia del conjunto histórico de diez casos
 
@@ -55,19 +57,21 @@ relación entre una fila operativa y su PDF de origen.
 ## Correlación mínima para el flujo nuevo
 
 Mientras el operador continúe descargando los PDFs antes de iniciar Power Apps,
-la entrada debe incluir un control de lote junto con esos archivos:
+la entrada debe incluir un control de lote junto con esos archivos. La hoja se
+guarda en `ControlEntrada`, nunca en `Controles`, que queda reservada para los
+JSON que activan el orquestador:
 
-1. Power Apps recibe una copia de la hoja operativa como control del lote y
-   registra un `ID_INGRESO` técnico por fila.
-2. Cada PDF se carga en `PDFs` con ese `ID_INGRESO` en el nombre. El código no
-   debe derivar la asociación por posición de fila, nombre de cliente ni el
-   enlace externo.
+1. Power Apps recibe una proyección de la hoja operativa con un `ID_INGRESO`
+   técnico y un `ARCHIVO_PDF` por fila.
+2. Cada PDF se carga en `PDFs` y `ARCHIVO_PDF` se compara con su nombre. El
+   código no deriva la asociación por posición de fila, nombre de cliente ni
+   enlace externo. El nombre puede ser técnico, por ejemplo `D01.pdf`.
 3. Antes de crear el manifiesto, una prevalidación exige una fila y un PDF por
    cada `ID_INGRESO`, sin duplicados. Luego relaciona el `item_id` del PDF con
    esa referencia técnica.
-4. El manifiesto lleva solo la referencia técnica necesaria para la relación.
-   Los datos personales quedan en el control restringido; `PRESTAMO`, seguro y
-   moneda se incorporan al adaptador según necesidad y validación.
+4. El manifiesto lleva solo `ID_INGRESO`, `PRESTAMO`, moneda y referencias de
+   conciliación autorizadas. DNI, nombre de cliente y enlace quedan fuera de la
+   aplicación y del manifiesto.
 
 La alternativa de usar `SEGURO` o `NRO_EXPEDIENTE` como llave requiere
 demostrar que el campo es único, estable y siempre está presente. Hasta esa
@@ -117,17 +121,16 @@ flowchart LR
    operativa en la carpeta de entrada de OneDrive. El diseño vigente no admite
    enlaces externos en el manifiesto: solo declara `item_id`, `etag`, nombre y
    tamaño de un PDF ya presente.
-2. La capa de entrada crea una relación estable entre la fila operativa y el
-   PDF, conserva los campos restringidos fuera de la cola bancaria y genera o
-   enlaza el futuro `ID_CASO`.
+2. La capa de entrada crea una relación estable por `ARCHIVO_PDF`, conserva
+   DNI, nombre de cliente y enlace fuera de la cola bancaria y asocia
+   `ID_INGRESO` con el futuro `ID_CASO`.
 3. El flujo actual procesa un PDF por vez. `service.py` invoca
    `pdf_extractor.py`; `address_parser.py` y `catalog.py` normalizan dirección,
    territorio y códigos. Esa combinación reemplaza la etapa externa anterior
    de extracción, sin descargar enlaces públicos desde Cloud Run.
 4. Cloud une el resultado extraído con la metadata de entrada. `PRESTAMO` pasa
-   validado a la preparación de macro; la moneda de origen se concilia con la
-   moneda documentada; `DNI`, nombre y expediente permanecen en control
-   restringido.
+   validado a `PARA_PROCESAR`; la moneda de origen se concilia con la moneda
+   documentada; DNI, nombre y enlace no llegan a Cloud.
 5. El resultado Cloud activa PAD, integración ya comprobada solamente en
    `SIMULACION`.
 6. PAD conserva el XLSX original, crea una copia local de la plantilla `.xlsm`
@@ -155,11 +158,11 @@ fila y reemplazar las rutas fijas de capturas por el runtime del lote.
 
 ## Brechas para implementar, en orden
 
-1. Acordar la llave estable de la fila operativa y el PDF.
-2. Implementar el ingreso de metadata y su almacenamiento restringido por
-   `ID_CASO`; el manifiesto actual no lo soporta.
-3. Definir la regla de conciliación de moneda de operador frente a moneda de
-   tasación y promover las reglas aclaradas a código con casos sintéticos.
+1. Publicar el cambio Cloud Run y aplicar en Canvas la colección
+   `tblControlLote` documentada en el contrato.
+2. Confirmar con una prueba de control que las diez relaciones
+   `ARCHIVO_PDF`–PDF y sus préstamos son únicas.
+3. Promover las reglas aclaradas de negocio a código con casos sintéticos.
 4. Crear el adaptador local que copie y llene una plantilla `.xlsm` aprobada,
    sin alterar el resultado Cloud ni la plantilla maestra.
 5. Refactorizar y versionar la macro para ejecución no interactiva y salida

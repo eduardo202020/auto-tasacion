@@ -67,6 +67,45 @@ Set(varAhoraProceso; Now())
 
 Conserva `btnActualizar` exclusivamente para actualizar `colPdfs`.
 
+## Hoja de control y colección de trabajo
+
+Este cambio se aplica manualmente en Power Apps Studio; la CLI del repositorio
+no puede modificar ni publicar la Canvas App.
+
+1. En OneDrive, crea la carpeta `ControlEntrada` al mismo nivel que `PDFs` y
+   `Controles`. Dentro de ella crea el libro de proyección y una tabla
+   llamada `tblControlLote`. Sus encabezados son exactamente `ID_INGRESO`,
+   `ARCHIVO_PDF`, `PRESTAMO`, `MONEDA_OPERADOR`, `SEGURO_ORIGEN` y
+   `NRO_EXPEDIENTE`. `PRESTAMO` debe ser una columna de texto de veinte
+   dígitos. No guardes este libro en `Controles`: esa carpeta está reservada
+   para los JSON que disparan el orquestador.
+2. Agrega esa tabla como origen de datos de Excel en la app y conserva el
+   nombre `tblControlLote`. No agregues al origen las columnas DNI, cliente ni
+   enlace de tasación de la hoja operativa original.
+3. En `Screen1.OnVisible`, después de la lógica que carga PDFs, agrega:
+
+```powerfx
+ClearCollect(
+    colControl;
+    ForAll(
+        tblControlLote As control;
+        {
+            ArchivoPdf: Trim(Text(control.ARCHIVO_PDF));
+            IdIngreso: Trim(Text(control.ID_INGRESO));
+            Prestamo: Trim(Text(control.PRESTAMO));
+            MonedaOperador: Upper(Trim(Text(control.MONEDA_OPERADOR)));
+            SeguroOrigen: Trim(Text(control.SEGURO_ORIGEN));
+            NroExpediente: Trim(Text(control.NRO_EXPEDIENTE))
+        }
+    )
+)
+```
+
+`ARCHIVO_PDF` debe coincidir, sin importar mayúsculas/minúsculas, con el nombre
+de cada PDF seleccionado en `colPdfs`. En el conjunto de diez casos permite
+relacionar explícitamente `D01.pdf` a `D10.pdf`; no se relaciona por posición
+de fila.
+
 ## Boton **Ejecutar** (`Button5.OnSelect`)
 
 Reemplaza la propiedad `OnSelect` por esta formula. Mantiene la seleccion
@@ -74,9 +113,52 @@ multiple existente, crea solo el manifiesto y deja la transferencia de cada PDF
 al flujo programado.
 
 ```powerfx
+ClearCollect(
+    colSeleccionControl;
+    ForAll(
+        Filter(colPdfs; Seleccionado) As pdf;
+        With(
+            {control: LookUp(colControl; Lower(ArchivoPdf) = Lower(pdf.Nombre))};
+            {
+                ItemId: pdf.ItemId;
+                Nombre: pdf.Nombre;
+                Tamano: pdf.Tamano;
+                ETag: pdf.ETag;
+                IdIngreso: control.IdIngreso;
+                Prestamo: control.Prestamo;
+                MonedaOperador: control.MonedaOperador;
+                SeguroOrigen: control.SeguroOrigen;
+                NroExpediente: control.NroExpediente
+            }
+        )
+    )
+);;
 If(
-    CountRows(Filter(colPdfs; Seleccionado)) = 0;
+    CountRows(colSeleccionControl) = 0;
     Notify("Seleccione al menos un PDF."; NotificationType.Warning);
+    CountRows(Filter(
+        colSeleccionControl;
+        Or(
+            IsBlank(IdIngreso);
+            !IsMatch(Prestamo; "^[0-9]{20}$");
+            !Or(
+                MonedaOperador = "PEN";
+                MonedaOperador = "SOL";
+                MonedaOperador = "SOLES";
+                MonedaOperador = "S/";
+                MonedaOperador = "USD";
+                MonedaOperador = "DOLAR";
+                MonedaOperador = "DÓLAR";
+                MonedaOperador = "DOLARES";
+                MonedaOperador = "DÓLARES";
+                MonedaOperador = "US$";
+                MonedaOperador = "US DOLLARS"
+            )
+        )
+    )) > 0;
+    Notify("Cada PDF seleccionado necesita una fila de control con préstamo de 20 dígitos y moneda válida."; NotificationType.Error);
+    CountRows(Distinct(colSeleccionControl; IdIngreso)) <> CountRows(colSeleccionControl);
+    Notify("ID_INGRESO no puede repetirse dentro del lote."; NotificationType.Error);
     Set(varMonitorearLote; false);;
     Set(varLote; Blank());;
     Set(varIdLote; Blank());;
@@ -103,12 +185,17 @@ If(
             'auto-tasacion-iniciar-lote'.Run(
                 JSON(
                     ForAll(
-                        Filter(colPdfs; Seleccionado);
+                        colSeleccionControl;
                         {
                             item_id: ItemId;
                             nombre: Nombre;
                             tamano_bytes: Tamano;
-                            etag: ETag
+                            etag: ETag;
+                            id_ingreso: IdIngreso;
+                            prestamo: Prestamo;
+                            moneda_operador: MonedaOperador;
+                            seguro_origen: SeguroOrigen;
+                            nro_expediente: NroExpediente
                         }
                     );
                     JSONFormat.Compact
@@ -122,7 +209,7 @@ If(
         Notify("No se pudo registrar el lote. Intentelo nuevamente."; NotificationType.Error);
         Set(varIdLote; varLote.id_lote);;
         Set(varEstadoLote; varLote.estado);;
-        Set(varTotalPdfs; CountRows(Filter(colPdfs; Seleccionado)));;
+        Set(varTotalPdfs; CountRows(colSeleccionControl));;
         Set(varPdfsCargados; 0);;
         Set(varPdfsProcesados; 0);;
         Set(varPdfsFallidos; 0);;

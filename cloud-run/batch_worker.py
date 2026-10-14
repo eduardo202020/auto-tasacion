@@ -147,9 +147,11 @@ def process_batch_gcs(
         raise BatchError("El bucket de lotes no está configurado", code="CONFIGURACION_INVALIDA", status=500)
     bucket = (storage_client or storage.Client()).bucket(resolved_bucket_name)
 
-    def pdf_entries() -> Iterator[tuple[str, bytes]]:
+    def pdf_entries() -> Iterator[tuple[str, bytes, dict[str, Any]]]:
         for item in confirmed:
-            yield item["nombre"], _verified_pdf_bytes(bucket, item)
+            # ``control`` ya fue validado al registrar el lote. Solo se pasa la
+            # proyección operativa sin datos personales al extractor.
+            yield item["nombre"], _verified_pdf_bytes(bucket, item), dict(item.get("control") or {})
 
     try:
         _log_event("JOB_INICIADO", id_lote=batch_id, total_pdfs=len(confirmed))

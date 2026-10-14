@@ -31,7 +31,24 @@ BATCH_STATE_PREFIX = "estado/lotes"
 BATCH_INPUT_PREFIX = "ingresos"
 BATCH_RESULT_PREFIX = "resultados"
 _SAFE_OBJECT_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+_CONTROL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 DEFAULT_ORCHESTRATION_LEASE_SECONDS = 3 * 60 * 60
+
+# La hoja de control se proyecta por archivo. Solo se guardan los campos que
+# intervienen en la preparación del lote; DNI, nombre de cliente y enlaces de
+# descarga no deben cruzar este límite ni persistirse en el manifiesto.
+CONTROL_FIELDS = (
+    "id_ingreso",
+    "prestamo",
+    "moneda_operador",
+    "seguro_origen",
+    "nro_expediente",
+)
+CONTROL_REQUIRED_FIELDS = ("id_ingreso", "prestamo", "moneda_operador")
+CONTROL_FORBIDDEN_FIELDS = frozenset({
+    "dni", "nombre_cliente", "cliente", "url_tasacion", "link_tasacion", "link",
+})
+MANIFEST_FILE_FIELDS = frozenset({"item_id", "etag", "nombre", "tamano_bytes"})
 
 FILE_PENDING = "PENDIENTE"
 FILE_UPLOADING = "SUBIENDO"
@@ -223,12 +240,96 @@ def _positive_size(value: Any) -> int:
     return size
 
 
+def _optional_control_text(value: Any, label: str, *, limit: int = 128) -> str:
+    text = str(value or "").strip()
+    if len(text) > limit:
+        raise BatchError(f"{label} excede el tamaño permitido", code="CONTROL_INVALIDO")
+    return text
+
+
+def normalize_control_currency(value: Any) -> str:
+    """Normaliza las monedas permitidas por la hoja operativa."""
+    text = str(value or "").strip().upper()
+    normalized = (
+        text.replace("Á", "A").replace("É", "E").replace("Í", "I")
+        .replace("Ó", "O").replace("Ú", "U").replace(".", "")
+        .replace(" ", "")
+    )
+    if normalized in {"PEN", "SOL", "SOLES", "S/"}:
+        return "PEN"
+    if normalized in {"USD", "DOLAR", "DOLARES", "USDOLLAR", "USDOLLARS", "US$"}:
+        return "USD"
+    raise BatchError("moneda_operador debe ser PEN/SOLES o USD/DOLARES", code="CONTROL_INVALIDO")
+
+
+def normalize_manifest_item(value: Any) -> dict[str, Any]:
+    """Normaliza claves y bloquea datos fuera del contrato por PDF."""
+    if not isinstance(value, dict):
+        raise BatchError("Cada archivo del manifiesto debe ser un objeto")
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip().lower()
+        if key in normalized:
+            raise BatchError("Cada archivo no puede duplicar campos", code="CONTROL_INVALIDO")
+        normalized[key] = raw_value
+    forbidden = sorted(set(normalized) & CONTROL_FORBIDDEN_FIELDS)
+    if forbidden:
+        raise BatchError("La metadata de control no admite datos personales ni enlaces", code="CONTROL_SENSIBLE")
+    unsupported = set(normalized) - CONTROL_FIELDS - MANIFEST_FILE_FIELDS
+    if unsupported:
+        raise BatchError("La metadata de control contiene campos no autorizados", code="CONTROL_INVALIDO")
+    return normalized
+
+
+def normalize_control_metadata(value: Any) -> dict[str, str]:
+    """Valida la proyección no personal de una fila de control.
+
+    La función permite que los lotes históricos continúen sin metadata. Cuando
+    una fila declara cualquier campo de control, la relación pasa a ser
+    obligatoria y completa para impedir que se asocie un PDF a una fila parcial.
+    """
+    if not isinstance(value, dict):
+        raise BatchError("La metadata de control debe ser un objeto", code="CONTROL_INVALIDO")
+    normalized = normalize_manifest_item(value)
+    metadata = {field: normalized.get(field, "") for field in CONTROL_FIELDS}
+    missing = [field for field in CONTROL_REQUIRED_FIELDS if not str(metadata[field] or "").strip()]
+    if missing:
+        raise BatchError("Faltan campos obligatorios de la hoja de control", code="CONTROL_INCOMPLETO")
+
+    id_ingreso = _optional_control_text(metadata["id_ingreso"], "id_ingreso", limit=64)
+    if not _CONTROL_ID_RE.fullmatch(id_ingreso):
+        raise BatchError("id_ingreso debe usar letras, números, guion o guion bajo", code="CONTROL_INVALIDO")
+    prestamo = _optional_control_text(metadata["prestamo"], "prestamo", limit=20)
+    if not re.fullmatch(r"\d{20}", prestamo):
+        raise BatchError("prestamo debe contener exactamente 20 dígitos", code="PRESTAMO_INVALIDO")
+    return {
+        "id_ingreso": id_ingreso,
+        "prestamo": prestamo,
+        "moneda_operador": normalize_control_currency(metadata["moneda_operador"]),
+        "seguro_origen": _optional_control_text(metadata["seguro_origen"], "seguro_origen"),
+        "nro_expediente": _optional_control_text(metadata["nro_expediente"], "nro_expediente"),
+    }
+
+
+def has_control_metadata(value: Any) -> bool:
+    """Indica si un elemento declara parte de la proyección de control."""
+    return isinstance(value, dict) and any(
+        str(key).strip().lower() in CONTROL_FIELDS for key in value
+    )
+
+
 def file_identity_key(item_id: str, etag: str) -> str:
     return f"{item_id}:{etag}"
 
 
 def manifest_idempotency_key(source_folder: str, files: list[dict[str, Any]]) -> str:
-    identities = sorted(file_identity_key(item["item_id"], item["etag"]) for item in files)
+    identities = sorted(
+        "|".join((
+            file_identity_key(item["item_id"], item["etag"]),
+            json.dumps(item.get("control", {}), ensure_ascii=True, sort_keys=True, separators=(",", ":")),
+        ))
+        for item in files
+    )
     source = f"{source_folder}|" + "|".join(identities)
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
@@ -267,10 +368,11 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
 
     files: list[dict[str, Any]] = []
     seen_item_ids: set[str] = set()
+    seen_control_ids: set[str] = set()
     invalid_file_errors: list[str] = []
-    for supplied in supplied_files:
-        if not isinstance(supplied, dict):
-            raise BatchError("Cada archivo del manifiesto debe ser un objeto")
+    control_mode: bool | None = None
+    for raw_supplied in supplied_files:
+        supplied = normalize_manifest_item(raw_supplied)
         item_id = _required_identifier(supplied.get("item_id"), "item_id")
         etag = _required_identifier(supplied.get("etag"), "etag")
         if item_id in seen_item_ids:
@@ -278,6 +380,17 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
         seen_item_ids.add(item_id)
         filename = safe_pdf_filename(supplied.get("nombre"))
         size = _positive_size(supplied.get("tamano_bytes"))
+        item_has_control = has_control_metadata(supplied)
+        if control_mode is None:
+            control_mode = item_has_control
+        elif control_mode != item_has_control:
+            raise BatchError("Todos los PDFs deben incluir control o ninguno debe incluirlo", code="CONTROL_INCOMPLETO")
+        control = normalize_control_metadata(supplied) if item_has_control else {}
+        if control:
+            control_id = control["id_ingreso"]
+            if control_id in seen_control_ids:
+                raise BatchError("id_ingreso no puede repetirse dentro del lote", code="CONTROL_DUPLICADO")
+            seen_control_ids.add(control_id)
         file_id = file_id_from_identity(item_id, etag)
         state = FILE_PENDING
         error = ""
@@ -295,6 +408,7 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
             "estado": state,
             "mensaje": error,
             "etag_confirmado": "",
+            "control": control,
         })
 
     total_bytes = sum(item["tamano_bytes"] for item in files)
@@ -308,7 +422,7 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
 
     now = utc_timestamp()
     manifest = {
-        "version": 1,
+        "version": 2 if control_mode else 1,
         "id_lote": batch_id,
         "clave_idempotencia": key,
         "carpeta_origen": source_folder,
@@ -326,6 +440,10 @@ def build_manifest(payload: dict[str, Any], *, limits: BatchLimits | None = None
         "resultado_objeto": batch_result_object_name(batch_id),
         "resultado_disponible": False,
         "ejecucion_job": "",
+        "control_lote": {
+            "incluido": bool(control_mode),
+            "campos": list(CONTROL_FIELDS) if control_mode else [],
+        },
         # Este bloque es la reserva persistida que hace seguro recibir más de
         # un evento de creación para el mismo control de OneDrive. No cambia
         # el estado de negocio del lote ni contiene contenido documental.

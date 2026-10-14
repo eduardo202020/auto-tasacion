@@ -17,6 +17,7 @@ from provider_ocr import extract_braschi_floor_table_ocr, iter_provider_ocr_text
 
 RAW_CASA_RE = re.compile(r"\b(CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR|VIVIENDA)\b", re.I)
 RAW_DEPTO_RE = re.compile(r"\b(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT)\b", re.I)
+RAW_TERRENO_RE = re.compile(r"\bTERRENO(?:\s+SIN\s+CONSTRUCCIONES)?\b", re.I)
 VALOR_COMERCIAL_RE = re.compile(r"\bVALOR\s+COMERCIAL\b", re.I)
 VALOR_RECONSTRUCCION_RE = re.compile(
     r"\b(VALORES?\s+DE\s+RECONSTRUCCION|VALOR\s+DE\s+RECONSTRUCCION|RECONSTRUCCION)\b",
@@ -172,19 +173,26 @@ def extract_solicitud_construyo_address(doc: fitz.Document) -> tuple[str, Option
 def extract_address(doc: fitz.Document) -> tuple[str, Optional[int]]:
     """Extrae la dirección operativa con prioridad documental definida.
 
-    El flujo histórico usa la dirección de minuta de la unidad tasada. La de
-    inspección ocular es el primer respaldo y la dirección municipal/matriz
-    queda como último recurso. Así se evita que una dirección matriz sustituya
-    la ubicación específica de la garantía.
+    La dirección registral prevalece sobre la de minuta; inspección ocular es
+    el último respaldo. Las fuentes municipales o matriciales solo se revisan
+    en el recorrido genérico posterior para no sustituir la garantía.
     """
-    for source_marker in ("MINUTA", "INSPECCION"):
+    for source_marker, source_pattern in (
+        ("REGISTRAL", r"REGISTRAL"),
+        ("REGISTRO", r"REGISTRO"),
+        ("MINUTA", r"MINUTA"),
+        ("INSPECCION", r"INSPECCION(?:\s+OCULAR)?"),
+    ):
         for page_index in range(min(len(doc), 5)):
             blocks = get_blocks(doc[page_index])
             for block in blocks:
-                if "DIRECCION" not in block["up"] or source_marker not in block["up"]:
+                has_address_label = any(
+                    label in block["up"] for label in ("DIRECCION", "UBICACION", "INMUEBLE")
+                )
+                if not has_address_label or source_marker not in block["up"]:
                     continue
                 inline = re.sub(
-                    r"^.*?\b(?:MINUTA|INSPECCION(?:\s+OCULAR)?)\b\s*",
+                    rf"^.*?\b(?:{source_pattern})\b\s*",
                     "",
                     block["text"],
                     flags=re.I,
@@ -227,14 +235,14 @@ def extract_address(doc: fitz.Document) -> tuple[str, Optional[int]]:
 
 
 def detect_address_conflict(doc: fitz.Document, selected_address: str) -> str:
-    """La prioridad Minuta > Inspección > Matriz resuelve fuentes distintas."""
+    """La prioridad Registral > Minuta > Inspección resuelve fuentes distintas."""
     # La diferencia entre esas fuentes es esperada en los informes y queda
     # resuelta por la regla operativa de prioridad aplicada en extract_address.
     return ""
 
 
 def extract_tipo_inmueble(doc: fitz.Document, direccion: str) -> tuple[str, str, Optional[int]]:
-    labelled = re.compile(r"TIPO\s+(?:DE\s+)?INMUEBLE\D{0,50}(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT|CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR)", re.I)
+    labelled = re.compile(r"TIPO\s+(?:DE\s+)?INMUEBLE\D{0,50}(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT|CASA|CASA\s+HABITACION|VIVIENDA\s+UNIFAMILIAR|TERRENO(?:\s+SIN\s+CONSTRUCCIONES)?)", re.I)
     for page_index in range(min(len(doc), 6)):
         text = doc[page_index].get_text("text")
         if match := labelled.search(text):
@@ -252,10 +260,14 @@ def extract_tipo_inmueble(doc: fitz.Document, direccion: str) -> tuple[str, str,
             return "DEPARTAMENTO", collapse_spaces(match.group(0)), page_index + 1
         if match := RAW_CASA_RE.search(text):
             return "CASA", collapse_spaces(match.group(0)), page_index + 1
+        if match := RAW_TERRENO_RE.search(text):
+            return "CASA", collapse_spaces(match.group(0)), page_index + 1
     if RAW_DEPTO_RE.search(direccion):
         return "DEPARTAMENTO", "DEPARTAMENTO", None
     if RAW_CASA_RE.search(direccion):
         return "CASA", "CASA", None
+    if RAW_TERRENO_RE.search(direccion):
+        return "CASA", "TERRENO", None
     return "", "", None
 
 
@@ -680,8 +692,9 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
                 ocr_floors = extract_braschi_floor_table_ocr(doc)
                 if ocr_floors is not None:
                     pisos, sotanos, page_pisos = ocr_floors
-            # PRESTAMO y SEGURO INMUEBLE se obtienen después en PAD/IBM 3270.
-            # Cloud Run no toma ni infiere esos identificadores desde el PDF.
+            # Cloud Run no toma ni infiere PRESTAMO ni SEGURO INMUEBLE desde el
+            # PDF. En lotes con control, PRESTAMO llega después desde la
+            # proyección autorizada; los lotes heredados lo conservan vacío.
             prestamo = ""
             address_conflict = detect_address_conflict(doc, direccion)
             floors_conflict = detect_pisos_sotanos_conflict(doc)

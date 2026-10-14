@@ -17,9 +17,13 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
 
 - `tblParaProcesar` es la única cola para PAD/IBM.
 - `REVISION_IA` y `CONTROL` no se usan para operar el banco.
-- El contrato Cloud vigente permite `PRESTAMO` vacío. La futura preparación de
-  macro debe recibirlo desde la fila operativa autorizada, sin inferirlo del
-  PDF ni del 3270.
+- Los lotes con control reciben `PRESTAMO` desde la fila operativa autorizada;
+  se valida como texto de 20 dígitos y nunca se infiere del PDF ni del 3270.
+  Los lotes históricos sin control pueden conservarlo vacío, pero se derivan a
+  revisión y no quedan listos para la macro.
+- Reglas operativas confirmadas el 2026-10-14: dirección registral → minuta →
+  inspección ocular; terreno se clasifica como `CASA`; la falta de una
+  referencia de ubicación necesaria exige ampliar `DATOS`, sin inventar código.
 - Campos críticos sin evidencia, catálogos no autorizados o conflictos quedan
   en revisión.
 - La IA es excepcional, aporta evidencia y se revalida.
@@ -36,6 +40,7 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
 | `batch_worker.py` | Procesa solo objetos `CARGADO` de un manifiesto. |
 | `service.py` | Comparte clasificación por PDF y mantiene el endpoint ZIP heredado. |
 | `contracts/masivo.md` | Define el XLSX estable. |
+| `contracts/control-lote.md` | Define la proyección de hoja de control por PDF. |
 
 ## Estado operativo comprobado: Cloud → PAD
 

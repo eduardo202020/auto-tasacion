@@ -12,7 +12,9 @@ Fuentes de verdad:
 1. [`README.md`](README.md): visión de producto.
 2. [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md): modelo de dominio y rutas.
 3. [`contracts/masivo.md`](contracts/masivo.md): contrato inmutable del XLSX.
-4. [`cloud-run/README.md`](cloud-run/README.md): servicio y Job.
+4. [`contracts/control-lote.md`](contracts/control-lote.md): proyección de
+   hoja de control por PDF.
+5. [`cloud-run/README.md`](cloud-run/README.md): servicio y Job.
 
 ## Invariantes no negociables
 
@@ -23,9 +25,12 @@ Fuentes de verdad:
 - `tblParaProcesar` es la única cola operable para PAD/IBM 3270.
 - `REVISION_IA` contiene excepciones y `CONTROL` una fila por PDF.
 - Las primeras 24 columnas y el orden no cambian; `ID_CASO` permanece al final.
-- El contrato Cloud vigente permite `PRESTAMO` vacío; la ampliación pendiente
-  debe traerlo desde la fila operativa autorizada, sin inferirlo del PDF ni del
-  3270.
+- Los lotes con control reciben `PRESTAMO` de la fila operativa autorizada y
+  validada; nunca se infiere del PDF ni del 3270. Los lotes históricos sin
+  control pueden conservarlo vacío, pero se derivan a revisión.
+- Dirección: registral, luego minuta y finalmente inspección ocular. Terreno
+  se clasifica como `CASA`. Una referencia de ubicación no homologada se deriva
+  a revisión hasta ampliar `DATOS`; nunca se inventa un código.
 - Un dato crítico sin evidencia, código no autorizado o conflicto no entra a
   `PARA_PROCESAR`.
 - La IA es excepcional y su resultado se revalida.

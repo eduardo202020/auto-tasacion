@@ -8,13 +8,13 @@ para cargar datos contra IBM 3270.
 
 | Columna | Campo | Origen | Regla |
 |---|---|---|---|
-| A | PRESTAMO | PDF / 3270 | Solo número de 20 dígitos con evidencia. Si falta, queda vacío para que Power Automate/IBM 3270 lo complete. |
+| A | PRESTAMO | Hoja de control autorizada | En lotes con control, solo número de 20 dígitos validado antes de cargar el PDF. En lotes históricos sin control permanece vacío. Nunca se infiere del PDF ni del 3270. |
 | B | TIPO DE INMUEBLE | Tipo extraído | Etiqueta completa: `DEPARTAMENTO` o `CASA`. El código del bloque `MASIVO` del catálogo `DATOS` se conserva en `CONTROL`. |
 | C | VALOR DEL BIEN | Reservado | Se deja vacío por compatibilidad con la salida MASIVO histórica. |
-| D | MONEDA | Tasación | `PEN` si existe un valor elegido en soles; `USD` solo como respaldo si el PDF no contiene PEN. Solo se emiten códigos existentes en `DATOS`. |
+| D | MONEDA | Tasación | `PEN` si existe un valor elegido en soles; `USD` solo como respaldo si el PDF no contiene PEN. Solo se emiten códigos existentes en `DATOS`. En lotes con control debe coincidir con `MONEDA_OPERADOR`; una discrepancia va a revisión. |
 | E | IMPORTE | Tasación | Valor elegido en la moneda de salida; prioriza PEN y se emite como texto con miles y dos decimales, por ejemplo `735,096.00`. |
 | G:K | Dirección | Dirección del inmueble | Se estructura desde la dirección según minuta; inspección ocular es respaldo y dirección municipal/matriz el último recurso. El tipo de vía conserva la etiqueta completa, por ejemplo `CALLE`, `JIRON` o `AVENIDA`. |
-| M:O | Ubicación | Dirección del inmueble | Tipo, nombre de ubicación y distrito. El tipo conserva la etiqueta completa, por ejemplo `URBANIZACION`. Si no está homologado, UBICACION y UBICACION1 quedan vacíos; la geografía válida se conserva. |
+| M:O | Ubicación | Dirección del inmueble | Tipo, nombre de ubicación y distrito. El tipo conserva la etiqueta completa, por ejemplo `URBANIZACION`. Si una referencia de ubicación necesaria no está homologada, el caso va a revisión hasta ampliar `DATOS`; no se inventan códigos. |
 | P, R, T | Códigos geográficos | Catálogo | Solo se informa una coincidencia explícita. |
 | U | CLASE | Pisos | 1: hasta 4; 2: de 5 a 10; 3: más de 10. Se toma del bloque `CLASE INMUEBLE` de `DATOS`. |
 | V:W | PISOS, SOTANOS | PDF | Prioriza la tabla de características del inmueble; usa la descripción solo si no existe una tabla legible. La azotea no cuenta como piso ni incrementa PISOS. |
@@ -26,5 +26,7 @@ Las excepciones no llegan a `PARA_PROCESAR`: se registran en `REVISION_IA`.
 La evidencia por página, el origen del año, los códigos usados, el resultado
 de IA, el perfil, la empresa de tasación identificada por firma, el origen de
 esa identificación (`TEXTO_PDF`, `OCR_LOCAL` o `PERFIL_TECNICO`) y la ruta
-final se registran en `CONTROL`. `REVISION_IA` replica esos metadatos de perfil
-para revisar las excepciones. Ninguno modifica las columnas de `PARA_PROCESAR`.
+final se registran en `CONTROL`, junto con la proyección operativa autorizada
+(`ID_INGRESO`, seguro de origen, expediente y moneda de operador). `REVISION_IA`
+replica los campos necesarios para revisar las excepciones. Ninguno modifica
+las columnas de `PARA_PROCESAR` fuera de `PRESTAMO`.
