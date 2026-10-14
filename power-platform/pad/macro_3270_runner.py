@@ -255,8 +255,6 @@ def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: l
         phase = "configurar_excel"
         excel.Visible = settings.excel_visible
         excel.DisplayAlerts = False
-        excel.AskToUpdateLinks = False
-        excel.Calculation = -4105  # xlCalculationAutomatic
         phase = "abrir_copia_plantilla"
         workbook = excel.Workbooks.Open(str(workbook_path), UpdateLinks=0, ReadOnly=False, IgnoreReadOnlyRecommended=True)
         phase = "obtener_hoja_y_tabla_masivo"
