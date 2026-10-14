@@ -31,6 +31,48 @@ La llave de relación entre la fila y el PDF todavía debe formalizarse. Hasta
 definirla, ningún dato de la fila se puede asociar de forma segura a un
 `ID_CASO`.
 
+## Evidencia del conjunto histórico de diez casos
+
+Se inspeccionó en modo lectura el conjunto de diez PDFs y su libro final ya
+procesado. No se abrió Excel, no se ejecutó VBA, no se modificó ningún PDF y no
+se registraron valores de clientes.
+
+El libro contiene diez filas activas en `MASIVO` y las diez cumplen el formato
+de 20 caracteres en `PRESTAMO`. Las columnas que producen códigos de catálogo
+mantienen sus fórmulas. Las diez filas tienen un valor en `SEGURO INMUEBLE`, lo
+que confirma que es un ejemplo válido del contrato de salida de la macro.
+
+`N. INTERIOR` no está cargado en ese conjunto y `UBICACIÓN` / `UBICACIÓN 1`
+solo aparecen en parte de las filas. Dado que la macro completó el conjunto, no
+se deben convertir esos tres campos en bloqueos universales sin una regla de
+negocio posterior.
+
+El libro no contiene `ID_CASO`, nombre de PDF, vínculo de descarga, expediente,
+DNI ni nombre de cliente. Los PDFs tienen nombres genéricos. Por tanto, el
+conjunto prueba el formato final, pero no permite reconstruir por sí solo la
+relación entre una fila operativa y su PDF de origen.
+
+## Correlación mínima para el flujo nuevo
+
+Mientras el operador continúe descargando los PDFs antes de iniciar Power Apps,
+la entrada debe incluir un control de lote junto con esos archivos:
+
+1. Power Apps recibe una copia de la hoja operativa como control del lote y
+   registra un `ID_INGRESO` técnico por fila.
+2. Cada PDF se carga en `PDFs` con ese `ID_INGRESO` en el nombre. El código no
+   debe derivar la asociación por posición de fila, nombre de cliente ni el
+   enlace externo.
+3. Antes de crear el manifiesto, una prevalidación exige una fila y un PDF por
+   cada `ID_INGRESO`, sin duplicados. Luego relaciona el `item_id` del PDF con
+   esa referencia técnica.
+4. El manifiesto lleva solo la referencia técnica necesaria para la relación.
+   Los datos personales quedan en el control restringido; `PRESTAMO`, seguro y
+   moneda se incorporan al adaptador según necesidad y validación.
+
+La alternativa de usar `SEGURO` o `NRO_EXPEDIENTE` como llave requiere
+demostrar que el campo es único, estable y siempre está presente. Hasta esa
+confirmación, `ID_INGRESO` evita depender de identificadores de negocio.
+
 ## Flujo histórico observado
 
 ```mermaid
