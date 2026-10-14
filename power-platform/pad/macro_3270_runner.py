@@ -249,20 +249,28 @@ def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: l
     client = com_client()
     excel = None
     workbook = None
+    phase = "crear_instancia_excel"
     try:
         excel = client.DispatchEx("Excel.Application")
+        phase = "configurar_excel"
         excel.Visible = settings.excel_visible
         excel.DisplayAlerts = False
         excel.AskToUpdateLinks = False
         excel.Calculation = -4105  # xlCalculationAutomatic
+        phase = "abrir_copia_plantilla"
         workbook = excel.Workbooks.Open(str(workbook_path), UpdateLinks=0, ReadOnly=False, IgnoreReadOnlyRecommended=True)
+        phase = "obtener_hoja_y_tabla_masivo"
         sheet = workbook.Worksheets("MASIVO")
         table = sheet.ListObjects("Tabla164")
         last_row = len(rows) + 1
+        phase = "redimensionar_tabla_masivo"
         table.Resize(sheet.Range(sheet.Cells(1, 1), sheet.Cells(last_row, 25)))
+        phase = "limpiar_celdas_de_entrada"
         clear_non_formula_cells(sheet, last_row)
 
+        phase = "crear_traza_pad"
         trace = configure_trace_sheet(workbook, lot_id, source_sha, rows)
+        phase = "cargar_filas_para_procesar"
         for index, source in enumerate(rows, start=2):
             set_value(sheet, index, 1, as_code(source["PRESTAMO"]), "@")
             set_value(sheet, index, 2, clean(source["TIPO DE INMUEBLE"]).upper(), "@")
@@ -292,15 +300,19 @@ def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: l
             trace.Cells(index, 8).Value = utc_now()
             trace.Cells(index, 10).Value = source_sha
 
+        phase = "recalcular_y_guardar_libro"
         excel.CalculateFullRebuild()
         workbook.Save()
         if execute:
+            phase = "ejecutar_macro_3270"
             evidence_directory = workbook_path.parent / "evidencias_3270"
             evidence_directory.mkdir(parents=True, exist_ok=True)
             excel.Run(f"'{workbook.Name}'!{settings.macro_procedure}", 2, last_row, str(evidence_directory), settings.session_name)
+            phase = "guardar_resultado_macro_3270"
             excel.CalculateFull()
             workbook.Save()
 
+        phase = "leer_resultados_macro_3270"
         output: list[dict[str, Any]] = []
         for index, source in enumerate(rows, start=2):
             result = clean(sheet.Cells(index, 25).Value)
@@ -316,7 +328,7 @@ def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: l
     except Macro3270Error:
         raise
     except Exception as error:
-        raise Macro3270Error(f"EXCEL_O_MACRO_3270_ERROR:{type(error).__name__}") from error
+        raise Macro3270Error(f"EXCEL_O_MACRO_3270_ERROR:{phase}:{type(error).__name__}") from error
     finally:
         if workbook is not None:
             try:
