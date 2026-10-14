@@ -275,7 +275,7 @@ def normalize_manifest_item(value: Any) -> dict[str, Any]:
     forbidden = sorted(set(normalized) & CONTROL_FORBIDDEN_FIELDS)
     if forbidden:
         raise BatchError("La metadata de control no admite datos personales ni enlaces", code="CONTROL_SENSIBLE")
-    unsupported = set(normalized) - CONTROL_FIELDS - MANIFEST_FILE_FIELDS
+    unsupported = set(normalized) - set(CONTROL_FIELDS) - MANIFEST_FILE_FIELDS
     if unsupported:
         raise BatchError("La metadata de control contiene campos no autorizados", code="CONTROL_INVALIDO")
     return normalized
