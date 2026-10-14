@@ -25,6 +25,27 @@ piloto. El componente nuevo conserva el límite operativo:
 ALTA_SEGURO_INMUEBLE_SIMULADA → IBM_3270_MOCK
 ```
 
+## Revisión de compatibilidad con el resultado Cloud
+
+El 2026-10-13 se inspeccionó una segunda copia de la macro en modo lectura. El
+resultado confirma que no es un ejecutable directo de
+`Resultado_Final_<ID_LOTE>.xlsx`: los procedimientos trabajan sobre la hoja
+activa o sobre la primera hoja de un archivo elegido con diálogo, usan
+posiciones fijas y guardan el archivo de entrada. Las consultas de terminal
+además requieren que el préstamo ya esté disponible.
+
+`PARA_PROCESAR` usa un contrato distinto: `PRESTAMO` se ubica en la columna A,
+la correlación se mantiene con `ID_CASO` y el flujo Cloud puede entregarlo
+vacío. La integración futura requiere un adaptador que copie el libro a un
+directorio local de trabajo, haga mapeo por encabezados y publique una salida
+separada. No se debe automatizar el diálogo ni ejecutar el procedimiento
+heredado contra el archivo sincronizado de OneDrive.
+
+La revisión también encontró definiciones públicas repetidas de la función de
+conexión en módulos distintos. El proyecto VBA debe consolidarlas y compilarse
+antes de cualquier integración. Consulte la decisión completa en
+[`../../docs/operacion/revision-reglas-y-macro-2026-10-13.md`](../../docs/operacion/revision-reglas-y-macro-2026-10-13.md).
+
 ## Contrato de entrada observado
 
 La muestra

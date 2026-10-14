@@ -50,3 +50,17 @@ Excel interactivo, PCOMM e IBM 3270.
 
 Consulte la evidencia, expresiones lógicas y diagnóstico en
 [`operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
+
+## Reglas devueltas y macro heredada
+
+La respuesta del operador contiene cambios explícitos en prioridad de dirección,
+clasificación de terreno, condiciones de preparación para macro y valor de
+reconstrucción de `CASA`. Algunas filas siguen describiendo preguntas sin una
+decisión operativa; no deben convertirse en comportamiento implícito.
+
+La macro heredada fue inspeccionada estáticamente y no es compatible de forma
+directa con el resultado Cloud: usa columnas fijas, guarda sobre su entrada y
+requiere un préstamo antes de iniciar una consulta. Para una integración futura
+se necesita un adaptador con copia local, mapeo por encabezados y correlación
+por `ID_CASO`. Los detalles están en
+[`operacion/revision-reglas-y-macro-2026-10-13.md`](operacion/revision-reglas-y-macro-2026-10-13.md).

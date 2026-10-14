@@ -60,6 +60,12 @@ Conserve estos límites al modificar esta ruta:
   reintentos duplicados.
 - No se incorporan VBA, Excel interactivo, PCOMM, IBM 3270 ni operaciones
   bancarias sin una autorización y una validación E2E separadas.
+- La macro heredada no se invoca directamente sobre `Resultado_Final`. Usa un
+  esquema posicional distinto y guarda sobre su archivo de entrada. Primero se
+  debe diseñar un adaptador con copia local de trabajo, mapeo por encabezados,
+  fuente autorizada de `PRESTAMO` y trazabilidad por `ID_CASO`.
 
 La evidencia y el procedimiento de diagnóstico están en
 [`docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
+La revisión de las reglas devueltas por Operaciones y de la macro está en
+[`docs/operacion/revision-reglas-y-macro-2026-10-13.md`](docs/operacion/revision-reglas-y-macro-2026-10-13.md).
