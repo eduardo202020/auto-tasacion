@@ -30,6 +30,7 @@ from openpyxl import load_workbook
 
 
 FILENAME_PATTERN = re.compile(r"^Resultado_Final_(TAS-[A-Za-z0-9-]+)\.xlsx$", re.IGNORECASE)
+LOT_ID_PATTERN = re.compile(r"^TAS-[A-Za-z0-9-]+$", re.IGNORECASE)
 TERMINAL_STATES = {
     "SIMULADO_FINALIZADO",
     "SIMULADO_CON_INCIDENCIAS",
@@ -210,6 +211,8 @@ class Settings:
     suspicious_basements_threshold: int
     file_retry_attempts: int
     file_retry_base_seconds: float
+    input_sync_timeout_seconds: float
+    input_sync_poll_seconds: float
     synthetic_failure_case_ids: frozenset[str]
 
     @classmethod
@@ -271,6 +274,11 @@ class Settings:
             suspicious_basements_threshold=max(1, int(raw.get("suspicious_basements_threshold", 20))),
             file_retry_attempts=max(1, int(raw.get("file_retry_attempts", 5))),
             file_retry_base_seconds=max(0, float(raw.get("file_retry_base_seconds", 0.1))),
+            # A OneDrive-created event can reach the cloud flow before the BPO
+            # workstation has synchronized the XLSX. The lot-specific command
+            # waits only for its expected file, with a bounded timeout.
+            input_sync_timeout_seconds=max(0, float(raw.get("input_sync_timeout_seconds", 600))),
+            input_sync_poll_seconds=max(0.1, float(raw.get("input_sync_poll_seconds", 5))),
             synthetic_failure_case_ids=frozenset(
                 str(item) for item in raw.get("synthetic_failure_case_ids", [])
             ),
@@ -769,6 +777,37 @@ class LocalMonitor:
             processed.append({"file": candidate.name, "outcome": self._register_candidate(candidate, match.group(1))})
         return processed
 
+    def find_lot_result(self, lot_id: str) -> Path | None:
+        """Devuelve exclusivamente el resultado que corresponde al lote pedido.
+
+        ``run-lot`` se invoca desde un evento Cloud/PAD. No puede reutilizar
+        ``scan_once`` porque este analiza todos los Excel sincronizados y un
+        evento duplicado o retrasado no debe procesar un lote ajeno.
+        """
+        if LOT_ID_PATTERN.fullmatch(lot_id) is None:
+            raise ValueError("id_lote debe tener el formato TAS-<identificador>")
+        self.settings.input_directory.mkdir(parents=True, exist_ok=True)
+        for candidate in self.settings.input_directory.iterdir():
+            if not candidate.is_file() or candidate.name.startswith("~$"):
+                continue
+            match = FILENAME_PATTERN.fullmatch(candidate.name)
+            if match is not None and match.group(1).casefold() == lot_id.casefold():
+                return candidate
+        return None
+
+    def wait_for_lot_result(self, lot_id: str) -> tuple[Path | None, str]:
+        """Espera la sincronización de un único XLSX y confirma su estabilidad."""
+        deadline = time.monotonic() + self.settings.input_sync_timeout_seconds
+        while True:
+            candidate = self.find_lot_result(lot_id)
+            if candidate is not None and self.wait_until_stable(candidate):
+                return candidate, "LISTO"
+            reason = "AUN_COPIANDO" if candidate is not None else "NO_ENCONTRADO"
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None, reason
+            time.sleep(min(self.settings.input_sync_poll_seconds, remaining))
+
     def _register_candidate(self, source: Path, lot_id: str) -> str:
         digest = sha256_file(source)
         destination = self.settings.processing_directory / safe_name(lot_id) / f"{digest}.xlsx"
@@ -1037,6 +1076,73 @@ def command_run_cycle(settings: Settings) -> int:
     return 0 if summary["technical_errors"] == 0 else 1
 
 
+def run_lot(settings: Settings, lot_id: str) -> dict[str, str]:
+    """Procesa solamente el Excel final asociado a ``lot_id``.
+
+    Este es el punto de entrada para el Cloud Flow que recibe un evento de
+    creación de ``Resultado_Final_<ID_LOTE>.xlsx``. Espera de forma acotada la
+    sincronización local de OneDrive y conserva la misma reserva atómica
+    ``(id_lote, SHA-256)`` que usa el ciclo manual.
+    """
+    monitor = LocalMonitor(settings)
+    try:
+        source, availability = monitor.wait_for_lot_result(lot_id)
+    except ValueError:
+        return {
+            "id_lote": lot_id,
+            "status": "ID_LOTE_INVALIDO",
+            "outcome": "invalid_lot_id",
+        }
+    if source is None:
+        return {
+            "id_lote": lot_id,
+            "status": "ESPERA_SINCRONIZACION_AGOTADA",
+            "outcome": availability.lower(),
+        }
+
+    match = FILENAME_PATTERN.fullmatch(source.name)
+    assert match is not None  # find_lot_result already enforces this invariant.
+    canonical_lot_id = match.group(1)
+    digest = sha256_file(source)
+    detection_outcome = monitor._register_candidate(source, canonical_lot_id)
+    store = StateStore(settings)
+    job_path = store.job_path(canonical_lot_id, digest)
+
+    if job_path.exists():
+        status, job_outcome = Mock3270Simulator(settings).run_job(job_path)
+    else:
+        records = [
+            item for item in store.lot_records(canonical_lot_id)
+            if item.get("sha256") == digest
+        ]
+        if not records:
+            status, job_outcome = "ERROR_TECNICO", "state_not_found"
+        else:
+            status = str(records[0].get("status", "ERROR_TECNICO"))
+            job_outcome = "terminal" if status in TERMINAL_STATES else "job_not_available"
+
+    return {
+        "id_lote": canonical_lot_id,
+        "status": status,
+        "outcome": job_outcome,
+        "detection": detection_outcome,
+    }
+
+
+def command_run_lot(settings: Settings, lot_id: str) -> int:
+    result = run_lot(settings, lot_id)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    expected_terminal = {
+        "SIMULADO_FINALIZADO",
+        "SIMULADO_CON_INCIDENCIAS",
+        "REVISION_MANUAL",
+        "ERROR_ESTRUCTURAL",
+    }
+    # A terminal data-quality outcome is not retried by Cloud/PAD. Timeouts,
+    # source changes and technical storage failures remain observable failures.
+    return 0 if result["status"] in expected_terminal else 1
+
+
 def command_reprocess(settings: Settings, lot_id: str, digest: str, reason: str) -> int:
     record = StateStore(settings).reprocess(lot_id, digest, reason)
     print(json.dumps({"status": record["status"], "execution_id": record["execution_id"]}, ensure_ascii=False))
@@ -1055,6 +1161,11 @@ def main() -> int:
         "run-cycle",
         help="Detecta XLSX y ejecuta una vez todos los trabajos locales pendientes en modo simulación.",
     )
+    lot_parser = subcommands.add_parser(
+        "run-lot",
+        help="Espera y procesa solamente Resultado_Final_<ID_LOTE>.xlsx en modo simulación.",
+    )
+    lot_parser.add_argument("--lot", required=True)
     reprocess_parser = subcommands.add_parser("reprocess")
     reprocess_parser.add_argument("--lot", required=True)
     reprocess_parser.add_argument("--sha256", required=True)
@@ -1067,6 +1178,8 @@ def main() -> int:
         return command_run_job(settings, arguments.job)
     if arguments.command == "run-cycle":
         return command_run_cycle(settings)
+    if arguments.command == "run-lot":
+        return command_run_lot(settings, arguments.lot)
     return command_reprocess(settings, arguments.lot, arguments.sha256, arguments.reason)
 
 

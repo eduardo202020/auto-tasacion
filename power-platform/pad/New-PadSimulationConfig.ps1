@@ -51,6 +51,8 @@ if ($runtimeFull.StartsWith($inputFull + '\', [System.StringComparison]::Ordinal
     suspicious_basements_threshold = 20
     file_retry_attempts = 5
     file_retry_base_seconds = 0.1
+    input_sync_timeout_seconds = 600
+    input_sync_poll_seconds = 5
     synthetic_failure_case_ids = @()
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $OutputPath -Encoding utf8
 

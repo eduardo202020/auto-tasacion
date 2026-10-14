@@ -59,6 +59,43 @@ No agregue acciones PAD de **Terminal**, **Ejecutar macro de Excel**, PCOMM,
 autECL, navegador o emulación 3270. No configure conexiones de nube en este
 piloto.
 
+## Integración automática Cloud → PAD por `ID_LOTE`
+
+La integración no usa un monitor global ni un bucle PAD. El Cloud Flow que
+recibe la creación de `Resultado_Final_<ID_LOTE>.xlsx` entrega únicamente el
+identificador del lote al Desktop Flow. PAD espera la sincronización de ese
+archivo, valida el contrato y lo procesa de manera idempotente.
+
+1. En la ventana **Variables** de PAD, cree una variable de **entrada**:
+   - nombre: `IdLote`;
+   - tipo: `Texto`;
+   - valor predeterminado: vacío.
+2. Mantenga `InicializarLote` para cargar `RutaConfiguracion`.
+3. En `ValidarExcel`, reemplace el comando global `monitor --once` por:
+
+   ```text
+   "<instalación>\power-platform\pad\pad_simulator.py" --config "%RutaConfiguracion%" run-lot --lot "%IdLote%"
+   ```
+
+   La ruta de la aplicación sigue siendo el `python.exe` del entorno virtual
+   local. Configure **Esperar a que finalice la aplicación**.
+4. En `Main`, deje solo `InicializarLote` seguido por `ValidarExcel`. No llame
+   `PrepararRegistros`: ese subflujo procesa todos los JSON pendientes y no es
+   válido para la activación automática por lote.
+5. Guarde y publique el Desktop Flow. El diseñador Cloud mostrará `IdLote`
+   como parámetro de la acción **Ejecutar un flujo creado con Power Automate
+   para escritorio**.
+
+El Cloud Flow se debe activar solo para el nombre esperado, obtener el lote
+con `replace(replace(<Nombre>, 'Resultado_Final_', ''), '.xlsx', '')` y pasar
+ese valor a `IdLote`. La carpeta de entrada requiere el folderId de la raíz
+de resultados; ese ID se suministra en el despliegue, no se versiona en Git.
+
+`run-lot` espera hasta diez minutos a la sincronización de OneDrive. Una
+ausencia, archivo aún copiándose, cambio de origen o fallo técnico termina la
+ejecución con error observable. Los estados terminales de validación y una
+reinvocación idempotente no reprocesan registros.
+
 ## Preparar NTTD-MKEY sin Git
 
 En desarrollo, desde un commit revisado, genere un paquete local:

@@ -48,6 +48,8 @@ class PadSimulationTestCase(unittest.TestCase):
             "processing_lease_seconds": 60,
             "suspicious_floors_threshold": 100,
             "suspicious_basements_threshold": 20,
+            "input_sync_timeout_seconds": 0,
+            "input_sync_poll_seconds": 0.01,
             "synthetic_failure_case_ids": [],
         }
         value.update(overrides)
@@ -200,6 +202,61 @@ class PadSimulationTestCase(unittest.TestCase):
                 if event["event"] == "ALTA_SEGURO_INMUEBLE_SIMULADA"
             ])
             self.assertEqual(second_count, first_count)
+
+    def test_run_lot_processes_only_the_requested_lot(self) -> None:
+        self.create_workbook("TAS-TARGET")
+        self.create_workbook("TAS-OTHER", rows=[self.valid_values("TAS-OTHER-CASE")])
+
+        result = pad.run_lot(self.settings, "TAS-TARGET")
+
+        self.assertEqual(result["id_lote"], "TAS-TARGET")
+        self.assertEqual(result["status"], "SIMULADO_FINALIZADO")
+        self.assertEqual(result["outcome"], "claimed")
+        self.assertEqual(result["detection"], "VALIDADO")
+        self.assertEqual(self.read_state("TAS-TARGET")["status"], "SIMULADO_FINALIZADO")
+        self.assertEqual(pad.StateStore(self.settings).lot_records("TAS-OTHER"), [])
+
+    def test_run_lot_duplicate_event_is_idempotent(self) -> None:
+        self.create_workbook("TAS-EVENT")
+        first = pad.run_lot(self.settings, "TAS-EVENT")
+        first_operations = [
+            event for event in self.read_state("TAS-EVENT")["events"]
+            if event["event"] == "ALTA_SEGURO_INMUEBLE_SIMULADA"
+        ]
+
+        duplicate = pad.run_lot(self.settings, "TAS-EVENT")
+
+        second_operations = [
+            event for event in self.read_state("TAS-EVENT")["events"]
+            if event["event"] == "ALTA_SEGURO_INMUEBLE_SIMULADA"
+        ]
+        self.assertEqual(first["status"], "SIMULADO_FINALIZADO")
+        self.assertEqual(duplicate["status"], "SIMULADO_FINALIZADO")
+        self.assertEqual(duplicate["outcome"], "terminal")
+        self.assertEqual(duplicate["detection"], "duplicate")
+        self.assertEqual(len(first_operations), len(second_operations))
+
+    def test_run_lot_reports_a_bounded_sync_timeout_without_scanning_other_lots(self) -> None:
+        self.create_workbook("TAS-EXISTS")
+
+        result = pad.run_lot(self.settings, "TAS-MISSING")
+
+        self.assertEqual(result, {
+            "id_lote": "TAS-MISSING",
+            "status": "ESPERA_SINCRONIZACION_AGOTADA",
+            "outcome": "no_encontrado",
+        })
+        self.assertEqual(pad.StateStore(self.settings).lot_records("TAS-EXISTS"), [])
+        self.assertEqual(pad.command_run_lot(self.settings, "TAS-MISSING"), 1)
+
+    def test_run_lot_rejects_invalid_lot_id_without_touching_input(self) -> None:
+        self.create_workbook("TAS-VALID")
+
+        result = pad.run_lot(self.settings, "../../TAS-INVALID")
+
+        self.assertEqual(result["status"], "ID_LOTE_INVALIDO")
+        self.assertEqual(result["outcome"], "invalid_lot_id")
+        self.assertEqual(pad.StateStore(self.settings).lot_records("TAS-VALID"), [])
 
     def test_duplicate_event_does_not_create_a_second_state_or_job(self) -> None:
         self.create_workbook("TAS-DUP")

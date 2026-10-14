@@ -136,6 +136,34 @@ con la reserva idempotente existente:
 power-platform/pad/.venv/Scripts/python.exe power-platform/pad/pad_simulator.py --config power-platform/pad/config.development.json run-cycle
 ```
 
+## Invocación automática por lote desde Cloud Flow
+
+El punto de entrada para la integración Cloud → PAD es `run-lot`. Recibe solo
+el identificador que Cloud extrajo de `Resultado_Final_<ID_LOTE>.xlsx` y nunca
+recorre los otros Excel o trabajos pendientes:
+
+```powershell
+power-platform/pad/.venv/Scripts/python.exe power-platform/pad/pad_simulator.py `
+  --config power-platform/pad/config.local.json run-lot --lot TAS-<ID_LOTE>
+```
+
+Cuando el evento Cloud llega antes que OneDrive sincronice el libro en la PC
+BPO, `run-lot` espera únicamente ese archivo durante
+`input_sync_timeout_seconds` (600 segundos por defecto) y exige la misma
+comprobación de estabilidad de tamaño y fecha antes de copiarlo. Si se agota
+el plazo, devuelve `ESPERA_SINCRONIZACION_AGOTADA` y falla; no escanea ni
+procesa otro lote.
+
+La reserva durable `(id_lote, SHA-256)` conserva la idempotencia ante eventos
+duplicados. Un segundo llamado sobre el mismo Excel devuelve el estado terminal
+sin crear operaciones simuladas adicionales.
+
+Para conectarlo al Desktop Flow, declare en PAD una variable de entrada de
+texto llamada `IdLote` y haga que la acción **Ejecutar aplicación** ejecute
+`run-lot --lot "%IdLote%"`. El subflujo `PrepararRegistros` no debe seguirse
+invocando desde `Main`, porque su recorrido por `pendientes` es global y se
+conserva solo como herramienta de diagnóstico manual.
+
 Para iniciarlo continuamente fuera de PAD:
 
 ```powershell
