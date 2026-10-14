@@ -82,6 +82,9 @@ diálogos antes de que PAD pueda usarla.
 
 La evidencia y el procedimiento de diagnóstico están en
 [`docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
+La ejecución controlada de diez PDFs desde Canvas, con su hoja de control y
+PAD en BPO, está registrada en
+[`docs/operacion/e2e-control-10-pdfs-2026-10-14.md`](docs/operacion/e2e-control-10-pdfs-2026-10-14.md).
 La revisión de las reglas devueltas por Operaciones y de la macro está en
 [`docs/operacion/revision-reglas-y-macro-2026-10-13.md`](docs/operacion/revision-reglas-y-macro-2026-10-13.md).
 El contrato del último tramo y sus bloqueos están en

@@ -58,6 +58,14 @@ Excel interactivo, PCOMM e IBM 3270.
 Consulte la evidencia, expresiones lógicas y diagnóstico en
 [`operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
 
+El 2026-10-14 se completó además un lote controlado de diez PDFs desde Canvas
+App. La hoja de control aportó `PRESTAMO` y `MONEDA_OPERADOR`; Cloud Run creó
+el XLSX contractual en OneDrive y el evento activó PAD en BPO. El resultado
+separó cuatro registros en `PARA_PROCESAR` y seis en `REVISION_IA`; PAD produjo
+cuatro operaciones simuladas y seis incidencias de revisión, sin errores
+técnicos ni ejecución de macro o 3270. La evidencia está en
+[`operacion/e2e-control-10-pdfs-2026-10-14.md`](operacion/e2e-control-10-pdfs-2026-10-14.md).
+
 ## Reglas devueltas y macro heredada
 
 La respuesta del operador contiene cambios explícitos en prioridad de dirección,
