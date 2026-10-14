@@ -12,6 +12,12 @@ idempotencia, los bloqueos, el procesamiento de trabajos y los reportes se
 mantienen en `pad_simulator.py`; PAD no replica reglas de negocio ni abre IBM
 3270, Excel o VBA.
 
+El 2026-10-13 se comprobó el recorrido Cloud → PAD en `SIMULACION`: un Excel
+final nuevo activó el flujo Cloud, el Desktop Flow recibió `IdLote` y el
+simulador terminó el lote sin errores técnicos. Consulte el alcance, las
+expresiones lógicas y el diagnóstico en
+[`../../docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](../../docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
+
 ## Configuración local por equipo
 
 Las rutas se declaran en

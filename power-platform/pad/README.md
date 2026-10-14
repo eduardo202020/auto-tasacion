@@ -173,8 +173,10 @@ Para iniciarlo continuamente fuera de PAD:
 
 El flujo de escritorio se documenta en
 [MANUAL_SOLUTION_INTEGRATION.md](MANUAL_SOLUTION_INTEGRATION.md). La creación
-del componente PAD dentro de la solución sigue siendo una acción manual y no
-queda declarada como completada hasta verlo en `autoTasacion`.
+manual del componente PAD, su publicación y el recorrido automático Cloud →
+PAD por `IdLote` fueron comprobados el 2026-10-13 en `SIMULACION`. La evidencia
+operativa, sus límites y el diagnóstico están en
+[`../../docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](../../docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
 
 ## Salidas locales
 

@@ -34,3 +34,19 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
 | `batch_worker.py` | Procesa solo objetos `CARGADO` de un manifiesto. |
 | `service.py` | Comparte clasificación por PDF y mantiene el endpoint ZIP heredado. |
 | `contracts/masivo.md` | Define el XLSX estable. |
+
+## Estado operativo comprobado: Cloud → PAD
+
+El 2026-10-13 se validó, en `SIMULACION`, la integración que recibe un
+`Resultado_Final_TAS-<ID_LOTE>.xlsx` nuevo en OneDrive, extrae su identificador
+en `auto-tasacion-activar-pad`, invoca el Desktop Flow atendido y ejecuta
+`run-lot` para ese único lote. La ejecución termina con estado durable y
+reportes locales, sin modificar el XLSX de origen.
+
+El runtime técnico es local al equipo de PAD. No se sincronizan estados, locks
+ni logs con OneDrive. La simultaneidad del flujo Cloud es uno y la idempotencia
+del simulador usa `(id_lote, SHA-256)`. El alcance termina antes de macro, VBA,
+Excel interactivo, PCOMM e IBM 3270.
+
+Consulte la evidencia, expresiones lógicas y diagnóstico en
+[`operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](operacion/e2e-cloud-pad-simulacion-2026-10-13.md).

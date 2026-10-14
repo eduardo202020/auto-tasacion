@@ -40,3 +40,26 @@ Fuentes de verdad:
 
 No desplegar sin autorización explícita. No guardar PDFs productivos, secretos,
 URLs firmadas completas ni contenido documental en Git o logs.
+
+## Límite operativo comprobado: Cloud → PAD
+
+La integración automática Cloud → PAD está validada en `SIMULACION` hasta el
+estado local y los reportes del lote. El flujo Cloud filtra exclusivamente
+`Resultado_Final_TAS-<ID_LOTE>.xlsx`, entrega solo `IdLote` al Desktop Flow y
+PAD ejecuta `run-lot` para ese lote; no se usa un monitor global durante esta
+activación.
+
+Conserve estos límites al modificar esta ruta:
+
+- `Main` del Desktop Flow invoca `InicializarLote` y `ValidarExcel` solamente.
+  `PrepararRegistros` queda reservado para diagnóstico manual.
+- El runtime técnico (estados, locks, logs y reportes) es local y no se mueve a
+  OneDrive. Una necesidad de compartir reportes requiere una copia explícita a
+  una carpeta de salida dedicada.
+- La idempotencia durable `(id_lote, SHA-256)` se mantiene ante eventos o
+  reintentos duplicados.
+- No se incorporan VBA, Excel interactivo, PCOMM, IBM 3270 ni operaciones
+  bancarias sin una autorización y una validación E2E separadas.
+
+La evidencia y el procedimiento de diagnóstico están en
+[`docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
