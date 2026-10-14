@@ -65,7 +65,16 @@ Conserve estos límites al modificar esta ruta:
   debe diseñar un adaptador con copia local de trabajo, mapeo por encabezados,
   fuente autorizada de `PRESTAMO` y trazabilidad por `ID_CASO`.
 
+La plantilla MASIVO revisada después contiene una macro orientada a sus
+columnas `A:Y`, pero tampoco es un ejecutable directo del resultado Cloud:
+`Y` es su salida de seguro y Cloud usa esa posición para `ID_CASO`. El
+adaptador debe crear una copia `.xlsm` local, conservar la trazabilidad fuera
+de `A:Y`, exigir un préstamo autorizado de 20 caracteres y eliminar sus
+diálogos antes de que PAD pueda usarla.
+
 La evidencia y el procedimiento de diagnóstico están en
 [`docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md`](docs/operacion/e2e-cloud-pad-simulacion-2026-10-13.md).
 La revisión de las reglas devueltas por Operaciones y de la macro está en
 [`docs/operacion/revision-reglas-y-macro-2026-10-13.md`](docs/operacion/revision-reglas-y-macro-2026-10-13.md).
+El contrato del último tramo y sus bloqueos están en
+[`docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md).

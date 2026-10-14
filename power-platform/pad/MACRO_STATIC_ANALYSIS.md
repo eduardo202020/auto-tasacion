@@ -58,6 +58,26 @@ El piloto toma ese contrato versionado como fuente de verdad. No interpreta
 instrucciones ni lógica implícita dentro de la macro como un permiso para usar
 PCOMM, macros, automatización de Excel o conexiones bancarias.
 
+## Plantilla MASIVO observada el 2026-10-14
+
+Una segunda plantilla `.xlsm` revisada en modo lectura contiene `MASIVO`,
+`PRINT_PANTALLAS` y `DATOS`. El botón **EJECUTAR** llama a `segHipoMasiv` y el
+botón **LIMPIAR** a `Borrar_filas_Tabla_Masivo`. La tabla de entrada es
+`Tabla164` en `A:Y`; el procedimiento exige un préstamo de 20 caracteres en
+`A` y escribe el seguro o el mensaje de pantalla en `Y`.
+
+La plantilla calcula códigos de `MASIVO`, vía, ubicación, territorio y clase
+con fórmulas locales. Cloud ya entrega la mayor parte de los valores necesarios
+en posiciones compatibles, pero deja `PRESTAMO` vacío y usa `Y` para
+`ID_CASO`. Por ello no se abre ni se ejecuta sobre `Resultado_Final`.
+
+La versión observada usa diálogos para elegir el rango de filas, referencias
+`Cells` sin calificar, una lectura fija de `B2` durante el bucle y una ruta fija
+para capturas. Además no tiene firma digital y mantiene una referencia externa
+heredada. La integración requiere una copia local versionada, una macro sin
+diálogos y una traza separada por `ID_CASO`; el diseño completo está en
+[`../../docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](../../docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md).
+
 ## Siguiente paso para una integración real
 
 Cuando exista autorización específica, se debe traducir cada acción bancaria

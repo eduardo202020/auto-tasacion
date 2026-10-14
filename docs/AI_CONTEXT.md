@@ -64,3 +64,12 @@ requiere un préstamo antes de iniciar una consulta. Para una integración futur
 se necesita un adaptador con copia local, mapeo por encabezados y correlación
 por `ID_CASO`. Los detalles están en
 [`operacion/revision-reglas-y-macro-2026-10-13.md`](operacion/revision-reglas-y-macro-2026-10-13.md).
+
+La plantilla MASIVO revisada el 2026-10-14 aclara el contrato del tramo final:
+la macro opera `A:Y`, exige un `PRESTAMO` de 20 caracteres y escribe su
+resultado en `Y`. Como Cloud usa `Y` para `ID_CASO` y entrega un `.xlsx`, PAD
+debe construir una copia local `.xlsm` mediante un adaptador, conservar la
+traza fuera de `A:Y` y ejecutar una macro sin diálogos. No se inicia PCOMM ni
+VBA hasta resolver la fuente autorizada de préstamo y los requisitos de la
+plantilla. Consulte
+[`operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](operacion/contrato-cloud-a-macro-3270-2026-10-14.md).
