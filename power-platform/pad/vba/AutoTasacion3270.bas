@@ -1,9 +1,9 @@
-ï»¿Attribute VB_Name = "AutoTasacion3270"
+Attribute VB_Name = "AutoTasacion3270"
 Option Explicit
 
-' MÃ³dulo de ejecuciÃ³n por lote para la plantilla MASIVO.
-' Requiere que la clase CONEXION de la plantilla estÃ© disponible y que PCOMM
-' tenga la sesiÃ³n indicada ya autenticada en la pantalla de espera.
+' Módulo de ejecución por lote para la plantilla MASIVO.
+' Requiere que la clase CONEXION de la plantilla esté disponible y que PCOMM
+' tenga la sesión indicada ya autenticada en la pantalla de espera.
 
 Public Sub EjecutarLote3270(ByVal primeraFila As Long, ByVal ultimaFila As Long, _
                             ByVal carpetaEvidencia As String, ByVal nombreSesion As String)
@@ -38,7 +38,7 @@ Private Sub ValidarRangoPad(ByVal ws As Worksheet, ByVal primeraFila As Long, By
 
     ultimaConDato = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
     If primeraFila < 2 Or ultimaFila < primeraFila Or ultimaFila > ultimaConDato Then
-        Err.Raise vbObjectError + 3270, "EjecutarLote3270", "Rango de filas invÃ¡lido para MASIVO."
+        Err.Raise vbObjectError + 3270, "EjecutarLote3270", "Rango de filas inválido para MASIVO."
     End If
 End Sub
 
