@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import timedelta
 import hmac
 import json
+import logging
 import os
 import re
 from typing import Any, Callable
@@ -60,6 +61,8 @@ _DELIVERY_PATH = re.compile(r"^/v1/lotes/([^/]+)/entrega$")
 _ORCHESTRATION_CLAIM_PATH = re.compile(r"^/v1/lotes/([^/]+)/orquestacion/reclamar$")
 _ORCHESTRATION_RENEW_PATH = re.compile(r"^/v1/lotes/([^/]+)/orquestacion/renovar$")
 _ORCHESTRATION_RELEASE_PATH = re.compile(r"^/v1/lotes/([^/]+)/orquestacion/liberar$")
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _json_response(payload: dict[str, Any], status: int = 200) -> Response:
@@ -606,5 +609,14 @@ def handle_request(
     except BatchError as error:
         return _error_response(error)
     except Exception:
+        # Do not include the request body here: it contains the OneDrive file
+        # identifiers.  The traceback is kept in Cloud Run only so operational
+        # configuration failures can be diagnosed without exposing it to PAD,
+        # Power Apps or the operator.
+        LOGGER.exception(
+            "Error interno al procesar el lote: method=%s path=%s",
+            request.method,
+            request.path,
+        )
         return _json_response({"status": "error", "codigo": "ERROR_INTERNO", "mensaje": "Error interno al procesar el lote"}, 500)
 
