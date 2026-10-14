@@ -29,3 +29,6 @@ power-platform/pad/config.local.json
 
 # Paquetes locales generados para instalar PAD sin Git.
 artifacts/
+
+# Herramientas temporales de análisis local.
+.tmp/

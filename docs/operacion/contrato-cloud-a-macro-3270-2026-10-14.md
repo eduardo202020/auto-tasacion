@@ -1,7 +1,8 @@
 # Contrato del resultado Cloud a la plantilla MASIVO
 
 **Fecha:** 2026-10-14
-**Estado:** análisis estático; no se ejecutó Excel, VBA, PCOMM ni IBM 3270
+**Estado:** contrato implementado en el adaptador local; pendiente instalar la
+plantilla aprobada y realizar la primera ejecución atendida en BPO.
 
 ## Alcance y evidencia
 
@@ -132,6 +133,8 @@ la plantilla maestra sobre OneDrive durante la ejecución.
 7. Validar en una sesión `A` de prueba, ya autenticada y en espera, con datos
    sintéticos antes de operar filas reales.
 
-Hasta completar esos puntos, el alcance validado sigue siendo Cloud → PAD en
-`SIMULACION`. No hay autorización ni evidencia para ejecutar VBA, PCOMM o IBM
-3270 en esta integración.
+El adaptador local y el módulo VBA no interactivo se versionaron el 2026-10-14.
+La instalación de la plantilla y el cambio concreto de PAD están en
+[`ejecucion-macro-3270-pad-2026-10-14.md`](ejecucion-macro-3270-pad-2026-10-14.md).
+La evidencia operativa seguirá siendo Cloud → PAD en `SIMULACION` hasta que se
+realice y registre la primera ejecución atendida de la macro.

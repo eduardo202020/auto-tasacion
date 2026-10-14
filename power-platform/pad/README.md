@@ -192,3 +192,14 @@ OneDrive compartido y del conjunto de entrada:
 - `errores/`: trabajos que terminaron con error técnico.
 
 No se producen resultados bancarios ni cambios sobre el XLSX de origen.
+
+## Ejecución real mediante macro y 3270
+
+Para el tramo de presentación `Resultado_Final → MASIVO → PCOMM`, use
+`macro_3270_runner.py` y la plantilla local preparada con
+`AutoTasacion3270.EjecutarLote3270`. El procedimiento de instalación de la
+plantilla, configuración de PAD y ubicación de resultados está en
+[`../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md`](../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).
+
+El simulador se conserva para diagnóstico y para lotes anteriores. El Desktop
+Flow de presentación debe invocar el ejecutor de macro, no `pad_simulator.py`.

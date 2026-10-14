@@ -25,6 +25,7 @@ altera el contrato de `PARA_PROCESAR` sin aprobación operativa.
 | F18 | Stepper visual del lote | Implementado en fuente; pendiente de publicacion Canvas | `POLLING.md` define cinco pasos, colores de avance/error y un Timer visual sin llamadas adicionales. |
 | F19 | Tiempo persistente de lote | Implementado en fuente; pendiente de despliegue | El manifiesto guarda inicio y fin inmutables; consulta tipada expone fechas y segundos. |
 | F20 | Orquestación de lote por evento | Implementado en la rama de migración; despliegue de ruta pendiente | La definición preparada usa un control pequeño en `/automatizaciones-jhglazar/auto-tasaciones/Controles`, claim GCS, carga serial, Job, backoff y entrega idempotente. La auditoría remota del 2026-10-13 confirmó que el flujo publicado aún usa `/auto-tasaciones`; ver [auditoría de migración](operacion/auditoria-migracion-onedrive-2026-10-13.md). |
+| F21 | Adaptación final MASIVO y 3270 | Implementado localmente; E2E BPO pendiente | PAD puede copiar una plantilla `.xlsm`, cargar las filas de `PARA_PROCESAR`, preservar `ID_CASO` en `TRAZA_PAD` e invocar el módulo sin diálogos. Falta instalar la plantilla en BPO y registrar su primera ejecución atendida. |
 
 ## Ciclo de alta seguro
 

@@ -65,8 +65,10 @@ Conserve estos límites al modificar esta ruta:
   una carpeta de salida dedicada.
 - La idempotencia durable `(id_lote, SHA-256)` se mantiene ante eventos o
   reintentos duplicados.
-- No se incorporan VBA, Excel interactivo, PCOMM, IBM 3270 ni operaciones
-  bancarias sin una autorización y una validación E2E separadas.
+- La integración de VBA, Excel, PCOMM e IBM 3270 está autorizada por el
+  responsable para cerrar la presentación. Su evidencia sigue pendiente hasta
+  registrar la primera ejecución atendida en BPO; no se declara completa antes
+  de esa evidencia.
 - La macro heredada no se invoca directamente sobre `Resultado_Final`. Usa un
   esquema posicional distinto y guarda sobre su archivo de entrada. Primero se
   debe diseñar un adaptador con copia local de trabajo, mapeo por encabezados,
@@ -91,3 +93,6 @@ El contrato del último tramo y sus bloqueos están en
 [`docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md).
 El flujo corregido desde la entrada del operador hasta la macro está en
 [`docs/operacion/flujo-operador-cloud-macro-2026-10-14.md`](docs/operacion/flujo-operador-cloud-macro-2026-10-14.md).
+La instalación de la plantilla y el cambio de Desktop Flow para el tramo
+final están en
+[`docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md`](docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).

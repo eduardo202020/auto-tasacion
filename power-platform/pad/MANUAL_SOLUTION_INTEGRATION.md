@@ -126,3 +126,8 @@ Use datos sintéticos. La prueba local con un Excel real solo procede después d
 la revisión del operador. El flujo nunca se presenta como integrado hasta que
 el usuario confirme que aparece como **Desktop flow** dentro de
 **Soluciones → autoTasacion → Objetos**.
+
+> Para la ruta de presentación con Excel, VBA y PCOMM use
+> [`ejecucion-macro-3270-pad-2026-10-14.md`](../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).
+> Este documento conserva exclusivamente la configuración histórica de
+> `SIMULACION`.

@@ -90,3 +90,12 @@ resolver los requisitos de la plantilla. Consulte
 [`operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](operacion/contrato-cloud-a-macro-3270-2026-10-14.md).
 El flujo completo corregido está en
 [`operacion/flujo-operador-cloud-macro-2026-10-14.md`](operacion/flujo-operador-cloud-macro-2026-10-14.md).
+
+## Preparación final MASIVO y 3270
+
+El adaptador local y el módulo VBA no interactivo para cerrar el tramo
+`Resultado_Final → MASIVO → PCOMM` están versionados. El módulo recibe un rango
+explícito, elimina los diálogos del libro heredado y guarda `ID_CASO` en
+`TRAZA_PAD`. Solo opera filas de `PARA_PROCESAR`. La instalación en BPO y el
+cambio de comando de PAD están en
+[`operacion/ejecucion-macro-3270-pad-2026-10-14.md`](operacion/ejecucion-macro-3270-pad-2026-10-14.md).
