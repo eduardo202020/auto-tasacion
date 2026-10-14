@@ -213,7 +213,7 @@ function Get-ControlToken {
         # Secret Manager. The placeholder is only serialized in memory/output.
         return '__LOCAL_PLAN_CONTROL_TOKEN__'
     }
-    $value = (& $Gcloud secrets versions access 2 --secret 'batch-control-api-token' --project 'project-fe2e4c6a-b528-4bcf-aa1').Trim()
+    $value = (& $Gcloud secrets versions access latest --secret 'batch-control-api-token' --project 'project-fe2e4c6a-b528-4bcf-aa1').Trim()
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw 'No se pudo obtener el token de control desde Secret Manager.'
     }
