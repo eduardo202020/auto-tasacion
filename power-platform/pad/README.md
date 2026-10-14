@@ -196,9 +196,13 @@ No se producen resultados bancarios ni cambios sobre el XLSX de origen.
 ## Ejecución real mediante macro y 3270
 
 Para el tramo de presentación `Resultado_Final → MASIVO → PCOMM`, use
-`macro_3270_runner.py` y la plantilla local preparada con
-`AutoTasacion3270.EjecutarLote3270`. El procedimiento de instalación de la
-plantilla, configuración de PAD y ubicación de resultados está en
+`macro_3270_runner.py` y la plantilla local preparada. La prueba segura usa
+`read-lot`, que llama `AutoTasacion3270.ValidarSesionSoloLectura`: solo se
+adjunta a la sesión y se lee un carácter de pantalla, sin enviar teclas ni
+escribir datos. `run-lot` llama `AutoTasacion3270.EjecutarLote3270` y es el
+modo transaccional que se habilita únicamente después de aprobar la prueba
+segura. El procedimiento de instalación de la plantilla, configuración de PAD
+y ubicación de resultados está en
 [`../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md`](../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).
 
 El simulador se conserva para diagnóstico y para lotes anteriores. El Desktop

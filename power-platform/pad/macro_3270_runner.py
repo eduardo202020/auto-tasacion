@@ -32,6 +32,7 @@ REQUIRED_SOURCE_FIELDS = (
     "PRESTAMO", "TIPO DE INMUEBLE", "MONEDA", "IMPORTE", "DIRECCION", "DIRECCION1",
     "EXTERIOR", "MUNICIPIO", "DIST_COD", "PROV_COD", "DEPT_COD", "PISOS", "SOTANOS", "AÑO",
 )
+READ_ONLY_MACRO_PROCEDURE = "AutoTasacion3270.ValidarSesionSoloLectura"
 
 
 class Macro3270Error(RuntimeError):
@@ -245,7 +246,14 @@ def set_value(sheet: Any, row: int, column: int, value: Any, number_format: str 
     cell.Value = value
 
 
-def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: list[dict[str, Any]], settings: Settings, execute: bool) -> list[dict[str, Any]]:
+def populate_workbook(
+    workbook_path: Path,
+    lot_id: str,
+    source_sha: str,
+    rows: list[dict[str, Any]],
+    settings: Settings,
+    execution_mode: str,
+) -> list[dict[str, Any]]:
     client = com_client()
     excel = None
     workbook = None
@@ -301,12 +309,13 @@ def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: l
         phase = "recalcular_y_guardar_libro"
         excel.CalculateFullRebuild()
         workbook.Save()
-        if execute:
-            phase = "ejecutar_macro_3270"
+        if execution_mode != "PREPARAR":
+            phase = "ejecutar_validacion_solo_lectura" if execution_mode == "SOLO_LECTURA" else "ejecutar_macro_3270"
             evidence_directory = workbook_path.parent / "evidencias_3270"
             evidence_directory.mkdir(parents=True, exist_ok=True)
-            excel.Run(f"'{workbook.Name}'!{settings.macro_procedure}", 2, last_row, str(evidence_directory), settings.session_name)
-            phase = "guardar_resultado_macro_3270"
+            macro_procedure = READ_ONLY_MACRO_PROCEDURE if execution_mode == "SOLO_LECTURA" else settings.macro_procedure
+            excel.Run(f"'{workbook.Name}'!{macro_procedure}", 2, last_row, str(evidence_directory), settings.session_name)
+            phase = "guardar_resultado_validacion" if execution_mode == "SOLO_LECTURA" else "guardar_resultado_macro_3270"
             excel.CalculateFull()
             workbook.Save()
 
@@ -314,7 +323,7 @@ def populate_workbook(workbook_path: Path, lot_id: str, source_sha: str, rows: l
         output: list[dict[str, Any]] = []
         for index, source in enumerate(rows, start=2):
             result = clean(sheet.Cells(index, 25).Value)
-            trace_status = clean(trace.Cells(index, 6).Value) or ("PENDIENTE" if not execute else "SIN_RESULTADO")
+            trace_status = clean(trace.Cells(index, 6).Value) or ("PENDIENTE" if execution_mode == "PREPARAR" else "SIN_RESULTADO")
             output.append({
                 "id_caso": clean(source["ID_CASO"]),
                 "prestamo": as_code(source["PRESTAMO"]),
@@ -370,12 +379,12 @@ def copy_to_output(settings: Settings, workbook_path: Path) -> Path | None:
     return target
 
 
-def process_lot(settings: Settings, lot_id: str, execute: bool, force: bool = False) -> dict[str, Any]:
+def process_lot(settings: Settings, lot_id: str, execution_mode: str, force: bool = False) -> dict[str, Any]:
     source = result_workbook(settings, lot_id)
     wait_stable(source, settings.stability_checks, settings.stability_interval_seconds)
     source_sha = sha256(source)
     state_file = state_path(settings, lot_id, source_sha)
-    if execute and state_file.is_file() and not force:
+    if execution_mode == "EJECUTAR" and state_file.is_file() and not force:
         previous = json.loads(state_file.read_text(encoding="utf-8"))
         if previous.get("status") in {"COMPLETADO_3270", "COMPLETADO_3270_CON_INCIDENCIAS"}:
             return {"outcome": "idempotente", **previous}
@@ -385,7 +394,11 @@ def process_lot(settings: Settings, lot_id: str, execute: bool, force: bool = Fa
     work_dir.mkdir(parents=True, exist_ok=True)
     working_book = work_dir / f"Resultado_MASIVO_{safe_name(lot_id)}.xlsm"
     shutil.copy2(settings.template_path, working_book)
-    status = "PREPARANDO_3270" if execute else "PREPARADO_PARA_3270"
+    status = {
+        "PREPARAR": "PREPARADO_PARA_3270",
+        "SOLO_LECTURA": "VALIDANDO_LECTURA_3270",
+        "EJECUTAR": "PREPARANDO_3270",
+    }[execution_mode]
     record: dict[str, Any] = {
         "schema_version": 1,
         "id_lote": lot_id,
@@ -397,16 +410,21 @@ def process_lot(settings: Settings, lot_id: str, execute: bool, force: bool = Fa
         "updated_at": utc_now(),
         "filas_para_procesar": len(rows),
         "revision_ia_excluida": True,
+        "modo_ejecucion": execution_mode,
     }
     atomic_json(state_file, record)
 
     try:
-        results = populate_workbook(working_book, lot_id, source_sha, rows, settings, execute)
-        published = copy_to_output(settings, working_book) if execute else None
+        results = populate_workbook(working_book, lot_id, source_sha, rows, settings, execution_mode)
+        published = copy_to_output(settings, working_book) if execution_mode != "PREPARAR" else None
         completed_without_incidents = all(item["estado"] == "COMPLETADO" for item in results)
-        final_status = (
-            "COMPLETADO_3270" if completed_without_incidents else "COMPLETADO_3270_CON_INCIDENCIAS"
-        ) if execute else "PREPARADO_PARA_3270"
+        read_only_validated = all(item["estado"] == "LECTURA_3270_OK" for item in results)
+        if execution_mode == "EJECUTAR":
+            final_status = "COMPLETADO_3270" if completed_without_incidents else "COMPLETADO_3270_CON_INCIDENCIAS"
+        elif execution_mode == "SOLO_LECTURA":
+            final_status = "VALIDADO_LECTURA_3270" if read_only_validated else "VALIDADO_LECTURA_3270_CON_INCIDENCIAS"
+        else:
+            final_status = "PREPARADO_PARA_3270"
         record.update({
             "status": final_status,
             "updated_at": utc_now(),
@@ -416,7 +434,12 @@ def process_lot(settings: Settings, lot_id: str, execute: bool, force: bool = Fa
         atomic_json(state_file, record)
         result_file = settings.results_directory / f"{safe_name(lot_id)}_{source_sha[:12]}_macro_3270.json"
         atomic_json(result_file, record)
-        return {"outcome": "ejecutado" if execute else "preparado", **record}
+        outcome = {
+            "PREPARAR": "preparado",
+            "SOLO_LECTURA": "lectura_validada",
+            "EJECUTAR": "ejecutado",
+        }[execution_mode]
+        return {"outcome": outcome, **record}
     except Exception as error:
         record.update({
             "status": "ERROR_MACRO_3270",
@@ -431,14 +454,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Preparador y ejecutor MASIVO/3270 para PAD")
     parser.add_argument("--config", required=True, type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("prepare-lot", "run-lot"):
+    for name in ("prepare-lot", "read-lot", "run-lot"):
         command = commands.add_parser(name)
         command.add_argument("--lot", required=True)
         command.add_argument("--force", action="store_true")
     arguments = parser.parse_args()
     try:
         settings = load_settings(arguments.config.resolve())
-        result = process_lot(settings, arguments.lot, execute=arguments.command == "run-lot", force=arguments.force)
+        execution_mode = {
+            "prepare-lot": "PREPARAR",
+            "read-lot": "SOLO_LECTURA",
+            "run-lot": "EJECUTAR",
+        }[arguments.command]
+        result = process_lot(settings, arguments.lot, execution_mode=execution_mode, force=arguments.force)
         print(json.dumps({"id_lote": result["id_lote"], "estado": result["status"], "outcome": result["outcome"]}, ensure_ascii=False))
         return 0
     except Macro3270Error as error:

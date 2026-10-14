@@ -33,6 +33,30 @@ Public Sub EjecutarLote3270(ByVal primeraFila As Long, ByVal ultimaFila As Long,
     ThisWorkbook.Save
 End Sub
 
+' Prueba segura: solo adjunta la sesion PCOMM y lee un caracter de pantalla
+' para comprobar que esta disponible. No escribe campos, no envia teclas y no
+' navega a transacciones.
+Public Sub ValidarSesionSoloLectura(ByVal primeraFila As Long, ByVal ultimaFila As Long, _
+                                    ByVal carpetaEvidencia As String, ByVal nombreSesion As String)
+    Dim ws As Worksheet
+    Dim con As Object
+    Dim fila As Long
+    Dim caracterLeido As String
+
+    Set ws = ThisWorkbook.Worksheets("MASIVO")
+    ValidarRangoPad ws, primeraFila, ultimaFila
+
+    Set con = New CONEXION
+    con.init nombreSesion
+    caracterLeido = con.Leer(1, 1, 1)
+
+    For fila = primeraFila To ultimaFila
+        RegistrarResultadoPad ws, fila, "LECTURA_3270_OK", "SESION_" & nombreSesion & "_LEIBLE"
+    Next fila
+
+    ThisWorkbook.Save
+End Sub
+
 Private Sub ValidarRangoPad(ByVal ws As Worksheet, ByVal primeraFila As Long, ByVal ultimaFila As Long)
     Dim ultimaConDato As Long
 
