@@ -30,8 +30,11 @@ final sincronizado en BPO.
 | --- | --- |
 | PDFs recibidos | 10 |
 | Filas `CONTROL` | 10 |
+| Préstamos de 20 dígitos en `CONTROL` | 10 de 10 |
 | Filas `PARA_PROCESAR` | 4 |
+| Préstamos de 20 dígitos en `PARA_PROCESAR` | 4 de 4 |
 | Filas `REVISION_IA` | 6 |
+| Préstamos de 20 dígitos en `REVISION_IA` | 6 de 6 |
 | Operaciones PAD simuladas | 4 |
 | Revisiones de IA simuladas | 6 |
 | Revisiones manuales | 0 |
