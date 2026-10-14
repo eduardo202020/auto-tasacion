@@ -16,10 +16,12 @@ flowchart LR
     B --> C[Copia local MASIVO XLSM]
     C --> D{Modo PAD}
     D -->|read-lot| E[ValidarSesionSoloLectura]
-    D -->|run-lot| F[EjecutarLote3270]
+    D -->|navigate-lot| F[NavegarSesionSinCambios]
+    D -->|run-lot| H[EjecutarLote3270]
     E --> G[PCOMM sesión A ya autenticada]
     F --> G
-    G --> H[TRAZA_PAD + resultado local]
+    H --> G
+    G --> I[TRAZA_PAD + resultado local]
 ```
 
 Solo se cargan las filas de `PARA_PROCESAR`. `REVISION_IA` queda excluida de
@@ -48,11 +50,13 @@ altera el XLSX de OneDrive ni la plantilla maestra.
 - `macro_3270_runner.py`: prepara una copia local, la llena por contrato,
   invoca Excel y llama el módulo VBA. Mantiene estado independiente en
   `estado\\macro_3270` para que un evento duplicado no ejecute 3270 dos veces.
-- `vba\\AutoTasacion3270.bas`: contiene dos procedimientos no interactivos:
+- `vba\\AutoTasacion3270.bas`: contiene tres procedimientos con alcances
+  separados:
   `ValidarSesionSoloLectura`, que únicamente se adjunta a PCOMM y lee un
-  carácter de pantalla, y `EjecutarLote3270`, que es el procedimiento
-  transaccional histórico. Ambos registran resultado estructurado en
-  `TRAZA_PAD`.
+  carácter de pantalla; `NavegarSesionSinCambios`, que abre I003 sin utilizar
+  datos de la fila ni cambiar el centro; y `EjecutarLote3270`, que es el
+  procedimiento transaccional histórico. Los tres registran resultado
+  estructurado en `TRAZA_PAD`.
 - `config.macro-3270.example.json`: configuración de producción a copiar como
   `config.macro-3270.local.json`.
 - `requirements-macro-3270.txt`: dependencia de Excel COM (`pywin32`).
@@ -121,8 +125,13 @@ Conserve `Main` como `InicializarLote` seguido de `ValidarExcel`. Publique el
 Desktop Flow después de guardar.
 
 Para la ejecución transaccional aprobada posteriormente, cambie únicamente
-`read-lot` por `run-lot`. Ese cambio hace que el procedimiento VBA escriba y
-navegue en PCOMM; no forma parte de la prueba de solo lectura.
+`navigate-lot` por `run-lot`. El modo intermedio `navigate-lot` se usa para una
+demostración visible: solo ejecuta `PAUSA`, escribe `I003` en la línea de
+comandos y presiona `ENTER`. Lee el centro de la pantalla y deja la sesión en
+I003. Si el centro no es `0727`, registra
+`NAVEGADO_SIN_CAMBIOS_3270_CON_INCIDENCIAS`; no ejecuta `QGTR` ni cambia el
+centro. `run-lot` escribe y navega con datos de negocio y no forma parte de
+esta prueba.
 
 ## Primera ejecución de presentación: solo lectura
 

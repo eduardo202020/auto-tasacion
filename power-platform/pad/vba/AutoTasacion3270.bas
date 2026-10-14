@@ -57,6 +57,42 @@ Public Sub ValidarSesionSoloLectura(ByVal primeraFila As Long, ByVal ultimaFila 
     ThisWorkbook.Save
 End Sub
 
+' Prueba de presentacion sin cambios de negocio. Solo usa la ruta de navegacion
+' inicial de la macro historica: PAUSA -> I003 -> ENTER. No lee datos de MASIVO
+' para enviarlos al host, no cambia centro, no usa F4/F8/FIN y deja PCOMM visible
+' en I003 para que el operador pueda comprobar la interaccion.
+Public Sub NavegarSesionSinCambios(ByVal primeraFila As Long, ByVal ultimaFila As Long, _
+                                   ByVal carpetaEvidencia As String, ByVal nombreSesion As String)
+    Dim ws As Worksheet
+    Dim con As Object
+    Dim fila As Long
+    Dim centroActual As String
+    Dim estadoNavegacion As String
+    Dim detalleNavegacion As String
+
+    Set ws = ThisWorkbook.Worksheets("MASIVO")
+    ValidarRangoPad ws, primeraFila, ultimaFila
+
+    Set con = New CONEXION
+    con.init nombreSesion
+
+    IrAI003Pad con
+    centroActual = Trim$(con.Leer(2, 2, 4))
+    If centroActual = "0727" Then
+        estadoNavegacion = "NAVEGACION_3270_OK"
+        detalleNavegacion = "I003_ABIERTO_CENTRO_0727"
+    Else
+        estadoNavegacion = "NAVEGACION_3270_BLOQUEADA"
+        detalleNavegacion = "I003_ABIERTO_CENTRO_" & IIf(Len(centroActual) > 0, centroActual, "NO_LEIBLE")
+    End If
+
+    For fila = primeraFila To ultimaFila
+        RegistrarResultadoPad ws, fila, estadoNavegacion, detalleNavegacion
+    Next fila
+
+    ThisWorkbook.Save
+End Sub
+
 Private Sub ValidarRangoPad(ByVal ws As Worksheet, ByVal primeraFila As Long, ByVal ultimaFila As Long)
     Dim ultimaConDato As Long
 

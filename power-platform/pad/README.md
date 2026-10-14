@@ -199,10 +199,13 @@ Para el tramo de presentación `Resultado_Final → MASIVO → PCOMM`, use
 `macro_3270_runner.py` y la plantilla local preparada. La prueba segura usa
 `read-lot`, que llama `AutoTasacion3270.ValidarSesionSoloLectura`: solo se
 adjunta a la sesión y se lee un carácter de pantalla, sin enviar teclas ni
-escribir datos. `run-lot` llama `AutoTasacion3270.EjecutarLote3270` y es el
-modo transaccional que se habilita únicamente después de aprobar la prueba
-segura. El procedimiento de instalación de la plantilla, configuración de PAD
-y ubicación de resultados está en
+escribir datos. `navigate-lot` llama `AutoTasacion3270.NavegarSesionSinCambios`:
+envía únicamente `PAUSA`, `I003` y `ENTER`, verifica que el centro sea `0727` y
+deja visible la pantalla I003. No escribe préstamo, seguro ni ningún campo de
+negocio, y no cambia el centro de trabajo. `run-lot` llama
+`AutoTasacion3270.EjecutarLote3270` y es el modo transaccional que se habilita
+únicamente después de aprobar la prueba de navegación. El procedimiento de
+instalación de la plantilla, configuración de PAD y ubicación de resultados está en
 [`../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md`](../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).
 
 El simulador se conserva para diagnóstico y para lotes anteriores. El Desktop
