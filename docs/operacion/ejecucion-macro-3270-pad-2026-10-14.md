@@ -105,15 +105,18 @@ acción **Ejecutar aplicación**, esperando a que finalice:
 **Aplicación**
 
 ```text
-C:\Users\mailbox_27530\AppData\Local\NTT DATA EMEAL\auto-tasacion\python-env\Scripts\python.exe
+C:\Windows\System32\cmd.exe
 ```
 
 **Argumentos para la prueba segura de solo lectura**
 
 ```text
-"C:\Users\mailbox_27530\OneDrive - NTT DATA EMEAL\automatizaciones-jhglazar\auto-tasaciones\codigos\pad-simulation\auto-tasacion\power-platform\pad\macro_3270_runner.py" --config "C:\Users\mailbox_27530\OneDrive - NTT DATA EMEAL\automatizaciones-jhglazar\auto-tasaciones\codigos\pad-simulation\auto-tasacion\power-platform\pad\config.macro-3270.local.json" read-lot --lot "%IdLote%"
+/d /c ""C:\Users\mailbox_27530\AppData\Local\NTT DATA EMEAL\auto-tasacion\python-env\Scripts\python.exe" "C:\Users\mailbox_27530\OneDrive - NTT DATA EMEAL\automatizaciones-jhglazar\auto-tasaciones\codigos\pad-simulation\auto-tasacion\power-platform\pad\macro_3270_runner.py" --config "%RutaConfiguracion%" read-lot --lot "%IdLote%""
 ```
 
+`RutaConfiguracion` conserva la ruta completa del archivo
+`config.macro-3270.local.json`. El envoltorio `cmd.exe` es necesario porque
+PAD no resolvió directamente el ejecutable Python cuya ruta contiene espacios.
 Conserve `Main` como `InicializarLote` seguido de `ValidarExcel`. Publique el
 Desktop Flow después de guardar.
 
@@ -143,3 +146,29 @@ navegue en PCOMM; no forma parte de la prueba de solo lectura.
 5. Un segundo evento de lectura vuelve a validar la disponibilidad de sesión
    sin afectar el host. La idempotencia de `run-lot` protege exclusivamente la
    futura ejecución transaccional.
+
+## Evidencia E2E confirmada
+
+El 2026-10-14 se ejecutó un lote nuevo de diez PDFs de prueba, con identidades
+de OneDrive nuevas para no reutilizar el lote anterior. La API de Cloud Run
+confirmó los siguientes valores públicos:
+
+| Campo | Valor |
+| --- | --- |
+| `id_lote` | `TAS-F1C48BE414207A139FF0` |
+| Estado Cloud | `ENTREGADO` |
+| PDFs cargados / procesados / fallidos | `10 / 10 / 0` |
+| Duración Cloud | 130 segundos |
+
+El Desktop Flow publicado ejecutó `read-lot` en BPO. El estado durable de PAD
+confirmó `VALIDADO_LECTURA_3270`, `modo_ejecucion = SOLO_LECTURA`, cuatro filas
+de `PARA_PROCESAR` y `LECTURA_3270_OK` con `SESION_A_LEIBLE` en cada una. No
+hubo `technical_error` y el libro publicado fue:
+
+```text
+C:\Users\mailbox_27530\OneDrive - NTT DATA EMEAL\automatizaciones-jhglazar\auto-tasaciones\Procesados\Resultado_MASIVO_TAS-F1C48BE414207A139FF0.xlsm
+```
+
+Esta evidencia cierra el tramo Cloud → resultado Excel → PAD → plantilla MASIVO
+→ lectura de PCOMM. Aún no constituye una ejecución transaccional contra 3270;
+esa fase requiere reemplazar `read-lot` por `run-lot` después de su aprobación.
