@@ -64,10 +64,12 @@ espera el préstamo en `Z`, usa columnas fijas y guarda en el archivo de
 entrada. Por tanto, no puede ejecutarse directamente sobre el resultado Cloud.
 
 Además, el flujo actual deja `PRESTAMO` vacío de forma deliberada y el
-simulador PAD puede terminar en simulación sin ese dato. Declarar préstamo
-obligatorio para la macro requiere definir primero una fuente autorizada para
-obtenerlo. Consultar 3270 no resuelve esa ausencia, porque las rutinas de la
-macro necesitan el préstamo para iniciar la consulta.
+simulador PAD puede terminar en simulación sin ese dato. Una corrección
+posterior identificó la fuente autorizada: la fila operativa recibida por el
+operador. Falta implementar la correlación segura entre esa fila y cada PDF.
+Consultar 3270 no resuelve esa ausencia, porque las rutinas de la macro
+necesitan el préstamo para iniciar la consulta. Consulte el flujo actualizado
+en [`flujo-operador-cloud-macro-2026-10-14.md`](flujo-operador-cloud-macro-2026-10-14.md).
 
 ## Diseño que debe preceder a la integración de macro
 

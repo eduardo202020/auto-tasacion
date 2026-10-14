@@ -17,7 +17,9 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
 
 - `tblParaProcesar` es la única cola para PAD/IBM.
 - `REVISION_IA` y `CONTROL` no se usan para operar el banco.
-- `PRESTAMO` puede quedar vacío antes del 3270.
+- El contrato Cloud vigente permite `PRESTAMO` vacío. La futura preparación de
+  macro debe recibirlo desde la fila operativa autorizada, sin inferirlo del
+  PDF ni del 3270.
 - Campos críticos sin evidencia, catálogos no autorizados o conflictos quedan
   en revisión.
 - La IA es excepcional, aporta evidencia y se revalida.
@@ -70,6 +72,8 @@ la macro opera `A:Y`, exige un `PRESTAMO` de 20 caracteres y escribe su
 resultado en `Y`. Como Cloud usa `Y` para `ID_CASO` y entrega un `.xlsx`, PAD
 debe construir una copia local `.xlsm` mediante un adaptador, conservar la
 traza fuera de `A:Y` y ejecutar una macro sin diálogos. No se inicia PCOMM ni
-VBA hasta resolver la fuente autorizada de préstamo y los requisitos de la
-plantilla. Consulte
+VBA hasta incorporar la fila operativa autorizada, relacionarla con el PDF y
+resolver los requisitos de la plantilla. Consulte
 [`operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](operacion/contrato-cloud-a-macro-3270-2026-10-14.md).
+El flujo completo corregido está en
+[`operacion/flujo-operador-cloud-macro-2026-10-14.md`](operacion/flujo-operador-cloud-macro-2026-10-14.md).

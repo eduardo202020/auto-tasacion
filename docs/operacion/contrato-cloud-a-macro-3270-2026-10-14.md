@@ -66,9 +66,11 @@ por Cloud:
 2. Cloud conserva `ID_CASO` en `Y`; la macro reserva `Y` para el seguro o el
    error que devuelve PCOMM. `ID_CASO` no puede permanecer allí durante la
    macro.
-3. Cloud deja `PRESTAMO` vacío de forma deliberada. La macro lo necesita como
-   llave de inicio y no puede obtenerlo consultando 3270, porque lo usa antes
-   de iniciar la consulta.
+3. Cloud deja `PRESTAMO` vacío de forma deliberada. La fuente autorizada ya se
+   identificó: es la fila operativa recibida por el operador. Sin embargo, el
+   manifiesto vigente no transporta ni relaciona esa fila con el PDF. La macro
+   necesita el préstamo como llave de inicio y no puede obtenerlo consultando
+   3270, porque lo usa antes de iniciar la consulta.
 
 Cloud conserva los nombres de vía y ubicación en las columnas que usa su
 contrato actual. La plantilla puede convertirlos en los códigos esperados con
@@ -112,8 +114,9 @@ la plantilla maestra sobre OneDrive durante la ejecución.
 
 ## Cambios necesarios antes de habilitar PAD + macro
 
-1. Definir la fuente autorizada y la validación de `PRESTAMO` por `ID_CASO`.
-   Es el bloqueo funcional actual.
+1. Incorporar la fila operativa autorizada a la entrada y relacionarla de forma
+   estable con cada PDF. El adaptador debe validar `PRESTAMO` por `ID_CASO` y
+   exigir exactamente 20 caracteres. Es el bloqueo funcional actual.
 2. Versionar una plantilla `.xlsm` aprobada, eliminar o resolver su referencia
    externa y verificar su integridad antes de cada uso.
 3. Refactorizar `segHipoMasiv` para recibir el lote y las filas sin

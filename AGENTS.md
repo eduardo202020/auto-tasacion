@@ -23,7 +23,9 @@ Fuentes de verdad:
 - `tblParaProcesar` es la única cola operable para PAD/IBM 3270.
 - `REVISION_IA` contiene excepciones y `CONTROL` una fila por PDF.
 - Las primeras 24 columnas y el orden no cambian; `ID_CASO` permanece al final.
-- `PRESTAMO` puede estar vacío antes del 3270.
+- El contrato Cloud vigente permite `PRESTAMO` vacío; la ampliación pendiente
+  debe traerlo desde la fila operativa autorizada, sin inferirlo del PDF ni del
+  3270.
 - Un dato crítico sin evidencia, código no autorizado o conflicto no entra a
   `PARA_PROCESAR`.
 - La IA es excepcional y su resultado se revalida.
@@ -63,7 +65,8 @@ Conserve estos límites al modificar esta ruta:
 - La macro heredada no se invoca directamente sobre `Resultado_Final`. Usa un
   esquema posicional distinto y guarda sobre su archivo de entrada. Primero se
   debe diseñar un adaptador con copia local de trabajo, mapeo por encabezados,
-  fuente autorizada de `PRESTAMO` y trazabilidad por `ID_CASO`.
+  asociación estable entre la fila operativa y el PDF, `PRESTAMO` autorizado y
+  trazabilidad por `ID_CASO`.
 
 La plantilla MASIVO revisada después contiene una macro orientada a sus
 columnas `A:Y`, pero tampoco es un ejecutable directo del resultado Cloud:
@@ -78,3 +81,5 @@ La revisión de las reglas devueltas por Operaciones y de la macro está en
 [`docs/operacion/revision-reglas-y-macro-2026-10-13.md`](docs/operacion/revision-reglas-y-macro-2026-10-13.md).
 El contrato del último tramo y sus bloqueos están en
 [`docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md`](docs/operacion/contrato-cloud-a-macro-3270-2026-10-14.md).
+El flujo corregido desde la entrada del operador hasta la macro está en
+[`docs/operacion/flujo-operador-cloud-macro-2026-10-14.md`](docs/operacion/flujo-operador-cloud-macro-2026-10-14.md).
