@@ -30,11 +30,11 @@ function Get-TeamsPostActions {
         $name = [string] $property.Name
         $action = $property.Value
         $actionPath = if ([string]::IsNullOrWhiteSpace($Path)) { $name } else { "$Path/$name" }
-        $host = $action.inputs.host
+        $connectorHost = $action.inputs.host
         $parameters = $action.inputs.parameters
         if ($action.type -eq 'OpenApiConnection' -and
-            $host.apiId -eq '/providers/Microsoft.PowerApps/apis/shared_teams' -and
-            $host.operationId -eq 'PostMessageToConversation' -and
+            $connectorHost.apiId -eq '/providers/Microsoft.PowerApps/apis/shared_teams' -and
+            $connectorHost.operationId -eq 'PostMessageToConversation' -and
             $parameters.poster -eq 'Flow bot' -and
             $parameters.location -eq 'Group chat' -and
             ([string] $parameters.'body/recipient') -match '^19:[^\s]+@thread\.v2$') {
