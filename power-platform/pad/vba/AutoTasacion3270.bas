@@ -101,8 +101,7 @@ Public Sub NavegarCasosSinCambios(ByVal primeraFila As Long, ByVal ultimaFila As
 
     Set ws = ThisWorkbook.Worksheets("MASIVO")
     ValidarRangoPad ws, primeraFila, ultimaFila
-    CrearCarpetasPad carpetaEvidencia
-
+    ' La carpeta de evidencia la crea macro_3270_runner.py antes de invocar VBA.
     Set con = New CONEXION
     con.init nombreSesion
 
