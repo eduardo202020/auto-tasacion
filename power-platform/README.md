@@ -57,7 +57,9 @@ crea o actualiza en la solución `autoTasacion` estos flujos:
 5. `auto-tasacion-entregar-lote` (legado).
 
 El script obtiene el token de control desde Secret Manager durante su ejecución;
-no lo guarda en el repositorio. La ruta nueva crea
+primero identifica la versión que la revisión activa de Cloud Run tiene montada
+en `BATCH_CONTROL_API_TOKEN`, para que el encabezado no use una versión más
+nueva todavía no aplicada al servicio. No guarda el token en el repositorio. La ruta nueva crea
 `_autotasacion_lote_<ID_LOTE>.json` con solo `{"id_lote":"..."}` en
 `/automatizaciones-jhglazar/auto-tasaciones/Controles`. El orquestador usa el trigger de OneDrive for
 Business **When a file is created (properties only)** (`OnNewFilesV2`) sobre

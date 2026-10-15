@@ -33,6 +33,10 @@ $script:IsLocalPlan = [bool] ($DryRun -or -not $Activate)
 $DataverseUrl = 'https://org9a4ef0e0.crm4.dynamics.com'
 $EnvironmentId = 'Default-3048dc87-43f0-4100-9acb-ae1971c79395'
 $ServiceUrl = 'https://demo-tasaciones-ia-h75cd5qm2q-nn.a.run.app'
+$CloudProjectId = 'project-fe2e4c6a-b528-4bcf-aa1'
+$CloudRunServiceName = 'demo-tasaciones-ia'
+$CloudRunRegion = 'northamerica-northeast1'
+$ControlTokenSecretName = 'batch-control-api-token'
 
 if ([string]::IsNullOrWhiteSpace($LocationsConfigPath)) {
     $LocationsConfigPath = Join-Path $PSScriptRoot '..\..\config\automation-locations.json'
@@ -245,12 +249,48 @@ function Get-ControlToken {
         # Secret Manager. The placeholder is only serialized in memory/output.
         return '__LOCAL_PLAN_CONTROL_TOKEN__'
     }
+    # The flow must use exactly the Secret Manager version mounted by the
+    # serving Cloud Run revision.  "latest" is unsafe: a newer inactive
+    # secret version can exist while Cloud Run still references a pinned one.
+    $serviceJson = @(
+        & $Gcloud run services describe $CloudRunServiceName `
+            --region $CloudRunRegion `
+            --project $CloudProjectId `
+            --format=json
+    ) -join [Environment]::NewLine
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serviceJson)) {
+        throw 'No se pudo leer la configuracion activa de Cloud Run para obtener la version del token de control.'
+    }
+    try {
+        $service = $serviceJson | ConvertFrom-Json
+    }
+    catch {
+        throw 'Cloud Run no devolvio una configuracion JSON valida para obtener la version del token de control.'
+    }
+    $tokenVariables = @(
+        @($service.spec.template.spec.containers) |
+            ForEach-Object { @($_.env) } |
+            Where-Object { $_.name -eq 'BATCH_CONTROL_API_TOKEN' }
+    )
+    if ($tokenVariables.Count -ne 1) {
+        throw 'Cloud Run debe definir exactamente una variable BATCH_CONTROL_API_TOKEN.'
+    }
+    $secretReference = $tokenVariables[0].valueFrom.secretKeyRef
+    $secretName = [string] $secretReference.name
+    $secretVersion = [string] $secretReference.key
+    if ($secretName -ne $ControlTokenSecretName) {
+        throw 'Cloud Run referencia un secreto de control distinto al esperado.'
+    }
+    if ($secretVersion -notmatch '^(latest|[1-9][0-9]*)$') {
+        throw 'La version del secreto de control configurada en Cloud Run no es valida.'
+    }
+
     # A native command can emit an empty trailing record. If it is returned
     # directly, PowerShell serializes the header as a JSON array and the HTTP
     # action becomes an InvalidTemplate before it reaches Cloud Run. Accept
     # exactly one non-empty line, never concatenate or expose its value.
     $values = @(
-        (& $Gcloud secrets versions access latest --secret 'batch-control-api-token' --project 'project-fe2e4c6a-b528-4bcf-aa1') |
+        (& $Gcloud secrets versions access $secretVersion --secret $ControlTokenSecretName --project $CloudProjectId) |
             ForEach-Object { ([string] $_).Trim() } |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
