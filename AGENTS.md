@@ -48,6 +48,18 @@ Fuentes de verdad:
 No desplegar sin autorización explícita. No guardar PDFs productivos, secretos,
 URLs firmadas completas ni contenido documental en Git o logs.
 
+## Harness para procesos multi-sistema
+
+Cuando un cambio alcance aplicación, flujo cloud, servicio, almacenamiento,
+automatización de escritorio o alertas, consulte
+[`docs/harness/README.md`](docs/harness/README.md). El harness exige una llave
+de correlación, configuración local fuera de Git, un modo de plan antes de
+activar cambios y evidencia E2E por cada frontera.
+
+No declare un flujo terminado solo porque una acción final se ejecutó. La
+evidencia debe incluir estado y mensaje no vacíos del componente anterior; una
+alerta de Teams con campos vacíos conserva el tramo como pendiente de validar.
+
 ## Límite operativo comprobado: Cloud → PAD
 
 La integración automática Cloud → PAD está validada en `SIMULACION` hasta el

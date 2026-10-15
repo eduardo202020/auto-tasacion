@@ -11,7 +11,7 @@
 | Canvas, selección de PDFs y registro de lote | Corregido; requiere repetición E2E | `auto-tasacion-iniciar-lote` se republicó con el token de la versión montada por Cloud Run. |
 | Cloud Run y entrega de Excel | Confirmado previamente | Lote de diez PDFs entregado y Excel `Resultado_Final` generado. |
 | PAD, Excel MASIVO y PCOMM | Confirmado en modo de consulta | Cuatro filas llegaron a `CONSULTA_3270_OK` con `ICA9783_SEGURO_TIPO_I`. |
-| Alertas Teams | Configurado; requiere repetición E2E | Chat grupal y acciones de inicio, entrega y PAD publicados. |
+| Alertas Teams | Eventos E2E confirmados; salida PAD pendiente de completar | Registro, entrega, inicio y fin llegan al chat. La alerta final de PAD debe devolver estado y mensaje no vacíos. |
 | Escritura transaccional en 3270 | Pendiente | No está autorizada en esta fase. |
 | Revisión por IA de excepciones | Pendiente posterior | Se atiende después de cerrar el flujo de presentación. |
 
@@ -51,7 +51,9 @@ estado del lote y libro `.xlsm` publicado en `Procesados`.
 
 Confirmar que Power Apps muestra el `ID_LOTE`, el avance hasta `ENTREGADO` y
 no presenta el mensaje genérico de error. Validar que los mensajes de Teams
-contienen solo lote, estado, conteos y nombre de salida.
+contienen solo lote, estado, conteos y nombre de salida. En la alerta final de
+PAD, validar específicamente que `EstadoPad` y `MensajePad` no estén vacíos;
+un envío correcto con esos campos vacíos no cierra esta revisión.
 
 ### 5. Cerrar la presentación
 

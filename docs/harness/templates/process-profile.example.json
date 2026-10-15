@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "process": {
+    "key": "__PROCESS_KEY__",
+    "display_name": "__DISPLAY_NAME__",
+    "business_owner": "<responsable_del_proceso>",
+    "technical_owner": "<responsable_tecnico>"
+  },
+  "correlation": {
+    "field": "<id_lote_o_id_caso>",
+    "generated_by": "<componente_origen>",
+    "idempotency_key": "<llave_durable>"
+  },
+  "cloud": {
+    "service": "<servicio>",
+    "project": "<proyecto>",
+    "region": "<region>",
+    "endpoint": "<url_sin_secretos>",
+    "control_secret": {
+      "environment_variable": "<variable_del_servicio>",
+      "secret_name": "<nombre_del_secreto>",
+      "version_source": "mounted-service-version"
+    }
+  },
+  "storage": {
+    "input": "<carpeta_o_contenedor_de_entrada>",
+    "control": "<carpeta_o_contenedor_de_control>",
+    "output": "<carpeta_o_contenedor_de_salida>"
+  },
+  "power_platform": {
+    "solution": "<solucion>",
+    "application": "<aplicacion>",
+    "flows": {
+      "start": "<flujo_inicio>",
+      "orchestrator": "<flujo_orquestador>",
+      "desktop_trigger": "<flujo_que_activa_pad>"
+    },
+    "connection_references": {
+      "storage": "<referencia_storage>",
+      "teams": "<referencia_teams>",
+      "desktop": "<referencia_desktop>"
+    }
+  },
+  "desktop": {
+    "flow": "<desktop_flow>",
+    "input": "<id_de_correlacion>",
+    "outputs": ["<estado>", "<mensaje>", "<id_procesado>"],
+    "safe_mode": "<consulta_sin_cambios>",
+    "write_mode": "<modo_transaccional_aprobado>"
+  },
+  "notifications": {
+    "provider": "Microsoft Teams",
+    "delivery": "Flow bot / group chat",
+    "destination_reference": "<id_opaco_local_no_versionado>",
+    "events": ["registered", "output_ready", "desktop_started", "desktop_finished", "error"]
+  },
+  "acceptance": {
+    "terminal_success": "<estado_terminal>",
+    "terminal_failure": ["<estado_error>"],
+    "required_evidence": ["cloud_run", "cloud_flows", "desktop", "notifications"]
+  }
+}
