@@ -202,7 +202,12 @@ adjunta a la sesión y se lee un carácter de pantalla, sin enviar teclas ni
 escribir datos. `navigate-lot` llama `AutoTasacion3270.NavegarSesionSinCambios`:
 envía únicamente `PAUSA`, `I003` y `ENTER`, verifica que el centro sea `0727` y
 deja visible la pantalla I003. No escribe préstamo, seguro ni ningún campo de
-negocio, y no cambia el centro de trabajo. `run-lot` llama
+negocio, y no cambia el centro de trabajo. `browse-lot` llama
+`AutoTasacion3270.NavegarCasosSinCambios`: para cada fila de `PARA_PROCESAR`,
+abre I003, ingresa la opción de consulta `01`, escribe el préstamo y presiona
+`ENTER`. Comprueba la pantalla `ICA9783`, guarda una captura PDF local por
+préstamo y retorna con `PAUSA`. No utiliza `FIN`, `F4`, `F8`, `QGTR` ni envía
+importe, dirección, seguro u otros datos de negocio. `run-lot` llama
 `AutoTasacion3270.EjecutarLote3270` y es el modo transaccional que se habilita
 únicamente después de aprobar la prueba de navegación. El procedimiento de
 instalación de la plantilla, configuración de PAD y ubicación de resultados está en

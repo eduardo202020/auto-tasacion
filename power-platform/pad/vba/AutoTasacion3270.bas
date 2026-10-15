@@ -93,6 +93,67 @@ Public Sub NavegarSesionSinCambios(ByVal primeraFila As Long, ByVal ultimaFila A
     ThisWorkbook.Save
 End Sub
 
+Public Sub NavegarCasosSinCambios(ByVal primeraFila As Long, ByVal ultimaFila As Long, _
+                                  ByVal carpetaEvidencia As String, ByVal nombreSesion As String)
+    Dim ws As Worksheet
+    Dim con As Object
+    Dim fila As Long
+
+    Set ws = ThisWorkbook.Worksheets("MASIVO")
+    ValidarRangoPad ws, primeraFila, ultimaFila
+    CrearCarpetasPad carpetaEvidencia
+
+    Set con = New CONEXION
+    con.init nombreSesion
+
+    For fila = primeraFila To ultimaFila
+        ConsultarCasoSinCambios con, ws, fila, carpetaEvidencia
+    Next fila
+
+    ThisWorkbook.Save
+End Sub
+
+'Prueba de consulta por prestamo. Recorre la navegacion inicial usada por la
+'macro historica para cada fila: PAUSA -> I003 -> opcion 01 -> prestamo -> ENTER.
+'Solo escribe los criterios de consulta necesarios para abrir la pantalla del caso.
+'No usa FIN, F4, F8, QGTR ni envia campos de negocio.
+Private Sub ConsultarCasoSinCambios(ByVal con As Object, ByVal ws As Worksheet, _
+                                    ByVal fila As Long, ByVal carpetaEvidencia As String)
+    Dim prestamo As String
+    Dim mensajePantalla As String
+
+    On Error GoTo ErrorFila
+
+    prestamo = Trim$(CStr(ws.Cells(fila, "A").Value))
+    If Len(prestamo) <> 20 Or Not EsNumericoPad(prestamo) Then
+        RegistrarResultadoPad ws, fila, "BLOQUEADO", "PRESTAMO_INVALIDO"
+        Exit Sub
+    End If
+
+    IrAI003Pad con
+    con.Escribir "01", 5, 14
+    con.Escribir prestamo, 6, 18
+    con.IngresarTecla "enter"
+
+    mensajePantalla = Trim$(con.Leer(3, 2, 80))
+    GuardarPantallaPad con, carpetaEvidencia, prestamo & "_consulta"
+
+    If InStr(1, mensajePantalla, "ICA9783", vbTextCompare) > 0 Then
+        RegistrarResultadoPad ws, fila, "CONSULTA_3270_OK", "ICA9783_SEGURO_TIPO_I"
+    Else
+        RegistrarResultadoPad ws, fila, "CONSULTA_3270_CON_INCIDENCIA", "PANTALLA_DE_CONSULTA_NO_ESPERADA"
+    End If
+
+    con.IngresarTecla "pausa"
+    Exit Sub
+
+ErrorFila:
+    RegistrarResultadoPad ws, fila, "ERROR_TECNICO", Left$(Err.Description, 200)
+    On Error Resume Next
+    con.IngresarTecla "pausa"
+    On Error GoTo 0
+End Sub
+
 Private Sub ValidarRangoPad(ByVal ws As Worksheet, ByVal primeraFila As Long, ByVal ultimaFila As Long)
     Dim ultimaConDato As Long
 

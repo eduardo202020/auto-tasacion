@@ -124,14 +124,30 @@ PAD no resolvió directamente el ejecutable Python cuya ruta contiene espacios.
 Conserve `Main` como `InicializarLote` seguido de `ValidarExcel`. Publique el
 Desktop Flow después de guardar.
 
-Para la ejecución transaccional aprobada posteriormente, cambie únicamente
-`navigate-lot` por `run-lot`. El modo intermedio `navigate-lot` se usa para una
-demostración visible: solo ejecuta `PAUSA`, escribe `I003` en la línea de
-comandos y presiona `ENTER`. Lee el centro de la pantalla y deja la sesión en
-I003. Si el centro no es `0727`, registra
-`NAVEGADO_SIN_CAMBIOS_3270_CON_INCIDENCIAS`; no ejecuta `QGTR` ni cambia el
-centro. `run-lot` escribe y navega con datos de negocio y no forma parte de
-esta prueba.
+El modo intermedio `navigate-lot` se usa para una demostración inicial: solo
+ejecuta `PAUSA`, escribe `I003` en la línea de comandos y presiona `ENTER`.
+Lee el centro de la pantalla y deja la sesión en I003. Si el centro no es
+`0727`, registra `NAVEGADO_SIN_CAMBIOS_3270_CON_INCIDENCIAS`; no ejecuta
+`QGTR` ni cambia el centro.
+
+Para la navegación profunda sin cambios, reemplace `navigate-lot` por
+`browse-lot`:
+
+```text
+/d /c ""C:\Users\mailbox_27530\AppData\Local\NTT DATA EMEAL\auto-tasacion\python-env\Scripts\python.exe" "C:\Users\mailbox_27530\OneDrive - NTT DATA EMEAL\automatizaciones-jhglazar\auto-tasaciones\codigos\pad-simulation\auto-tasacion\power-platform\pad\macro_3270_runner.py" --config "%RutaConfiguracion%" browse-lot --lot "%IdLote%""
+```
+
+Por cada fila de `PARA_PROCESAR`, este modo sigue `PAUSA → I003 → opción 01 →
+préstamo → ENTER`; valida que la pantalla obtenida contenga `ICA9783`, exporta
+una captura local en `evidencias_3270` y retorna con `PAUSA`. Solo escribe el
+criterio de consulta necesario para abrir el caso. No usa `FIN`, `F4`, `F8`,
+`QGTR`, importe, seguro, dirección ni campos de negocio.
+
+Las páginas posteriores de la macro histórica requieren avanzar con `F4` tras
+rellenar campos, y termina con `F8`. No se incluyen en esta prueba porque esas
+teclas forman parte del flujo que puede modificar la operación. La ejecución
+transaccional aprobada posteriormente cambia explícitamente `browse-lot` por
+`run-lot`.
 
 ## Primera ejecución de presentación: navegación sin cambios
 
@@ -140,10 +156,13 @@ esta prueba.
 2. Inicie el lote desde Canvas como en la prueba de diez PDFs.
 3. Cuando el Cloud Flow cree `Resultado_Final_TAS-<LOTE>.xlsx`, el flujo ya
    existente llamará PAD con `IdLote`.
-4. PAD creará el libro local y, con `navigate-lot`, ejecutará `PAUSA → I003 →
-   ENTER` en la sesión A. Registrará `NAVEGACION_3270_OK` por cada fila cuando
-   el centro visible sea `0727`. No envía préstamo, seguro ni otros campos de
-   negocio; tampoco ejecuta `QGTR`, `F4`, `F8` o `FIN`. El libro queda en:
+4. PAD creará el libro local y, con `browse-lot`, ejecutará por cada caso
+   `PAUSA → I003 → opción 01 → préstamo → ENTER`. Registrará
+   `CONSULTA_3270_OK` cuando la pantalla resultante contenga `ICA9783`, y
+   exportará una captura local por préstamo. Solo escribe el criterio de
+   consulta para abrir el caso; no envía seguro, importe, dirección ni otros
+   campos de negocio, y tampoco ejecuta `QGTR`, `F4`, `F8` o `FIN`. El libro
+   queda en:
 
    ```text
    C:\ProgramData\NTT DATA EMEAL\auto-tasacion\pad-runtime\trabajo\<LOTE>_<SHA>\Resultado_MASIVO_<LOTE>.xlsm
@@ -153,9 +172,9 @@ esta prueba.
    `resultados\\<LOTE>_<SHA>_macro_3270.json`. También publicará la copia
    `.xlsm` terminada a `Procesados` si la ruta configurada está disponible.
 
-5. La sesión queda visible en I003. Un segundo evento de navegación repite
-   únicamente esa interacción segura. La idempotencia de `run-lot` protege
-   exclusivamente la futura ejecución transaccional.
+5. La sesión queda en la pantalla consultada del último préstamo. Un segundo
+   evento repite únicamente esta consulta segura. La idempotencia de `run-lot`
+   protege exclusivamente la futura ejecución transaccional.
 
 ## Evidencia E2E confirmada
 

@@ -34,6 +34,7 @@ REQUIRED_SOURCE_FIELDS = (
 )
 READ_ONLY_MACRO_PROCEDURE = "AutoTasacion3270.ValidarSesionSoloLectura"
 NAVIGATION_ONLY_MACRO_PROCEDURE = "AutoTasacion3270.NavegarSesionSinCambios"
+CASE_BROWSE_MACRO_PROCEDURE = "AutoTasacion3270.NavegarCasosSinCambios"
 
 
 class Macro3270Error(RuntimeError):
@@ -314,6 +315,7 @@ def populate_workbook(
             phase = {
                 "SOLO_LECTURA": "ejecutar_validacion_solo_lectura",
                 "NAVEGACION": "ejecutar_navegacion_sin_cambios",
+                "CONSULTA": "ejecutar_consulta_de_casos_sin_cambios",
                 "EJECUTAR": "ejecutar_macro_3270",
             }[execution_mode]
             evidence_directory = workbook_path.parent / "evidencias_3270"
@@ -321,12 +323,14 @@ def populate_workbook(
             macro_procedure = {
                 "SOLO_LECTURA": READ_ONLY_MACRO_PROCEDURE,
                 "NAVEGACION": NAVIGATION_ONLY_MACRO_PROCEDURE,
+                "CONSULTA": CASE_BROWSE_MACRO_PROCEDURE,
                 "EJECUTAR": settings.macro_procedure,
             }[execution_mode]
             excel.Run(f"'{workbook.Name}'!{macro_procedure}", 2, last_row, str(evidence_directory), settings.session_name)
             phase = {
                 "SOLO_LECTURA": "guardar_resultado_validacion",
                 "NAVEGACION": "guardar_resultado_navegacion",
+                "CONSULTA": "guardar_resultado_consulta",
                 "EJECUTAR": "guardar_resultado_macro_3270",
             }[execution_mode]
             excel.CalculateFull()
@@ -411,6 +415,7 @@ def process_lot(settings: Settings, lot_id: str, execution_mode: str, force: boo
         "PREPARAR": "PREPARADO_PARA_3270",
         "SOLO_LECTURA": "VALIDANDO_LECTURA_3270",
         "NAVEGACION": "NAVEGANDO_SIN_CAMBIOS_3270",
+        "CONSULTA": "CONSULTANDO_CASOS_3270",
         "EJECUTAR": "PREPARANDO_3270",
     }[execution_mode]
     record: dict[str, Any] = {
@@ -434,12 +439,15 @@ def process_lot(settings: Settings, lot_id: str, execution_mode: str, force: boo
         completed_without_incidents = all(item["estado"] == "COMPLETADO" for item in results)
         read_only_validated = all(item["estado"] == "LECTURA_3270_OK" for item in results)
         navigation_validated = all(item["estado"] == "NAVEGACION_3270_OK" for item in results)
+        case_browse_validated = all(item["estado"] == "CONSULTA_3270_OK" for item in results)
         if execution_mode == "EJECUTAR":
             final_status = "COMPLETADO_3270" if completed_without_incidents else "COMPLETADO_3270_CON_INCIDENCIAS"
         elif execution_mode == "SOLO_LECTURA":
             final_status = "VALIDADO_LECTURA_3270" if read_only_validated else "VALIDADO_LECTURA_3270_CON_INCIDENCIAS"
         elif execution_mode == "NAVEGACION":
             final_status = "NAVEGADO_SIN_CAMBIOS_3270" if navigation_validated else "NAVEGADO_SIN_CAMBIOS_3270_CON_INCIDENCIAS"
+        elif execution_mode == "CONSULTA":
+            final_status = "CONSULTADO_SIN_CAMBIOS_3270" if case_browse_validated else "CONSULTADO_SIN_CAMBIOS_3270_CON_INCIDENCIAS"
         else:
             final_status = "PREPARADO_PARA_3270"
         record.update({
@@ -455,6 +463,7 @@ def process_lot(settings: Settings, lot_id: str, execution_mode: str, force: boo
             "PREPARAR": "preparado",
             "SOLO_LECTURA": "lectura_validada",
             "NAVEGACION": "navegacion_validada",
+            "CONSULTA": "consulta_validada",
             "EJECUTAR": "ejecutado",
         }[execution_mode]
         return {"outcome": outcome, **record}
@@ -472,7 +481,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Preparador y ejecutor MASIVO/3270 para PAD")
     parser.add_argument("--config", required=True, type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("prepare-lot", "read-lot", "navigate-lot", "run-lot"):
+    for name in ("prepare-lot", "read-lot", "navigate-lot", "browse-lot", "run-lot"):
         command = commands.add_parser(name)
         command.add_argument("--lot", required=True)
         command.add_argument("--force", action="store_true")
@@ -483,6 +492,7 @@ def main() -> int:
             "prepare-lot": "PREPARAR",
             "read-lot": "SOLO_LECTURA",
             "navigate-lot": "NAVEGACION",
+            "browse-lot": "CONSULTA",
             "run-lot": "EJECUTAR",
         }[arguments.command]
         result = process_lot(settings, arguments.lot, execution_mode=execution_mode, force=arguments.force)
