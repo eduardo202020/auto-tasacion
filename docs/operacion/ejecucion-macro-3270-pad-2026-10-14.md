@@ -221,4 +221,24 @@ visible en I003. La comprobación demuestra navegación y lectura del centro
 esperado sin ingresar datos de negocio ni disparar una transacción de 3270.
 
 La ejecución transaccional continúa pendiente de aprobación: exige cambiar
-explícitamente `navigate-lot` por `run-lot`.
+explícitamente `browse-lot` por `run-lot`.
+
+## Evidencia de consulta por préstamo sin cambios
+
+Sobre el mismo lote `TAS-F1C48BE414207A139FF0`, el 2026-10-14 se ejecutó en
+BPO el modo `browse-lot`. El estado durable de PAD confirmó:
+
+| Campo | Valor |
+| --- | --- |
+| `status` | `CONSULTADO_SIN_CAMBIOS_3270` |
+| `modo_ejecucion` | `CONSULTA` |
+| Filas para procesar | `4` |
+| `technical_error` | vacío |
+
+Los cuatro préstamos de `PARA_PROCESAR` terminaron con
+`CONSULTA_3270_OK` y `ICA9783_SEGURO_TIPO_I`. Esto demuestra que, para cada
+caso con datos completos, PCOMM abrió I003 y la pantalla de consulta de seguro
+asociada al préstamo. No se ejecutaron `FIN`, `F4`, `F8` ni campos de negocio.
+El libro resultante se publicó en `Procesados` y las capturas locales de la
+consulta quedaron bajo `evidencias_3270` dentro del directorio de trabajo del
+lote.
