@@ -26,6 +26,7 @@ power-platform/solutions/
 # Estado y reportes locales del piloto de Power Automate Desktop.
 power-platform/pad/runtime/
 power-platform/pad/config.local.json
+config/teams-notifications.local.json
 
 # Paquetes locales generados para instalar PAD sin Git.
 artifacts/

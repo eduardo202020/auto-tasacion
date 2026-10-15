@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "automation": "auto-tasacion",
+  "enabled": true,
+  "connection": {
+    "reference_logical_name": "<nombre_logico_de_la_referencia_de_conexion_teams>"
+  },
+  "destination": {
+    "kind": "group_chat",
+    "group_chat_id": "19:<id_opaco_del_chat>@thread.v2",
+    "display_name": "[BBVA] AUTOMATIZACION TASACIONES"
+  }
+}

@@ -34,6 +34,14 @@ API de control incluyen `X-Batch-Control-Token` desde una variable de entorno o
 conexión segura; nunca se escribe su valor en la app. Power Automate es el único componente que lee OneDrive; Cloud Run no usa
 Microsoft Graph ni recibe rutas de OneDrive para descargar contenido.
 
+## Alertas operativas en Teams
+
+La definición puede informar el registro, la entrega del Excel final y los
+errores terminales al chat grupal corporativo mediante Flow bot. El destino y
+la referencia de conexión se guardan por entorno en un archivo local excluido
+de Git. La configuración y los avisos manuales del tramo Cloud → PAD están en
+[`../docs/operacion/integracion-teams-orquestador.md`](../docs/operacion/integracion-teams-orquestador.md).
+
 ## Despliegue de flujos masivos
 
 El script [`scripts/deploy-mass-flows.ps1`](scripts/deploy-mass-flows.ps1)

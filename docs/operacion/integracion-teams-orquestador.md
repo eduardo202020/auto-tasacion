@@ -1,53 +1,137 @@
-> **Estado de cierre (2026-10-13):** el despliegue controlado retiro la accion y la referencia de prueba de Teams de la definicion publicada. Esta guia queda como configuracion para una futura integracion versionada.
+# Alertas de Microsoft Teams para Auto Tasaciones
 
-﻿# Integración opcional de Microsoft Teams en el orquestador
+## Destino aprobado
 
-## Estado actual
+Las alertas operativas se publican mediante **Flow bot** en el chat grupal de
+Teams **[BBVA] AUTOMATIZACION TASACIONES**. El nombre facilita seleccionar el
+chat en el diseñador; la definición técnica usa el identificador opaco del
+chat, que se guarda solamente en la configuración local del entorno.
 
-La acción de Teams observada en la definición publicada de
-`auto-tasacion-orquestar-lote` fue una prueba manual. No forma parte de la
-arquitectura definitiva ni del generador
-`power-platform/scripts/deploy-mass-flows.ps1`.
+No se envían préstamos, expedientes, PDFs, tasaciones ni contenido de los
+archivos. Los mensajes contienen solamente `ID_LOTE`, estado, conteos y el
+nombre del Excel de salida.
 
-La siguiente publicación controlada de ese flujo, una vez liberada la ventana
-operativa, sustituirá la definición completa y retirará esa acción y su
-referencia de conexión de Teams. No debe reincorporarse mediante una edición
-manual aislada del flujo.
+## Eventos cubiertos por la definición versionada
 
-## Configuración observada de la prueba
+| Momento | Flujo | Mensaje |
+| --- | --- | --- |
+| Lote registrado desde Canvas | `auto-tasacion-iniciar-lote` | ID del lote, PDFs seleccionados y estado inicial. |
+| Excel final entregado en OneDrive | `auto-tasacion-orquestar-lote` | ID del lote y nombre del Excel final. |
+| Lote terminal sin resultado | `auto-tasacion-orquestar-lote` | ID del lote y estado que requiere atención. |
+| Espera Cloud agotada | `auto-tasacion-orquestar-lote` | ID del lote y estado observado al agotarse las dos horas. |
 
-| Aspecto | Valor observado | Uso futuro |
-|---|---|---|
-| Conector | Microsoft Teams | Crear una referencia de conexión explícita dentro de `autoTasacionCore`. |
-| Operación | `PostMessageToConversation` | Usar una acción de publicación equivalente y versionarla en el generador. |
-| Identidad que publica | `Flow bot` | Es un bot del flujo, no la cuenta de OneDrive ni una cuenta personal. |
-| Ubicación | `Group chat` | La prueba fue un chat grupal; no fue un canal de un equipo. |
-| Destinatario | Chat grupal de prueba | El identificador opaco del chat no se versiona. Configurarlo por entorno al habilitar la integración. |
-| Mensaje de prueba | `Hola Mundo` | Sustituirlo por una plantilla de estado aprobada. |
+La acción de Teams no bloquea la respuesta a Power Apps ni la eliminación del
+control una vez que la entrega se confirmó. Las acciones posteriores se
+configuran para continuar tanto si el envío a Teams termina correctamente como
+si falla.
 
-La referencia técnica publicada durante la prueba era `shared_teams`. Esa
-referencia no está declarada por el generador ni debe tratarse como una
-dependencia de la migración OneDrive.
+Los mensajes del tramo **PAD / 3270** se agregan manualmente al Cloud Flow que
+invoca el Desktop Flow, porque ese flujo no lo genera
+`deploy-mass-flows.ps1`. El procedimiento está al final de este documento.
 
-## Cómo reincorporarlo correctamente
+## Configuración local por entorno
 
-1. Definir el evento que se notificará, por ejemplo, resultado terminal del
-   lote o fallo técnico. No publicar por cada PDF.
-2. Crear una referencia de conexión de Microsoft Teams dentro de
-   `autoTasacionCore` con una identidad de servicio aprobada.
-3. Guardar el destino del chat como configuración por entorno. No incluir IDs
-   de chats, tokens ni destinatarios personales en Git.
-4. Añadir al generador la referencia `shared_teams` y la acción en el punto
-   elegido del orquestador.
-5. Añadir una prueba de definición que compruebe la dependencia, el evento y
-   que el flujo continúa funcionando si Teams falla o no está configurado.
-6. Exportar una nueva solución Core y validar el flujo publicado antes de
-   habilitar notificaciones reales.
+La definición sólo incorpora Teams cuando se le entrega un JSON local. El
+archivo real está excluido de Git:
 
-## Condición para retirar la prueba actual
+```text
+config/teams-notifications.local.json
+```
 
-La retirada se realizará como parte del próximo despliegue de
-`auto-tasacion-orquestar-lote`, no mediante una edición manual. Antes de ello
-la carpeta `Controles` debe estar libre de JSON pendientes y debe existir una
-ventana operativa confirmada, para no disparar un lote heredado con una nueva
-definición.
+1. En **Soluciones → autoTasacion → Referencias de conexión**, cree o reutilice
+   una referencia de **Microsoft Teams** conectada con la cuenta corporativa
+   autorizada.
+2. En un borrador de flujo, agregue **Publicar un mensaje en un chat o canal**:
+   - **Publicar como**: `Flow bot`;
+   - **Publicar en**: `Group chat`;
+   - **Group chat**: `[BBVA] AUTOMATIZACION TASACIONES`.
+3. Guarde el borrador y abra la vista de código del flujo. Registre únicamente
+   estos dos valores técnicos:
+   - `connectionReferences.shared_teams.connection.connectionReferenceLogicalName`;
+   - `parameters.body/recipient`, con formato `19:...@thread.v2`.
+4. Copie `config/teams-notifications.example.json` a
+   `config/teams-notifications.local.json` y complete los dos valores. Mantenga
+   `display_name` como referencia visual del grupo.
+
+El bloque queda así, sin comillas adicionales dentro de los valores:
+
+```json
+{
+  "schema_version": 1,
+  "automation": "auto-tasacion",
+  "enabled": true,
+  "connection": {
+    "reference_logical_name": "<valor_de_connectionReferenceLogicalName>"
+  },
+  "destination": {
+    "kind": "group_chat",
+    "group_chat_id": "19:<valor_de_body_recipient>@thread.v2",
+    "display_name": "[BBVA] AUTOMATIZACION TASACIONES"
+  }
+}
+```
+
+La referencia de conexión debe existir dentro de la solución antes del
+despliegue. Por ello el generador no crea conexiones ni solicita credenciales.
+
+## Revisar y publicar la definición Cloud
+
+Primero genere las dos definiciones localmente, sin autenticarse ni cambiar
+Power Platform:
+
+```powershell
+.\power-platform\scripts\deploy-mass-flows.ps1 `
+  -DryRun `
+  -TeamsNotificationsConfigPath .\config\teams-notifications.local.json `
+  -ControlFolderId '<ID verificado de Controles>' `
+  -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
+```
+
+La definición resultante incluirá la referencia `shared_teams` y la operación
+`PostMessageToConversation`. Revise que el chat tenga el destino esperado.
+
+En una ventana operativa sin controles JSON pendientes, publique sólo esos dos
+flujos:
+
+```powershell
+.\power-platform\scripts\deploy-mass-flows.ps1 `
+  -Activate `
+  -TeamsNotificationsConfigPath .\config\teams-notifications.local.json `
+  -ControlFolderId '<ID verificado de Controles>' `
+  -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
+```
+
+El despliegue se ejecuta manualmente. No publique cambios desde el diseñador
+después de este paso sin reflejarlos en el generador, porque la próxima
+publicación sustituye la definición completa del flujo.
+
+## Avisos de PAD y 3270
+
+En el Cloud Flow que detecta `Resultado_Final_<ID_LOTE>.xlsx` e invoca
+`auto-tasacion-procesar-3270-simulado`, agregue tres acciones de Teams al mismo
+chat grupal. Reutilice la misma referencia de conexión.
+
+| Ubicación | Configurar ejecución posterior | Texto sugerido |
+| --- | --- | --- |
+| Inmediatamente antes de ejecutar el Desktop Flow | después de extraer `IdLote` | `Auto Tasaciones \| lote <IdLote> \| PAD/3270 inició.` |
+| Inmediatamente después del Desktop Flow | sólo si el Desktop Flow finaliza correctamente | `Auto Tasaciones \| lote <IdLote> \| PAD/3270 finalizó. Estado: <EstadoPad>. <MensajePad>` |
+| En una rama paralela después del Desktop Flow | **has failed**, **has timed out** y **is skipped** | `Auto Tasaciones \| lote <IdLote> \| PAD/3270 requiere atención. Revise la ejecución del flujo.` |
+
+Para cada acción seleccione `Flow bot`, `Group chat` y
+`[BBVA] AUTOMATIZACION TASACIONES`. En la segunda acción use las salidas ya
+publicadas por PAD: `EstadoPad` y `MensajePad`. Después guarde y publique el
+Cloud Flow.
+
+## Validación operativa
+
+1. Ejecute un lote de prueba con un PDF o con los diez casos autorizados.
+2. Confirme en el chat la alerta de registro y, cuando termine Cloud Run, la
+   alerta de Excel final.
+3. Confirme que el flujo Cloud activa PAD y que llegan el aviso de inicio y el
+   terminal de PAD/3270.
+4. Compare el `ID_LOTE` de las alertas con Power Apps, el historial de Cloud
+   Flows y el JSON de estado local de PAD.
+
+Microsoft documenta que la acción **Post a message in a chat or channel** se
+configura con `Flow bot`, `Group chat` y el grupo existente elegido en el
+desplegable. [Guía oficial de Microsoft](https://learn.microsoft.com/en-us/power-automate/teams/send-a-message-in-teams).

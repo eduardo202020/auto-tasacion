@@ -8,6 +8,7 @@ param(
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*$')]
     [string] $SolutionUniqueName = 'autoTasacion',
     [string] $LocationsConfigPath,
+    [string] $TeamsNotificationsConfigPath = $env:AUTOTASACION_TEAMS_NOTIFICATIONS_CONFIG,
     [string] $OneDriveBaseFolder = $env:AUTOTASACION_ONEDRIVE_BASE_FOLDER,
     [string] $PdfFolderId = $env:AUTOTASACION_PDFS_FOLDER_ID,
     [string] $ControlFolderId = $env:AUTOTASACION_CONTROLS_FOLDER_ID,
@@ -40,6 +41,35 @@ $LocationsConfigPath = (Resolve-Path -LiteralPath $LocationsConfigPath).Path
 $AutomationLocations = Get-Content -LiteralPath $LocationsConfigPath -Raw | ConvertFrom-Json
 if ($AutomationLocations.schema_version -ne 1 -or $AutomationLocations.automation -ne 'auto-tasacion') {
     throw 'El archivo de ubicaciones no corresponde a auto-tasacion schema_version=1.'
+}
+
+# Teams is deliberately opt-in and configured outside Git.  The local file
+# identifies the solution connection reference and the existing group chat;
+# it contains no content from lots, PDFs, or Excel workbooks.
+$script:TeamsNotifications = $null
+if (-not [string]::IsNullOrWhiteSpace($TeamsNotificationsConfigPath)) {
+    if (-not (Test-Path -LiteralPath $TeamsNotificationsConfigPath -PathType Leaf)) {
+        throw "No se encontro la configuracion local de Teams: $TeamsNotificationsConfigPath"
+    }
+    $TeamsNotificationsConfigPath = (Resolve-Path -LiteralPath $TeamsNotificationsConfigPath).Path
+    $teamsConfig = Get-Content -LiteralPath $TeamsNotificationsConfigPath -Raw | ConvertFrom-Json
+    if ($teamsConfig.schema_version -ne 1 -or $teamsConfig.automation -ne 'auto-tasacion') {
+        throw 'La configuracion local de Teams no corresponde a auto-tasacion schema_version=1.'
+    }
+    if ($teamsConfig.enabled -eq $true) {
+        $referenceLogicalName = [string] $teamsConfig.connection.reference_logical_name
+        $groupChatId = [string] $teamsConfig.destination.group_chat_id
+        if ($referenceLogicalName -notmatch '^[A-Za-z][A-Za-z0-9_]*$') {
+            throw 'connection.reference_logical_name de Teams no es un nombre logico valido.'
+        }
+        if ($groupChatId -notmatch '^19:[^\s]+@thread\.v2$') {
+            throw 'destination.group_chat_id de Teams debe ser el identificador 19:...@thread.v2 de un chat grupal existente.'
+        }
+        $script:TeamsNotifications = [ordered]@{
+            ReferenceLogicalName = $referenceLogicalName
+            GroupChatId = $groupChatId
+        }
+    }
 }
 
 function Normalize-OneDriveLogicalPath {
@@ -336,6 +366,61 @@ function New-EmbeddedOneDriveReference {
     }
 }
 
+function Add-TeamsConnectionReference {
+    param([Parameter(Mandatory)] [hashtable] $ConnectionReferences)
+
+    $result = [ordered]@{}
+    foreach ($entry in $ConnectionReferences.GetEnumerator()) {
+        $result[$entry.Key] = $entry.Value
+    }
+    if ($null -ne $script:TeamsNotifications) {
+        $result.shared_teams = [ordered]@{
+            runtimeSource = 'embedded'
+            connection = [ordered]@{
+                connectionReferenceLogicalName = $script:TeamsNotifications.ReferenceLogicalName
+            }
+            api = [ordered]@{ name = 'shared_teams' }
+        }
+    }
+    return $result
+}
+
+function New-TeamsGroupChatNotification {
+    param(
+        [Parameter(Mandatory)] [string] $MessageBody,
+        [hashtable] $RunAfter = @{}
+    )
+
+    if ($null -eq $script:TeamsNotifications) {
+        throw 'Se intento crear una notificacion de Teams sin configuracion local habilitada.'
+    }
+    return [ordered]@{
+        runAfter = $RunAfter
+        type = 'OpenApiConnection'
+        inputs = [ordered]@{
+            host = [ordered]@{
+                apiId = '/providers/Microsoft.PowerApps/apis/shared_teams'
+                connectionName = 'shared_teams'
+                operationId = 'PostMessageToConversation'
+            }
+            parameters = [ordered]@{
+                poster = 'Flow bot'
+                location = 'Group chat'
+                'body/recipient' = $script:TeamsNotifications.GroupChatId
+                'body/messageBody' = $MessageBody
+            }
+            authentication = "@parameters('`$authentication')"
+        }
+    }
+}
+
+function Get-NotificationCompletionRunAfter {
+    param([Parameter(Mandatory)] [string] $ActionName)
+    return [ordered]@{
+        $ActionName = @('Succeeded', 'Failed', 'Skipped', 'TimedOut')
+    }
+}
+
 function New-OneDriveAction {
     param(
         [Parameter(Mandatory)] [string] $OperationId,
@@ -439,7 +524,13 @@ function New-FlowDefinition {
                     }
                 }
             }
-            return [ordered]@{ connectionReferences = New-InvokerOneDriveReference; definition = New-BaseDefinition -Triggers (New-PowerAppsTrigger -Title 'SeleccionJson') -Actions $actions }
+            if ($null -ne $script:TeamsNotifications) {
+                $actions.Notificar_lote_registrado = New-TeamsGroupChatNotification -RunAfter ([ordered]@{ Crear_control_lote = @('Succeeded') }) -MessageBody "@concat('Auto Tasaciones | lote ', body('HTTP_Registrar_Lote')?['id_lote'], ' registrado. PDFs seleccionados: ', string(length(json(triggerBody()?['text']))), '. Estado: ', body('HTTP_Registrar_Lote')?['estado'], '.')"
+                # A notification outage must not leave Canvas waiting for the
+                # response or roll back a correctly registered lot.
+                $actions.Responder_a_Power_Apps.runAfter = Get-NotificationCompletionRunAfter -ActionName 'Notificar_lote_registrado'
+            }
+            return [ordered]@{ connectionReferences = Add-TeamsConnectionReference -ConnectionReferences (New-InvokerOneDriveReference); definition = New-BaseDefinition -Triggers (New-PowerAppsTrigger -Title 'SeleccionJson') -Actions $actions }
         }
         'auto-tasacion-consultar-lote' {
             $actions = [ordered]@{
@@ -723,8 +814,25 @@ function New-FlowDefinition {
                     else = [ordered]@{ actions = @{} }
                 }
             }
+            if ($null -ne $script:TeamsNotifications) {
+                $ownerActions = $actions.Es_control_de_lote.actions.Es_propietario_del_lote.actions
+                $terminalActions = $ownerActions.Lote_alcanzo_estado_terminal.actions
+                $deliveryBranch = $terminalActions.Lote_completado_con_resultado
+                $deliveryActions = $deliveryBranch.actions.Excel_final_ya_existe
+
+                $existingDeliveryActions = $deliveryActions.actions
+                $existingDeliveryActions.Notificar_excel_final_disponible_existente = New-TeamsGroupChatNotification -RunAfter ([ordered]@{ Confirmar_entrega_existente = @('Succeeded') }) -MessageBody "@concat('Auto Tasaciones | lote ', body('Leer_control_lote')?['id_lote'], ' entregado. Excel final disponible en OneDrive: Resultado_Final_', body('Leer_control_lote')?['id_lote'], '.xlsx.')"
+                $existingDeliveryActions.Eliminar_control_lote_existente.runAfter = Get-NotificationCompletionRunAfter -ActionName 'Notificar_excel_final_disponible_existente'
+
+                $newDeliveryActions = $deliveryActions.else.actions
+                $newDeliveryActions.Notificar_excel_final_disponible_nuevo = New-TeamsGroupChatNotification -RunAfter ([ordered]@{ Confirmar_entrega_nuevo = @('Succeeded') }) -MessageBody "@concat('Auto Tasaciones | lote ', body('Leer_control_lote')?['id_lote'], ' entregado. Excel final disponible en OneDrive: Resultado_Final_', body('Leer_control_lote')?['id_lote'], '.xlsx.')"
+                $newDeliveryActions.Eliminar_control_lote_nuevo.runAfter = Get-NotificationCompletionRunAfter -ActionName 'Notificar_excel_final_disponible_nuevo'
+
+                $deliveryBranch.else.actions.Notificar_lote_con_error = New-TeamsGroupChatNotification -MessageBody "@concat('Auto Tasaciones | lote ', body('Leer_control_lote')?['id_lote'], ' requiere atencion. Estado: ', variables('estado_lote'), '.')"
+                $ownerActions.Lote_alcanzo_estado_terminal.else.actions.Notificar_espera_agotada = New-TeamsGroupChatNotification -RunAfter ([ordered]@{ Liberar_claim_por_timeout = @('Succeeded', 'Failed', 'Skipped', 'TimedOut') }) -MessageBody "@concat('Auto Tasaciones | lote ', body('Leer_control_lote')?['id_lote'], ' requiere atencion: se agoto la espera de procesamiento. Estado observado: ', variables('estado_lote'), '.')"
+            }
             return [ordered]@{
-                connectionReferences = New-EmbeddedOneDriveReference
+                connectionReferences = Add-TeamsConnectionReference -ConnectionReferences (New-EmbeddedOneDriveReference)
                 definition = New-BaseDefinition -Triggers (New-OneDriveControlCreatedTrigger -FolderId $ControlFolderId) -Actions $actions
             }
         }
@@ -1001,6 +1109,9 @@ Import-Module MSAL.PS -Force
 
 Write-Output "Usando referencia de conexion: $OneDriveConnectionReferenceId"
 Add-SolutionComponent -ComponentId ([string] $OneDriveConnectionReferenceId) -ComponentType 10423
+if ($null -ne $script:TeamsNotifications) {
+    Write-Output "Usando referencia de conexion de Teams: $($script:TeamsNotifications.ReferenceLogicalName)"
+}
 
 foreach ($flow in $flows.GetEnumerator()) {
     $id = Create-DisabledFlow -Name $flow.Key -Description $flow.Value
