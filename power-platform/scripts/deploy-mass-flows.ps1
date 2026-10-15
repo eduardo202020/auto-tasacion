@@ -194,7 +194,8 @@ function Invoke-DataverseRequest {
     param(
         [Parameter(Mandatory)] [string] $Method,
         [Parameter(Mandatory)] [string] $Path,
-        [object] $Body
+        [object] $Body,
+        [TimeSpan] $Timeout = ([TimeSpan]::FromSeconds(100))
     )
 
     $headers = Get-DataverseHeaders
@@ -213,6 +214,7 @@ function Invoke-DataverseRequest {
     }
 
     $client = [System.Net.Http.HttpClient]::new()
+    $client.Timeout = $Timeout
     try {
         $response = $client.SendAsync($request).GetAwaiter().GetResult()
         $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
@@ -992,9 +994,12 @@ function Publish-WorkflowDraft {
     # update so Dataverse accepts the controlled Draft -> update -> Activated
     # lifecycle below; never publish unrelated environment customizations.
     $parameterXml = "<importexportxml><workflows><workflow>$WorkflowId</workflow></workflows></importexportxml>"
+    # PublishXml can take longer than HttpClient's default 100-second timeout
+    # when Dataverse has an ActiveUnpublished draft to reconcile. This remains
+    # scoped to one workflow; it never invokes PublishAllXml.
     Invoke-DataverseRequest -Method 'POST' -Path 'PublishXml' -Body ([ordered]@{
         ParameterXml = $parameterXml
-    }) | Out-Null
+    }) -Timeout ([TimeSpan]::FromMinutes(5)) | Out-Null
 }
 
 function Create-DisabledFlow {
