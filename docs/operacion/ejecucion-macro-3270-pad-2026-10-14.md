@@ -133,16 +133,17 @@ I003. Si el centro no es `0727`, registra
 centro. `run-lot` escribe y navega con datos de negocio y no forma parte de
 esta prueba.
 
-## Primera ejecución de presentación: solo lectura
+## Primera ejecución de presentación: navegación sin cambios
 
 1. Abra PCOMM en BPO, autentíquese y deje la sesión **A** en la pantalla de
    espera indicada en `login.png`.
 2. Inicie el lote desde Canvas como en la prueba de diez PDFs.
 3. Cuando el Cloud Flow cree `Resultado_Final_TAS-<LOTE>.xlsx`, el flujo ya
    existente llamará PAD con `IdLote`.
-4. PAD creará el libro local, verificará que la sesión A permite lectura y
-   registrará `LECTURA_3270_OK` por cada fila. No escribe campos, no envía
-   teclas, no navega en 3270 ni procesa préstamos. El libro queda en:
+4. PAD creará el libro local y, con `navigate-lot`, ejecutará `PAUSA → I003 →
+   ENTER` en la sesión A. Registrará `NAVEGACION_3270_OK` por cada fila cuando
+   el centro visible sea `0727`. No envía préstamo, seguro ni otros campos de
+   negocio; tampoco ejecuta `QGTR`, `F4`, `F8` o `FIN`. El libro queda en:
 
    ```text
    C:\ProgramData\NTT DATA EMEAL\auto-tasacion\pad-runtime\trabajo\<LOTE>_<SHA>\Resultado_MASIVO_<LOTE>.xlsm
@@ -152,9 +153,9 @@ esta prueba.
    `resultados\\<LOTE>_<SHA>_macro_3270.json`. También publicará la copia
    `.xlsm` terminada a `Procesados` si la ruta configurada está disponible.
 
-5. Un segundo evento de lectura vuelve a validar la disponibilidad de sesión
-   sin afectar el host. La idempotencia de `run-lot` protege exclusivamente la
-   futura ejecución transaccional.
+5. La sesión queda visible en I003. Un segundo evento de navegación repite
+   únicamente esa interacción segura. La idempotencia de `run-lot` protege
+   exclusivamente la futura ejecución transaccional.
 
 ## Evidencia E2E confirmada
 
@@ -178,6 +179,27 @@ hubo `technical_error` y el libro publicado fue:
 C:\Users\mailbox_27530\OneDrive - NTT DATA EMEAL\automatizaciones-jhglazar\auto-tasaciones\Procesados\Resultado_MASIVO_TAS-F1C48BE414207A139FF0.xlsm
 ```
 
-Esta evidencia cierra el tramo Cloud → resultado Excel → PAD → plantilla MASIVO
-→ lectura de PCOMM. Aún no constituye una ejecución transaccional contra 3270;
-esa fase requiere reemplazar `read-lot` por `run-lot` después de su aprobación.
+Esta evidencia cerró el tramo Cloud → resultado Excel → PAD → plantilla MASIVO
+→ lectura de PCOMM. Posteriormente se validó la navegación visible descrita a
+continuación.
+
+## Evidencia de navegación segura en PCOMM
+
+Sobre el mismo lote `TAS-F1C48BE414207A139FF0`, el 2026-10-14 se ejecutó el
+Desktop Flow con `navigate-lot`, después de actualizar el runner y el módulo
+VBA de la plantilla de BPO. El estado durable de PAD confirmó:
+
+| Campo | Valor |
+| --- | --- |
+| `status` | `NAVEGADO_SIN_CAMBIOS_3270` |
+| `modo_ejecucion` | `NAVEGACION` |
+| Filas para procesar | `4` |
+| `technical_error` | vacío |
+
+Las cuatro filas de la hoja `TRAZA_PAD` registraron
+`NAVEGACION_3270_OK` y `I003_ABIERTO_CENTRO_0727`. La sesión A terminó
+visible en I003. La comprobación demuestra navegación y lectura del centro
+esperado sin ingresar datos de negocio ni disparar una transacción de 3270.
+
+La ejecución transaccional continúa pendiente de aprobación: exige cambiar
+explícitamente `navigate-lot` por `run-lot`.
