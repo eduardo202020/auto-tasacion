@@ -85,10 +85,11 @@ Primero genere las dos definiciones localmente, sin autenticarse ni cambiar
 Power Platform:
 
 ```powershell
+$controlFolderId = .\power-platform\scripts\Get-OneDriveControlFolderId.ps1
 .\power-platform\scripts\deploy-mass-flows.ps1 `
   -DryRun `
   -TeamsNotificationsConfigPath .\config\teams-notifications.local.json `
-  -ControlFolderId '<ID verificado de Controles>' `
+  -ControlFolderId $controlFolderId `
   -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
@@ -99,10 +100,11 @@ En una ventana operativa sin controles JSON pendientes, publique sólo esos dos
 flujos:
 
 ```powershell
+$controlFolderId = .\power-platform\scripts\Get-OneDriveControlFolderId.ps1
 .\power-platform\scripts\deploy-mass-flows.ps1 `
   -Activate `
   -TeamsNotificationsConfigPath .\config\teams-notifications.local.json `
-  -ControlFolderId '<ID verificado de Controles>' `
+  -ControlFolderId $controlFolderId `
   -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 

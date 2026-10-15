@@ -1071,6 +1071,14 @@ if ($FlowName) {
     $flows = $selectedFlows
 }
 
+# The event-driven orchestrator needs the opaque OneDrive identifier stored in
+# its trigger. Validate it before building any local plan so a missing shell
+# environment variable produces an actionable message instead of a PowerShell
+# parameter-binding error inside the definition builder.
+if ($flows.Contains('auto-tasacion-orquestar-lote')) {
+    $ControlFolderId = Assert-OneDriveFolderId -FolderId $ControlFolderId -LogicalPath $ControlFolder -EnvironmentVariable 'AUTOTASACION_CONTROLS_FOLDER_ID'
+}
+
 if ($EmitDefinitionJson) {
     if ($flows.Count -ne 1) {
         throw '-EmitDefinitionJson requiere exactamente un -FlowName.'

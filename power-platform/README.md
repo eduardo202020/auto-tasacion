@@ -90,8 +90,8 @@ Generar y revisar las definiciones sin autenticarse ni modificar recursos remoto
 
 ```powershell
 $env:AUTOTASACION_ONEDRIVE_BASE_FOLDER = '/automatizaciones-jhglazar/auto-tasaciones'
-$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
-.\power-platform\scripts\deploy-mass-flows.ps1 -DryRun -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
+$controlFolderId = .\power-platform\scripts\Get-OneDriveControlFolderId.ps1
+.\power-platform\scripts\deploy-mass-flows.ps1 -DryRun -ControlFolderId $controlFolderId -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
 Omitir `-Activate` tambien deja el script en modo **Plan**, sin modificaciones
@@ -102,15 +102,16 @@ Para publicar solo la ruta nueva después de revisar el E2E:
 
 ```powershell
 $env:AUTOTASACION_ONEDRIVE_BASE_FOLDER = '/automatizaciones-jhglazar/auto-tasaciones'
-$env:AUTOTASACION_CONTROLS_FOLDER_ID = '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
-.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
+$controlFolderId = .\power-platform\scripts\Get-OneDriveControlFolderId.ps1
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -ControlFolderId $controlFolderId -FlowName auto-tasacion-iniciar-lote,auto-tasacion-orquestar-lote
 ```
 
 Para recuperar o actualizar solo un flujo, se puede indicar `-FlowName`. Por
 ejemplo, para actualizar solo el orquestador:
 
 ```powershell
-.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-orquestar-lote -ControlFolderId '<ID verificado de /automatizaciones-jhglazar/auto-tasaciones/Controles>'
+$controlFolderId = .\power-platform\scripts\Get-OneDriveControlFolderId.ps1
+.\power-platform\scripts\deploy-mass-flows.ps1 -Activate -FlowName auto-tasacion-orquestar-lote -ControlFolderId $controlFolderId
 ```
 
 `-Activate` conserva la definicion de cada flujo. Si un flujo publicado tiene un borrador activo sin publicar, el script lo
