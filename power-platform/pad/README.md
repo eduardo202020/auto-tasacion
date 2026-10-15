@@ -213,5 +213,11 @@ importe, dirección, seguro u otros datos de negocio. `run-lot` llama
 instalación de la plantilla, configuración de PAD y ubicación de resultados está en
 [`../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md`](../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).
 
+Cuando PCOMM no está abierto o el operador aún no inició sesión, el Desktop
+Flow debe ejecutar `AsegurarSesion3270` antes del comando `browse-lot`. La
+secuencia de apertura, HLLAPI, autenticación y cambio al centro `0727` está en
+[`AUTO_TASACION_LOGIN_3270.md`](AUTO_TASACION_LOGIN_3270.md). Esta preparación
+no habilita `run-lot` ni escribe datos de tasación.
+
 El simulador se conserva para diagnóstico y para lotes anteriores. El Desktop
 Flow de presentación debe invocar el ejecutor de macro, no `pad_simulator.py`.
