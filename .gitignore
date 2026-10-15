@@ -33,3 +33,6 @@ artifacts/
 
 # Herramientas temporales de análisis local.
 .tmp/
+
+# Directorios de trabajo locales de las pruebas de tasaciones.
+tasaciones-150/
