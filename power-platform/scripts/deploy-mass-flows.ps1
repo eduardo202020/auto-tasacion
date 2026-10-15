@@ -1019,13 +1019,11 @@ function Create-DisabledFlow {
         # to Draft first, replace the definition, then let -Activate publish it
         # again below. This keeps deployments repeatable for edited flows.
         if ([int] $existing.statecode -eq 1) {
-            # Publish only an ActiveUnpublished predecessor. Publishing a flow
-            # already in state/status Published before the PATCH is redundant
-            # and can fail after Dataverse has accepted the request, preventing
-            # the actual definition update from running.
-            if ([int] $existing.statuscode -ne 2) {
-                Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)
-            }
+            # Dataverse can report statuscode=2 while retaining an
+            # ActiveUnpublished row. Publish the named flow unconditionally
+            # before deactivation; otherwise the next PATCH fails with
+            # 0x80040203 and no definition is updated.
+            Publish-WorkflowDraft -WorkflowId ([string] $existing.workflowid)
             Invoke-DataverseRequest -Method 'PATCH' -Path "workflows($($existing.workflowid))" -Body ([ordered]@{
                 statecode = 0
                 statuscode = 1

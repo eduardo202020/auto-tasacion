@@ -198,9 +198,10 @@ if (-not $Activate) {
 
 $workflowId = [string] $flow.workflowid
 if ([int] $flow.statecode -eq 1) {
-    if ([int] $flow.statuscode -ne 2) {
-        Publish-WorkflowDraft -Headers $headers -WorkflowId $workflowId
-    }
+    # statecode/statuscode can still hide an ActiveUnpublished draft. Publish
+    # this one named flow before deactivation so the subsequent PATCH remains
+    # valid even when Dataverse reports statuscode=2.
+    Publish-WorkflowDraft -Headers $headers -WorkflowId $workflowId
     Invoke-DataversePatch -Headers $headers -Path "workflows($workflowId)" -Body ([ordered]@{
         statecode = 0
         statuscode = 1
