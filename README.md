@@ -31,6 +31,8 @@ La migración y reversión de la ruta por evento están en
 
 El estado de despliegue, pruebas y pendientes está en
 [estado de implementación](docs/operacion/estado-implementacion-2026-10-07.md).
+El orden de las validaciones aún pendientes está en
+[seguimiento de cierre](docs/operacion/seguimiento-pendiente-2026-10-14.md).
 
 ## Ruta vigente heredada
 
