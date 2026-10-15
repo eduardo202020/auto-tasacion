@@ -41,6 +41,8 @@ errores terminales al chat grupal corporativo mediante Flow bot. El destino y
 la referencia de conexión se guardan por entorno en un archivo local excluido
 de Git. La configuración y los avisos manuales del tramo Cloud → PAD están en
 [`../docs/operacion/integracion-teams-orquestador.md`](../docs/operacion/integracion-teams-orquestador.md).
+`scripts/Export-TeamsNotificationConfig.ps1` genera ese archivo desde una
+acción temporal de Teams guardada en la solución.
 
 ## Despliegue de flujos masivos
 

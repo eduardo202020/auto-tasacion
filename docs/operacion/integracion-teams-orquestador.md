@@ -45,15 +45,20 @@ config/teams-notifications.local.json
    - **Publicar como**: `Flow bot`;
    - **Publicar en**: `Group chat`;
    - **Group chat**: `[BBVA] AUTOMATIZACION TASACIONES`.
-3. Guarde el borrador y abra la vista de código del flujo. Registre únicamente
-   estos dos valores técnicos:
-   - `connectionReferences.shared_teams.connection.connectionReferenceLogicalName`;
-   - `parameters.body/recipient`, con formato `19:...@thread.v2`.
-4. Copie `config/teams-notifications.example.json` a
-   `config/teams-notifications.local.json` y complete los dos valores. Mantenga
-   `display_name` como referencia visual del grupo.
+3. Guarde el borrador con esa única acción temporal de Teams y ejecute desde la
+   raíz del repositorio:
 
-El bloque queda así, sin comillas adicionales dentro de los valores:
+   ```powershell
+   .\power-platform\scripts\Export-TeamsNotificationConfig.ps1
+   ```
+
+   El script abre la autenticación corporativa, lee sólo la definición guardada
+   y genera `config/teams-notifications.local.json`. No imprime ni versiona el
+   identificador del chat. La acción temporal quedará reemplazada por las
+   acciones versionadas al publicar el siguiente paso.
+
+El archivo generado tiene esta forma, sin comillas adicionales dentro de los
+valores:
 
 ```json
 {
