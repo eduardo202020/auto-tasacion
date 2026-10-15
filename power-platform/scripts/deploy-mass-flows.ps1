@@ -243,11 +243,19 @@ function Get-ControlToken {
         # Secret Manager. The placeholder is only serialized in memory/output.
         return '__LOCAL_PLAN_CONTROL_TOKEN__'
     }
-    $value = (& $Gcloud secrets versions access latest --secret 'batch-control-api-token' --project 'project-fe2e4c6a-b528-4bcf-aa1').Trim()
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        throw 'No se pudo obtener el token de control desde Secret Manager.'
+    # A native command can emit an empty trailing record. If it is returned
+    # directly, PowerShell serializes the header as a JSON array and the HTTP
+    # action becomes an InvalidTemplate before it reaches Cloud Run. Accept
+    # exactly one non-empty line, never concatenate or expose its value.
+    $values = @(
+        (& $Gcloud secrets versions access latest --secret 'batch-control-api-token' --project 'project-fe2e4c6a-b528-4bcf-aa1') |
+            ForEach-Object { ([string] $_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($values.Count -ne 1) {
+        throw 'Secret Manager no devolvio un unico valor de token de control.'
     }
-    return $value
+    return [string] $values[0]
 }
 
 function New-BaseDefinition {
