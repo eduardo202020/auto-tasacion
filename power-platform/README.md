@@ -36,10 +36,11 @@ Microsoft Graph ni recibe rutas de OneDrive para descargar contenido.
 
 ## Alertas operativas en Teams
 
-La definición puede informar el registro, la entrega del Excel final y los
-errores terminales al chat grupal corporativo mediante Flow bot. El destino y
-la referencia de conexión se guardan por entorno en un archivo local excluido
-de Git. La configuración y los avisos manuales del tramo Cloud → PAD están en
+La definición puede informar el registro, la entrega del Excel final, los
+errores terminales y el tramo Cloud → PAD/3270 al chat grupal corporativo
+mediante Flow bot. El destino y la referencia de conexión se guardan por
+entorno en un archivo local excluido de Git. La configuración y los
+actualizadores versionados están en
 [`../docs/operacion/integracion-teams-orquestador.md`](../docs/operacion/integracion-teams-orquestador.md).
 `scripts/Export-TeamsNotificationConfig.ps1` genera ese archivo desde una
 acción temporal de Teams guardada en la solución.

@@ -114,20 +114,32 @@ publicación sustituye la definición completa del flujo.
 
 ## Avisos de PAD y 3270
 
-En el Cloud Flow que detecta `Resultado_Final_<ID_LOTE>.xlsx` e invoca
-`auto-tasacion-procesar-3270-simulado`, agregue tres acciones de Teams al mismo
-chat grupal. Reutilice la misma referencia de conexión.
+El actualizador `Update-PadTeamsNotifications.ps1` conserva la definición ya
+publicada de `auto-tasacion-activar-pad`, incluida la conexión al Desktop
+Flow, y agrega tres acciones de Teams al mismo chat grupal:
 
-| Ubicación | Configurar ejecución posterior | Texto sugerido |
+| Ubicación | Ejecución posterior | Mensaje |
 | --- | --- | --- |
-| Inmediatamente antes de ejecutar el Desktop Flow | después de extraer `IdLote` | `Auto Tasaciones \| lote <IdLote> \| PAD/3270 inició.` |
-| Inmediatamente después del Desktop Flow | sólo si el Desktop Flow finaliza correctamente | `Auto Tasaciones \| lote <IdLote> \| PAD/3270 finalizó. Estado: <EstadoPad>. <MensajePad>` |
-| En una rama paralela después del Desktop Flow | **has failed**, **has timed out** y **is skipped** | `Auto Tasaciones \| lote <IdLote> \| PAD/3270 requiere atención. Revise la ejecución del flujo.` |
+| Antes del Desktop Flow | Dependencias originales del Desktop Flow | Inicio de PAD/3270 para el lote. |
+| Después del Desktop Flow | `Succeeded` | Estado `EstadoPad` y mensaje `MensajePad`. |
+| Después del Desktop Flow | `Failed`, `TimedOut` o `Skipped` | Aviso de atención sin detalles técnicos. |
 
-Para cada acción seleccione `Flow bot`, `Group chat` y
-`[BBVA] AUTOMATIZACION TASACIONES`. En la segunda acción use las salidas ya
-publicadas por PAD: `EstadoPad` y `MensajePad`. Después guarde y publique el
-Cloud Flow.
+El aviso de inicio no bloquea PAD si Teams falla. Primero revise el plan; esta
+lectura no escribe definiciones ni muestra el ID del chat:
+
+```powershell
+.\power-platform\scripts\Update-PadTeamsNotifications.ps1 -DryRun
+```
+
+Cuando confirme que la acción indicada en `DesktopAction` es la que ejecuta
+`auto-tasacion-procesar-3270-simulado`, aplique la actualización:
+
+```powershell
+.\power-platform\scripts\Update-PadTeamsNotifications.ps1 -Activate
+```
+
+No agregue ni modifique manualmente esas tres acciones en el diseñador, porque
+el siguiente despliegue dirigido volvería a aplicar la definición versionada.
 
 ## Validación operativa
 
