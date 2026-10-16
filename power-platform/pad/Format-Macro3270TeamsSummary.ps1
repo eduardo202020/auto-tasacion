@@ -62,6 +62,31 @@ function Format-StatusLabel {
     return (($Status -replace '_', ' ').ToLowerInvariant())
 }
 
+function Format-RunDuration {
+    param(
+        [AllowEmptyString()] [string] $CreatedAt,
+        [AllowEmptyString()] [string] $UpdatedAt
+    )
+
+    $started = [datetimeoffset]::MinValue
+    $finished = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse($CreatedAt, [ref] $started) -or
+        -not [datetimeoffset]::TryParse($UpdatedAt, [ref] $finished) -or
+        $finished -lt $started) {
+        return 'No informada'
+    }
+
+    $span = $finished - $started
+    $seconds = [Math]::Floor($span.TotalSeconds)
+    if ($seconds -lt 60) {
+        return "$seconds s"
+    }
+    if ($seconds -lt 3600) {
+        return "$([Math]::Floor($seconds / 60)) min $($seconds % 60) s"
+    }
+    return "$([Math]::Floor($seconds / 3600)) h $([Math]::Floor(($seconds % 3600) / 60)) min"
+}
+
 if ([string]::IsNullOrWhiteSpace($ResultsDirectory)) {
     if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
         throw 'Indique -ConfigPath o -ResultsDirectory.'
@@ -93,6 +118,7 @@ $incidents = [Math]::Max(0, $total - $ok)
 $technicalError = -not [string]::IsNullOrWhiteSpace([string] $record.technical_error)
 $withIncidents = $status -match 'CON_INCIDENCIAS' -or $incidents -gt 0
 $failed = $technicalError -or $status -match '(^ERROR|_ERROR_)'
+$duration = Format-RunDuration -CreatedAt ([string] $record.created_at) -UpdatedAt ([string] $record.updated_at)
 
 if ($failed) {
     $headline = 'El procesamiento 3270 requiere atenci&#243;n'
@@ -117,20 +143,24 @@ $resultGroups = @(
         Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Descending = $false } |
         ForEach-Object { "$(Encode-Html ([string] $_.Name)) ($($_.Count))" }
 )
-$published = -not [string]::IsNullOrWhiteSpace([string] $record.published_workbook)
+$publishedWorkbook = [string] $record.published_workbook
+$published = -not [string]::IsNullOrWhiteSpace($publishedWorkbook)
+$publishedFilename = if ($published) { [System.IO.Path]::GetFileName($publishedWorkbook) } else { 'No publicado' }
 $revisionIa = if ($record.revision_ia_excluida -eq $true) { 'Excluidas del 3270' } else { 'No informado' }
 
 if ($OutputFormat -eq 'Text') {
     $lines = @(
         "AUTO TASACIONES | RESULTADO 3270",
         "Lote: $LotId",
+        "Estado global: $status",
         "Estado: $stateLabel",
         "Modo: $mode",
         "Casos enviados a 3270: $total",
         "Consultas correctas: $ok",
         "Con incidencias: $incidents",
         "Revision IA: $revisionIa",
-        "Libro final: $(if ($published) { 'Publicado' } else { 'No publicado' })"
+        "Duracion: $duration",
+        "Libro final: $publishedFilename"
     )
     if ($resultGroups.Count -gt 0 -and -not $failed) {
         $lines += "Resultado observado: $($resultGroups -join '; ')"
@@ -151,13 +181,15 @@ $html = @(
     "Con incidencias: <b>$incidents</b><br>"
     "Revision IA: <b>$revisionIa</b><br>"
     "Modo: <b>$(Encode-Html $mode)</b><br>"
-    "Estado: <b>$(Encode-Html $stateLabel)</b>"
+    "Estado: <b>$(Encode-Html $stateLabel)</b><br>"
+    "Estado global: <b>$(Encode-Html $status)</b><br>"
+    "Duraci&#243;n: <b>$(Encode-Html $duration)</b>"
     '</p>'
 )
 if ($resultGroups.Count -gt 0 -and -not $failed) {
     $html += "<p><span style=`"font-size:11px;color:#616161;`">Resultado observado: $($resultGroups -join '; ')</span></p>"
 }
-$html += "<p><span style=`"font-size:11px;color:#616161;`">Libro final: $(if ($published) { 'publicado en OneDrive' } else { 'no publicado' })</span></p>"
+$html += "<p><span style=`"font-size:11px;color:#616161;`">Libro final: $(Encode-Html $publishedFilename)</span></p>"
 $html += '<p><span style="font-size:10px;color:#616161;">El detalle tecnico y la traza por caso permanecen en el JSON y el XLSM local.</span></p>'
 
 Write-Output ($html -join '')

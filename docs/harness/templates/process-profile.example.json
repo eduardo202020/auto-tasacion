@@ -45,8 +45,15 @@
     "flow": "<desktop_flow>",
     "input": "<id_de_correlacion>",
     "outputs": ["<estado>", "<mensaje>", "<id_procesado>"],
+    "external_operation": {
+      "technical_exit_code": "<variable_o_salida_de_codigo>",
+      "success_code": 0,
+      "functional_artifact": "<json_o_archivo_estructurado_por_llave>",
+      "artifact_lookup": "<patron_o_ubicacion_sin_secretos>"
+    },
     "safe_mode": "<consulta_sin_cambios>",
-    "write_mode": "<modo_transaccional_aprobado>"
+    "write_mode": "<modo_transaccional_aprobado>",
+    "intentional_open_processes": ["<aplicacion_que_permanece_abierta_o_vacio>"]
   },
   "notifications": {
     "provider": "Microsoft Teams",

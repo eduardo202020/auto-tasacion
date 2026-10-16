@@ -18,7 +18,10 @@ flowchart LR
     D --> E[macro_3270_runner.py browse-lot]
     E --> F[Copia local MASIVO XLSM]
     F --> G[Excel VBA adjunta sesión A]
-    G --> H[TRAZA_PAD + resultado local]
+    G --> H[TRAZA_PAD + JSON del lote]
+    H --> I[AppExitCode]
+    I -->|0| J[RESUMEN_RESULTADO_3270]
+    I -->|distinto de 0| K[Alerta Teams técnica]
 ```
 
 `browse-lot` ejecuta la consulta segura `PAUSA -> I003 -> opción 01 -> préstamo
@@ -62,7 +65,20 @@ ValidarExcel
 ```text
 AsegurarSesion3270
 cmd.exe /d /c ... macro_3270_runner.py --config "%RutaConfiguracion%" browse-lot --lot "%IdLote%"
+esperar a que termine -> AppExitCode
+IF AppExitCode = 0 -> RESUMEN_RESULTADO_3270
+ELSE -> alerta técnica de Teams
 ```
+
+La condición de PAD compara `AppExitCode` como número con `0`. Un código `0`
+confirma únicamente que el runner terminó técnicamente. El resultado funcional
+se obtiene del JSON con patrón `<ID_LOTE>_<SHA>_macro_3270.json`: puede ser
+correcto, tener incidencias o registrar un error funcional.
+
+`RESUMEN_RESULTADO_3270` usa ese JSON para publicar lote, estado, modo,
+conteos, categorías de resultado, duración y nombre del Excel publicado. Ante
+un código técnico distinto de `0`, PAD publica la alerta roja y no intenta
+interpretar el JSON.
 
 No llame `AsegurarSesion3270` también desde `Main`. La preparación abre PCOMM,
 autentica, selecciona el centro y cierra solo `TerminalSession` de PAD. Excel
@@ -102,6 +118,9 @@ la consulta por préstamo. La última evidencia segura confirmó:
 La nueva preparación automática añade a esa cadena que PCOMM puede partir
 cerrado, abrirse y quedar listo sin preparación manual. Su aceptación E2E exige
 que el mismo `browse-lot` vuelva a adjuntarse después de que PAD libere HLLAPI.
+Excel, Python y `cmd.exe` cierran al final; PCOMM permanece abierto de forma
+intencional con la sesión `A` disponible. No debe tratarse como proceso huérfano
+ni cerrarse con el PowerShell heredado.
 
 ## Pendientes de operación
 
@@ -111,6 +130,8 @@ que el mismo `browse-lot` vuelva a adjuntarse después de que PAD libere HLLAPI.
   no código 0.
 - Habilitar y validar las acciones Teams de login que siguen deshabilitadas en
   el Robin.
-- Confirmar que la alerta final de PAD recibe estado y mensaje no vacíos.
+- Ejecutar un lote nuevo y confirmar el resumen directo de
+  `RESUMEN_RESULTADO_3270` en Teams, comparándolo con su JSON. Hasta entonces,
+  el cierre rico de PAD permanece pendiente de evidencia E2E.
 
 La ejecución transaccional requiere una autorización posterior y explícita.

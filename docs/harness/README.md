@@ -58,9 +58,11 @@ Complete primero el perfil. Los valores opacos de conexiones, carpetas, chats, c
 - Los eventos repetidos deben ser idempotentes. Un reintento no puede duplicar una operación de escritorio ni una transacción de negocio.
 - Las alertas contienen identificador, etapa, estado y siguiente acción. No incluyen documentos, datos personales, valores de negocio ni detalles técnicos que deban quedar en el registro seguro.
 - Un tramo se acepta solo cuando su salida esperada está presente y no vacía. Una alerta final emitida con campos vacíos requiere corregir o validar el mapeo de salidas antes del cierre.
-
+- Separe el código de salida técnico de una operación externa de su resultado funcional. Ante un código técnico distinto de cero, alerte y no interprete el artefacto funcional; ante cero, clasifique el artefacto estructurado como correcto, con incidencias o error funcional.
+- El artefacto estructurado es la fuente de verdad del resumen del operador. La alerta contiene conteos, estado, duración y siguiente acción; el detalle sensible queda en la traza técnica.
 - En automatización de terminales, modele cada pantalla intermedia comprobada. No fuerce coordenadas si el host ya posiciona el cursor en el campo editable.
 - Separe abrir, autenticar y preparar sesión de la operación de negocio. Si otro cliente toma el control después, libere el manejador de terminal sin cerrar la aplicación que debe permanecer abierta.
+- Documente los procesos que permanecen abiertos de forma intencional al terminar el flujo, para distinguir ese estado de una fuga de proceso.
 - Registre las acciones deshabilitadas como configuración pendiente, no como capacidad operativa. Una falla funcional debe devolver un estado de error observable, nunca un éxito técnico.
 - Las configuraciones compartidas solo pueden contener parámetros no sensibles; las contraseñas se obtienen desde un almacén seguro en tiempo de ejecución.
 - Cuando el resultado detallado existe en el componente de escritorio, genere allí el resumen seguro para el operador. Evite depender de salidas Cloud no definidas; envíe solo conteos, estado y siguientes acciones.
@@ -70,9 +72,9 @@ Complete primero el perfil. Los valores opacos de conexiones, carpetas, chats, c
 1. El disparador registra la llave de correlación.
 2. Cada flujo invocado termina correctamente y el evento siguiente se crea una sola vez.
 3. El servicio genera el artefacto o estado de salida esperado.
-4. El Desktop Flow recibe exactamente la llave del caso y devuelve sus campos de salida.
+4. El Desktop Flow recibe exactamente la llave del caso, registra el código de salida técnico y genera o localiza el artefacto funcional del mismo caso.
 5. El destino final confirma la operación o, para una prueba segura, la consulta sin cambios.
-6. El canal de alertas muestra inicio, hito de salida, inicio de escritorio y fin con valores no vacíos.
+6. El canal de alertas muestra inicio, hito de salida, inicio de escritorio y fin con valores no vacíos; el fin coincide con el artefacto funcional de la misma llave.
 7. El registro de aceptación conserva enlaces o ubicaciones de evidencia sin copiar información sensible.
 
 ## Reversa y diagnóstico

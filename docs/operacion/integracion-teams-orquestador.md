@@ -125,10 +125,12 @@ Por defecto mantiene tres mensajes Cloud:
 | Despues del Desktop Flow | `Failed`, `TimedOut` o `Skipped` | Aviso de atencion sin detalles tecnicos. |
 
 El cierre generico es temporal mientras PAD no publique su resumen detallado.
-Cuando `ValidarExcel` ya lea el JSON durable y publique el HTML mediante
-`Format-Macro3270TeamsSummary.ps1`, use `-SuccessNotificationSource Desktop`.
-Ese modo conserva los avisos Cloud de inicio y error, y retira solo
-`Notificar_PAD_3270_fin` para que no haya dos cierres.
+`ValidarExcel` ya cuenta con el subflujo `RESUMEN_RESULTADO_3270`, que lee el
+JSON durable y publica su HTML directo en Teams después de validar el código de
+salida técnico. Una vez que esa ruta esté comprobada en una ejecución E2E nueva,
+use `-SuccessNotificationSource Desktop`. Ese modo conserva los avisos Cloud de
+inicio y error, y retira solo `Notificar_PAD_3270_fin` para que no haya dos
+cierres.
 
 La configuracion paso a paso y el formato del mensaje estan en
 [`resumen-teams-resultado-3270.md`](resumen-teams-resultado-3270.md). Primero
@@ -138,7 +140,8 @@ revise el plan; esta lectura no escribe definiciones ni muestra el ID del chat:
 .\power-platform\scripts\Update-PadTeamsNotifications.ps1 -DryRun
 ```
 
-Despues de validar visualmente el resumen de un lote nuevo, aplique el modo PAD:
+Despues de validar visualmente el resumen directo de PAD para un lote nuevo,
+aplique el modo PAD:
 
 ```powershell
 .\power-platform\scripts\Update-PadTeamsNotifications.ps1 `
@@ -147,8 +150,7 @@ Despues de validar visualmente el resumen de un lote nuevo, aplique el modo PAD:
 ```
 
 No modifique manualmente los avisos Cloud que administra este script, porque el
-siguiente despliegue dirigido volveria a aplicar la definicion versionada.
-el siguiente despliegue dirigido volvería a aplicar la definición versionada.
+siguiente despliegue dirigido volvería a aplicar la definición versionada.
 
 ## Validación operativa
 

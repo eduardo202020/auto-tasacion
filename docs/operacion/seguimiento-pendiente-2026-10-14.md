@@ -1,8 +1,8 @@
 # Seguimiento pendiente: cierre de presentación Auto Tasaciones
 
-**Actualizado:** 2026-10-14
-**Objetivo:** cerrar la demostración completa Cloud → Excel → PAD → consulta
-3270 sin realizar grabaciones en el sistema bancario.
+**Actualizado:** 2026-10-15
+**Objetivo:** cerrar la demostración Cloud → Excel → PAD → consulta 3270 sin
+realizar grabaciones en el sistema bancario.
 
 ## Estado confirmado
 
@@ -11,7 +11,9 @@
 | Canvas, selección de PDFs y registro de lote | Corregido; requiere repetición E2E | `auto-tasacion-iniciar-lote` se republicó con el token de la versión montada por Cloud Run. |
 | Cloud Run y entrega de Excel | Confirmado previamente | Lote de diez PDFs entregado y Excel `Resultado_Final` generado. |
 | PAD, Excel MASIVO y PCOMM | Confirmado en modo de consulta | Cuatro filas llegaron a `CONSULTA_3270_OK` con `ICA9783_SEGURO_TIPO_I`. |
-| Alertas Teams | Resumen rico de PAD listo para integrar | Registro, entrega, inicio y error llegan por Cloud. El cierre exitoso debe leer el JSON del mismo lote en PAD y publicar el resumen HTML. | Registro, entrega, inicio y fin llegan al chat. La alerta final de PAD debe devolver estado y mensaje no vacíos. |
+| Inicio 3270 desde cerrado | Configurado en PAD | `AsegurarSesion3270` abre PCOMM, inicia sesión, deja centro `0727` y libera HLLAPI. Requiere su prueba E2E integrada con el lote. |
+| Resumen directo de PAD en Teams | Configurado; pendiente de evidencia E2E | `ValidarExcel` evalúa `AppExitCode`, usa `RESUMEN_RESULTADO_3270` para éxito técnico y publica error directo en la rama contraria. |
+| Cierre genérico Cloud | Sigue activo | Se retira solo después de comprobar el resumen directo de PAD, para evitar duplicidad de cierre. |
 | Escritura transaccional en 3270 | Pendiente | No está autorizada en esta fase. |
 | Revisión por IA de excepciones | Pendiente posterior | Se atiende después de cerrar el flujo de presentación. |
 
@@ -34,43 +36,53 @@ confirmar que se publica `Resultado_Final_<ID_LOTE>.xlsx`.
 **Evidencia a guardar:** ejecución correcta del orquestador y alerta de
 resultado final en Teams.
 
-### 3. Comprobar activación automática de PAD
+### 3. Comprobar PAD, 3270 y el artefacto funcional
 
 Cuando aparezca el Excel final, verificar que `auto-tasacion-activar-pad`
-llama al Desktop Flow y que el estado local de
-`pad-runtime/estado/macro_3270` termina sin `technical_error`.
+llama al Desktop Flow una sola vez. PAD debe abrir y preparar PCOMM desde
+cerrado, ejecutar `browse-lot` y conservar `AppExitCode = 0`.
 
-Para la demostración vigente, PAD debe conservar el comando `browse-lot` y
-producir `CONSULTADO_SIN_CAMBIOS_3270` por los casos completos. No debe usar
-`run-lot` durante esta etapa.
+El JSON `<ID_LOTE>_<SHA>_macro_3270.json` debe pertenecer al mismo lote y
+terminar en `CONSULTADO_SIN_CAMBIOS_3270` o su variante con incidencias. El
+libro `.xlsm` publicado debe contener `TRAZA_PAD`.
 
-**Evidencia a guardar:** mensajes de inicio y fin de PAD en Teams, JSON de
-estado del lote y libro `.xlsm` publicado en `Procesados`.
+**Evidencia a guardar:** historial Cloud de activación, código técnico PAD,
+JSON del lote, libro publicado y evidencia de consulta. PCOMM puede permanecer
+abierto al terminar; es un estado intencional.
 
-### 4. Validar el resumen final de PAD en Teams
+### 4. Validar el resumen final directo de PAD
 
-Configure en `ValidarExcel` el resumen HTML a partir del JSON durable y ejecute
-un lote nuevo. Verifique que llega una sola vez y contiene lote, estado,
-conteos, resultado agregado y disponibilidad del libro, sin datos por caso ni
-rutas locales. Luego retire el cierre gen?rico Cloud con
-`-SuccessNotificationSource Desktop`.
+En la misma ejecución, comprobar que `RESUMEN_RESULTADO_3270` publica una sola
+vez en Teams. El mensaje debe coincidir con el JSON del lote y mostrar lote,
+estado, modo, conteos, categorías de resultado, duración y nombre del libro,
+sin datos por caso ni rutas locales.
 
-**Evidencia a guardar:** mensaje estilizado de Teams y JSON del mismo lote.
+Si `AppExitCode` es distinto de `0`, debe llegar la alerta roja y PAD no debe
+intentar interpretar el resultado funcional.
 
-### 5. Cerrar la presentación
+**Evidencia a guardar:** captura del mensaje estilizado y JSON del mismo lote.
 
-Registrar el ID del lote de prueba, duración total, número de PDFs, filas de
-`PARA_PROCESAR`, resultado de la consulta 3270 y ubicación del Excel final.
-Con esa evidencia se considera cerrada la demostración sin cambios en 3270.
+### 5. Retirar el cierre genérico Cloud y cerrar la presentación
+
+Solo después del paso anterior, ejecutar primero:
+
+```powershell
+.\power-platform\scripts\Update-PadTeamsNotifications.ps1 `
+  -DryRun `
+  -SuccessNotificationSource Desktop
+```
+
+Luego aplicar el mismo comando con `-Activate`. Conservar el ID del lote de
+prueba, duración total, número de PDFs, filas `PARA_PROCESAR`, resultado 3270 y
+ubicación del Excel final como evidencia de cierre.
 
 ## Trabajo posterior a la presentación
 
 1. Resolver los casos en `REVISION_IA` con las reglas aprobadas por
    Operaciones.
-2. Validar los datos de negocio de una muestra antes de habilitar escritura en
+2. Migrar las credenciales temporales de 3270 a un almacén seguro.
+3. Hacer que la rama de usuario bloqueado devuelva un estado técnico de error.
+4. Validar los datos de negocio de una muestra antes de habilitar escritura en
    3270.
-3. Solicitar una autorización explícita para cambiar `browse-lot` por
+5. Solicitar una autorización explícita para cambiar `browse-lot` por
    `run-lot`.
-4. Rotar el secreto de control expuesto durante el diagnóstico, actualizar la
-   referencia de Cloud Run a la nueva versión y republicar los flujos con
-   `deploy-mass-flows.ps1`.

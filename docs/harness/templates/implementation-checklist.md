@@ -35,7 +35,9 @@
 
 - [ ] Se instalaron dependencias con el mismo Python o runtime que usa PAD.
 - [ ] Se prepararon rutas locales, permisos, ubicaciones de confianza y archivo de configuración local.
-- [ ] El Desktop Flow recibe la llave de correlación y expone salidas de estado y mensaje.
+- [ ] El Desktop Flow recibe la llave de correlación, espera la operación externa y captura su código de salida técnico.
+- [ ] Se definió el artefacto estructurado que determina el resultado funcional y la regla para localizarlo por llave de correlación.
+- [ ] El resumen para el operador se construye desde ese artefacto; ante fallo técnico no intenta interpretarlo.
 - [ ] La aplicación de destino está autenticada y disponible para la prueba segura.
 
 ## 3. Consola y despliegue automatizado
@@ -52,12 +54,13 @@
 - [ ] La aplicación registró el caso o lote.
 - [ ] El servicio entregó el artefacto de salida esperado.
 - [ ] El evento de salida invocó el Desktop Flow una sola vez.
-- [ ] El Desktop Flow terminó en modo seguro y devolvió estado y mensaje.
-- [ ] Teams emitió los eventos de registro, salida, inicio y fin con campos no vacíos.
+- [ ] El Desktop Flow terminó en modo seguro, con código técnico esperado y artefacto funcional del mismo caso.
+- [ ] Teams emitió los eventos de registro, salida, inicio y fin con campos no vacíos; el resumen final coincide con el artefacto funcional.
 - [ ] Se actualizó `acceptance-record.md` con ubicaciones de evidencia.
 
 ## 5. Cierre o reversa
 
 - [ ] Se documentó la condición de éxito y la siguiente acción del operador.
+- [ ] Se documentó qué procesos cierran y cuáles permanecen abiertos de forma intencional al completar la ejecución.
 - [ ] Se retiraron configuraciones temporales que ya no son necesarias.
 - [ ] Si hubo error, se revirtió el componente afectado y se repitió con una llave nueva.

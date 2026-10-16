@@ -11,6 +11,8 @@
 | Fecha y hora | Pendiente |
 | Operador | Pendiente |
 | Modo de escritorio | Pendiente |
+| Código técnico de escritorio | Pendiente |
+| Resultado funcional | Pendiente |
 | Resultado final | Pendiente |
 
 ## Evidencia por frontera
@@ -21,8 +23,10 @@
 | Flujo -> servicio | Registro aceptado | Pendiente | Pendiente |
 | Servicio -> salida | Artefacto o estado terminal | Pendiente | Pendiente |
 | Salida -> Desktop Flow | Una ejecución para la llave | Pendiente | Pendiente |
+| Desktop -> operación externa | Código técnico esperado | Pendiente | Pendiente |
+| Operación externa -> artefacto | Resultado estructurado de la misma llave | Pendiente | Pendiente |
 | Desktop -> sistema destino | Consulta o transacción confirmada | Pendiente | Pendiente |
-| Notificaciones | Registro, salida, inicio y fin no vacíos | Pendiente | Pendiente |
+| Notificaciones | Registro, salida, inicio y fin no vacíos; el fin coincide con el artefacto | Pendiente | Pendiente |
 
 ## Incidencias y recuperación
 

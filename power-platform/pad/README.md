@@ -219,6 +219,14 @@ antes de `browse-lot`: abre PCOMM si es necesario, autentica la sesión `A`,
 prepara el centro `0727` y libera HLLAPI sin cerrar PCOMM. No se invoca desde
 `Main`, porque eso duplicaría el login.
 
+Después de `browse-lot`, PAD espera `cmd.exe`, guarda `AppExitCode` y separa
+dos niveles de resultado: si el código es distinto de `0`, publica la alerta
+técnica; si es `0`, el subflujo `RESUMEN_RESULTADO_3270` interpreta el JSON
+durable del mismo lote y publica el resumen para el operador. El código `0` no
+equivale a que todos los casos hayan terminado correctamente. El contrato y la
+evidencia requerida están en
+[`../../docs/operacion/resumen-teams-resultado-3270.md`](../../docs/operacion/resumen-teams-resultado-3270.md).
+
 La configuración actual obtiene de forma transitoria las credenciales desde un
 Excel compartido; no se versionan rutas, usuarios ni contraseñas. La evolución
 pendiente es recuperar la contraseña desde un almacén seguro. La secuencia
