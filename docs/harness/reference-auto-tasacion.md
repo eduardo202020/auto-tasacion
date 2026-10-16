@@ -13,9 +13,10 @@ Power Apps -> registro de lote -> Cloud Run -> Resultado_Final.xlsx
 ```
 
 La prueba 3270 usa `browse-lot`: consulta pantallas por préstamo sin grabar
-campos de negocio. Las alertas de Cloud informan lote registrado y Excel
-entregado; PAD informa inicio y final. El aviso final de PAD aún requiere
-validar que sus campos de salida no lleguen vacíos.
+campos de negocio. Las alertas de Cloud informan lote registrado, Excel
+entregado, inicio de PAD y error de PAD. El cierre exitoso puede generarse en
+PAD desde el JSON durable, para publicar conteos reales sin depender de salidas
+vacías del conector Desktop Flow.
 
 ## Preparación manual y automatizada
 
@@ -106,7 +107,7 @@ habilitarlas y validarlas. La rama de usuario bloqueado hoy finaliza con código
 | Excel COM falló al abrir plantilla | El archivo no estaba disponible localmente. | Confirmar sincronización y validar libro, hoja y tabla antes de PAD. |
 | Centro rechazado por 3270 | Se movió el cursor a una zona protegida. | Confirmar `BXA0147` y escribir el centro en el cursor actual. |
 | VBA no pudo tomar la sesión | PAD retuvo HLLAPI. | Cerrar `TerminalSession` sin cerrar PCOMM antes de llamar la macro. |
-| Alerta final de PAD con campos vacíos | Debe confirmarse el contrato de salida del Desktop Flow. | La aceptación exige estado y mensaje no vacíos. |
+| Alerta final de PAD con campos vacíos | El Cloud Flow dependía de salidas no definidas del Desktop Flow. | Construir el resumen en PAD desde el JSON durable del mismo lote y enviar solo conteos seguros. |
 
 ## Evidencia mínima de aceptación
 
@@ -118,7 +119,9 @@ habilitarlas y validarlas. La rama de usuario bloqueado hoy finaliza con código
    -> ENTER` y registra `CONSULTA_3270_OK` por cada caso elegible.
 5. El estado durable, el libro publicado y las capturas de consulta no muestran
    error técnico.
-6. Teams muestra los hitos con identificador, estado y mensaje no vacíos.
+6. Teams muestra los hitos con identificador, estado y mensaje no vacíos. El
+   cierre exitoso usa los conteos del JSON del mismo lote, sin exponer datos por
+   caso, rutas locales ni detalles técnicos.
 
 ## Límite actual
 

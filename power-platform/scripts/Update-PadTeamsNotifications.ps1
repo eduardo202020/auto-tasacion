@@ -3,7 +3,9 @@ param(
     [switch] $Activate,
     [switch] $DryRun,
     [string] $FlowName = 'auto-tasacion-activar-pad',
-    [string] $TeamsNotificationsConfigPath = (Join-Path $PSScriptRoot '..\..\config\teams-notifications.local.json')
+    [string] $TeamsNotificationsConfigPath = (Join-Path $PSScriptRoot '..\..\config\teams-notifications.local.json'),
+    [ValidateSet('Cloud', 'Desktop')]
+    [string] $SuccessNotificationSource = 'Cloud'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,6 +47,17 @@ function Set-ObjectProperty {
     }
     else {
         $property.Value = $Value
+    }
+}
+
+function Remove-ObjectProperty {
+    param(
+        [Parameter(Mandatory)] [object] $Object,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    if ($null -ne $Object.PSObject.Properties[$Name]) {
+        [void] $Object.PSObject.Properties.Remove($Name)
     }
 }
 
@@ -178,14 +191,22 @@ Set-ObjectProperty -Object $properties.definition.actions -Name $startNotificati
 Set-ObjectProperty -Object $desktopAction.Action -Name 'runAfter' -Value ([ordered]@{
     $startNotificationName = @('Succeeded', 'Failed', 'Skipped', 'TimedOut')
 })
-Set-ObjectProperty -Object $properties.definition.actions -Name $successNotificationName -Value (New-TeamsGroupChatNotification -RunAfter ([ordered]@{ $desktopActionName = @('Succeeded') }) -MessageBody "@concat('Auto Tasaciones | lote ', $idLoteExpression, ' | PAD/3270 finalizo. Estado: ', outputs('$desktopActionName')?['body/EstadoPad'], '. ', outputs('$desktopActionName')?['body/MensajePad'])")
+if ($SuccessNotificationSource -eq 'Cloud') {
+    Set-ObjectProperty -Object $properties.definition.actions -Name $successNotificationName -Value (New-TeamsGroupChatNotification -RunAfter ([ordered]@{ $desktopActionName = @('Succeeded') }) -MessageBody "@concat('Auto Tasaciones | lote ', $idLoteExpression, ' | PAD/3270 finalizo. Estado: ', outputs('$desktopActionName')?['body/EstadoPad'], '. ', outputs('$desktopActionName')?['body/MensajePad'])")
+}
+else {
+    # PAD posts the validated HTML summary read from its durable JSON. Keeping a
+    # second Cloud success action would duplicate the operator-facing result.
+    Remove-ObjectProperty -Object $properties.definition.actions -Name $successNotificationName
+}
 Set-ObjectProperty -Object $properties.definition.actions -Name $errorNotificationName -Value (New-TeamsGroupChatNotification -RunAfter ([ordered]@{ $desktopActionName = @('Failed', 'Skipped', 'TimedOut') }) -MessageBody "@concat('Auto Tasaciones | lote ', $idLoteExpression, ' | PAD/3270 requiere atencion. El flujo de escritorio no finalizo correctamente.')")
 
 $plan = [pscustomobject]@{
     Flow = [string] $flow.name
     DesktopAction = $desktopActionName
     DesktopOperation = $desktopAction.OperationId
-    Notifications = 3
+    Notifications = if ($SuccessNotificationSource -eq 'Cloud') { 3 } else { 2 }
+    SuccessNotificationSource = $SuccessNotificationSource
     Mode = if ($Activate) { 'Activate' } elseif ($DryRun) { 'DryRun' } else { 'Plan' }
     WillModifyRemote = [bool] $Activate
 }
@@ -216,4 +237,5 @@ Invoke-DataversePatch -Headers $headers -Path "workflows($workflowId)" -Body ([o
     statuscode = 2
 })
 Publish-WorkflowDraft -Headers $headers -WorkflowId $workflowId
-Write-Output "Publicado con tres notificaciones de Teams: $FlowName"
+$publishedMessage = if ($SuccessNotificationSource -eq 'Cloud') { "Publicado con tres notificaciones de Teams: $FlowName" } else { "Publicado con inicio/error Cloud; el resumen exitoso lo publica PAD: $FlowName" }
+Write-Output $publishedMessage

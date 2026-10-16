@@ -63,6 +63,7 @@ Complete primero el perfil. Los valores opacos de conexiones, carpetas, chats, c
 - Separe abrir, autenticar y preparar sesión de la operación de negocio. Si otro cliente toma el control después, libere el manejador de terminal sin cerrar la aplicación que debe permanecer abierta.
 - Registre las acciones deshabilitadas como configuración pendiente, no como capacidad operativa. Una falla funcional debe devolver un estado de error observable, nunca un éxito técnico.
 - Las configuraciones compartidas solo pueden contener parámetros no sensibles; las contraseñas se obtienen desde un almacén seguro en tiempo de ejecución.
+- Cuando el resultado detallado existe en el componente de escritorio, genere allí el resumen seguro para el operador. Evite depender de salidas Cloud no definidas; envíe solo conteos, estado y siguientes acciones.
 
 ## Evidencia mínima E2E
 
