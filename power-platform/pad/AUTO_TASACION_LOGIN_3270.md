@@ -1,113 +1,147 @@
 # Inicio automático de IBM 3270 para Auto Tasaciones
 
-## Propósito
+## Estado operativo validado en PBO
 
-Este procedimiento elimina la preparación manual de PCOMM antes de ejecutar el
-Desktop Flow. Solo abre la sesión, inicia sesión y deja el terminal listo para
-la navegación de consulta de Auto Tasaciones.
+`AsegurarSesion3270` prepara IBM Personal Communications (PCOMM) para una
+consulta segura. Abre el perfil, autentica la sesión `A`, selecciona el centro
+`0727`, libera HLLAPI y deja PCOMM abierto para que Excel/VBA se vuelva a
+adjuntar.
 
-La secuencia se obtuvo de un flujo PAD corporativo de referencia y de
-`login.png`. Se adapta al destino de Auto Tasaciones:
-
-```text
-Abrir PCOMM -> HLLAPI sesión A -> C -> autenticación -> QGTR -> centro 0727
--> pantalla lista -> macro_3270_runner browse-lot
-```
-
-No copie estas acciones del flujo de Emisoras:
-
-- `CESN` y su segundo inicio de sesión.
-- El centro usado por Emisoras.
-- Sus acciones de Teams, PowerShell, limpieza o negocio.
-- Valores de usuario o contraseña mostrados en cualquier evidencia.
-
-`NavegarCasosSinCambios` toma la sesión lista, envía `PAUSA`, abre `I003` y
-consulta cada préstamo sin escribir datos de tasación.
-
-## Credencial requerida
-
-Antes de editar PAD, cree en Power Automate una credencial de aplicación para
-3270, por ejemplo `credencial-3270-autotasaciones`, con el usuario autorizado
-para la operación. En PAD use la acción **Obtener credencial** al inicio del
-subflujo. Sus valores son sensibles en tiempo de ejecución y no deben aparecer
-en Excel, JSON local, PowerShell, capturas, mensajes de Teams ni Git.
-
-Para una cuenta distinta por operador, configure un mapeo de usuario sobre esa
-credencial. Consulte [credenciales seguras en PAD](https://learn.microsoft.com/en-us/power-automate/desktop-flows/actions-reference/powerautomatesecretvariables)
-y [mapeo de usuario](https://learn.microsoft.com/en-us/power-automate/desktop-flows/create-user-mapping).
-
-## Cambio en el Desktop Flow
-
-En `auto-tasacion-procesar-3270-simulado`, cree el subflujo
-`AsegurarSesion3270` y llámelo en `Main` después de `InicializarLote` y antes
-de `ValidarExcel`.
+No procesa préstamos ni escribe campos de tasación. La operación posterior se
+mantiene en `browse-lot`; `run-lot` continúa fuera del alcance de esta etapa.
 
 ```text
-InicializarLote
-AsegurarSesion3270
-ValidarExcel
+Main
+├── InicializarLote
+└── ValidarExcel
+    ├── AsegurarSesion3270
+    └── macro_3270_runner.py ... browse-lot
 ```
 
-Mantenga `ValidarExcel` con el comando seguro `browse-lot` durante esta etapa.
-No cambie a `run-lot`.
+`AsegurarSesion3270` se invoca únicamente dentro de `ValidarExcel`,
+inmediatamente antes de `browse-lot`. No debe añadirse a `Main`: duplicaría la
+apertura y el inicio de sesión.
 
-## Subflujo `AsegurarSesion3270`
+## Configuración y dependencias de PBO
 
-Defina estas variables locales. Las rutas se configuran en BPO y no se
-versionan:
+| Elemento | Valor validado | Uso |
+| --- | --- | --- |
+| Perfil PCOMM | `C:\Data\3270.WS` | Se abre maximizado mediante PAD. |
+| Biblioteca HLLAPI | `C:\Program Files (x86)\IBM\Personal Communications\EHLAPI32.dll` | PAD se adjunta después de abrir PCOMM. |
+| Sesión | `A` | PAD y VBA usan la misma sesión, en momentos distintos. |
+| Centro de Auto Tasaciones | `0727` | Se selecciona durante la preparación. |
 
-| Variable | Valor |
-|---|---|
-| `Perfil3270` | Perfil `.WS` corporativo de PCOMM de Auto Tasaciones. |
-| `Sesion3270` | `A` |
-| `CentroAutoTasaciones` | `0727` |
-| `Credencial3270` | Resultado de **Obtener credencial**. |
-| `TerminalSession` | Resultado de **Abrir sesión de terminal**. |
+El orden es obligatorio: abrir `.WS`, esperar su disponibilidad y luego abrir
+la sesión HLLAPI. PAD no debe intentar adjuntarse antes de que PCOMM esté
+abierto.
 
-Use esta secuencia de acciones. Las coordenadas provienen del procedimiento
-documentado de inicio de 3270; deben verificarse una vez contra la sesión BPO.
+## Credenciales: estado actual y objetivo
 
-| Paso | Acción PAD | Configuración o resultado esperado |
-|---:|---|---|
-| 1 | **Obtener credencial** | Recurso `credencial-3270-autotasaciones` hacia `Credencial3270`. |
-| 2 | **Ejecutar aplicación** | Abra `Perfil3270`; continúe sin esperar que el proceso termine. PCOMM permanece abierto. |
-| 3 | **Abrir sesión de terminal** | Proveedor `HLLAPI`, sesión `A`, adjuntar a sesión en ejecución. Use la DLL y carpeta de instalación de PCOMM de BPO. |
-| 4 | **Esperar el texto en la sesión de terminal** | Espere el texto del menú inicial hasta 30 segundos. Si no aparece, termine con `3270_MENU_INICIAL_NO_DISPONIBLE`. |
-| 5 | **Mover cursor** / **Establecer texto** / **Enviar tecla** | Fila `24`, columna `24`, escriba `C`, envíe **Transmitir**. |
-| 6 | **Esperar el texto en la sesión de terminal** | Espere `INICIO DE SESION DE UN TERMINAL`. |
-| 7 | **Mover cursor** / **Establecer texto** | Usuario: fila `4`, columna `34`. Contraseña: fila `5`, columna `34`. Use solo las propiedades sensibles de `Credencial3270`. |
-| 8 | **Enviar tecla** / **Esperar texto** | Envíe **Transmitir** y espere la confirmación de terminal conectado. |
-| 9 | **Obtener texto** / **Condicional** | Lea la línea de mensaje. Si incluye `BLOQUEA`, publique el error existente de PAD y termine con `3270_USUARIO_BLOQUEADO`. |
-| 10 | **Establecer texto** / **Enviar tecla** | Desde la pantalla lista, escriba `QGTR` en la posición inicial y envíe **Transmitir**. |
-| 11 | **Esperar texto** | Espere `CAMBIA CENTRO CONTABLE EN TERMINAL`. |
-| 12 | **Mover cursor** / **Establecer texto** / **Enviar tecla** | Fila `4`, columna `34`; escriba `%CentroAutoTasaciones%` (`0727`); envíe **Transmitir**. |
-| 13 | **Esperar texto** | Espere la pantalla en negro/lista. No envíe transacciones de negocio. |
-| 14 | **Cerrar sesión de terminal** | Cierre solamente el manejador HLLAPI de PAD. Deje PCOMM abierto para que Excel/VBA se conecte a la sesión `A`. |
+### Implementación actual
 
-La acción de terminal con HLLAPI requiere que el emulador ya esté abierto; por
-eso la apertura del perfil `.WS` precede al adjunto. IBM Personal
-Communications usa normalmente `EHLAPI32.dll`; reutilice la ruta comprobada en
-BPO, no una ruta inventada. Consulte [la configuración oficial HLLAPI](https://learn.microsoft.com/en-us/power-automate/desktop-flows/how-to/terminal-emulation-open-new-session)
-y la [referencia de acciones de terminal](https://learn.microsoft.com/es-es/power-automate/desktop-flows/actions-reference/terminalemulation).
+El subflujo `CREDENCIALES` abre un `config.xlsx` compartido localmente y carga
+los valores de las celdas `B2` y `B3` en las variables `USER3270` y
+`PASS3270`. El archivo se abre sin mostrar Excel y se cierra al terminar la
+lectura.
 
-## Reintento e idempotencia de sesión
+Esta es una configuración transitoria. La ruta concreta, el usuario y la
+contraseña no se documentan, no se registran en logs y no se incorporan a Git.
 
-Antes del paso 2, intente adjuntar HLLAPI a la sesión `A`. Si funciona y la
-pantalla contiene el menú inicial, omita la apertura del perfil. Si la sesión
-ya está autenticada, continúe desde `QGTR`; no vuelva a enviar `C` ni
-credenciales. Limite los intentos de apertura y adjunto a dos; un tercer fallo
-termina con `3270_SESION_NO_DISPONIBLE`.
+### Estado objetivo
 
-## Evidencia de aceptación
+`config.xlsx` debe conservar solo parámetros no sensibles: proceso, usuario
+lógico, sesión, centro y nombre lógico de credencial. La contraseña debe
+recuperarse en tiempo de ejecución desde un almacén seguro o una variable
+secreta de Power Automate. El cambio no está implementado aún.
 
-Pruebe primero con PCOMM completamente cerrado y un lote de consulta:
+## Secuencia exacta de `AsegurarSesion3270`
 
-1. Inicie el flujo desde Power Apps.
-2. Confirme que PAD abre el perfil, inicia sesión y deja la sesión `A` lista.
-3. Mantenga `browse-lot`.
-4. Confirme en el JSON del lote `CONSULTADO_SIN_CAMBIOS_3270` y que cada caso
-   tenga `CONSULTA_3270_OK`.
-5. Confirme que no se modificaron campos de tasación en 3270.
+| Paso | Acción PAD | Resultado validado |
+| ---: | --- | --- |
+| 1 | Ejecutar `CREDENCIALES`. | Se cargan `USER3270` y `PASS3270` sin exponer sus valores. |
+| 2 | Ejecutar `C:\Data\3270.WS`. | PCOMM queda abierto. |
+| 3 | Esperar 10 segundos. | Espera fija usada por el flujo corporativo de referencia. |
+| 4 | Abrir sesión de terminal HLLAPI `A`. | Se obtiene `TerminalSession`. |
+| 5 | Mover a fila 24, columna 24; escribir `C`; transmitir. | Se selecciona la aplicación inicial. |
+| 6 | Esperar 1 segundo. | El formulario de autenticación queda disponible. |
+| 7 | Escribir usuario en 4/34 y contraseña en 5/34; transmitir. | Inicio de sesión 3270. |
+| 8 | Esperar 1 segundo; leer 28 caracteres desde 1/1. | Se evalúa el indicador de bloqueo. |
+| 9 | Si el texto contiene `BLOQUEA`, cerrar `TerminalSession` y finalizar. | La alerta Teams existe, pero está deshabilitada en el Robin actual. |
+| 10 | Ejecutar `LIMPIAR_VENTANA`. | Envía `Clear` tres veces sobre `TerminalSession`. |
+| 11 | Escribir `qgtr` en el cursor actual y transmitir. | Se solicita cambio de centro. |
+| 12 | Esperar el texto `BXA0147` hasta 30 segundos; enviar `Clear`. | Se reconoce y confirma la pantalla intermedia real. |
+| 13 | Escribir `0727` en el cursor actual y transmitir. | El host deja el cursor en el campo editable. |
+| 14 | Esperar 2 segundos y ejecutar `LIMPIAR_VENTANA`. | La sesión queda lista para la macro. |
+| 15 | Cerrar `TerminalSession`. | Libera HLLAPI; PCOMM y la sesión `A` permanecen abiertos. |
 
-Un error de arranque, autenticación o centro debe terminar el lote con un
-código observable y debe activar la alerta de error existente en Teams.
+Las acciones de mover cursor a 1/1 antes de `qgtr` y a 4/34 antes de `0727`
+quedaron deshabilitadas. No deben reactivarse sin una nueva prueba PBO. El host
+posiciona el cursor tras `Clear`; moverlo manualmente llevó a una zona protegida
+y rechazó el valor del centro.
+
+`LIMPIAR_VENTANA` es un subflujo requerido, no una acción implícita:
+
+```text
+Clear
+Clear
+Clear
+```
+
+No cierra PCOMM.
+
+## Tratamiento de Teams y bloqueo
+
+El Robin contiene acciones de Teams para inicio de login y usuario bloqueado,
+pero figuran como `DISABLE External.InvokeCloudConnector`. Están configuradas
+pero deshabilitadas en el Desktop Flow actual; no cuentan como alertas
+operativas ni como evidencia de aceptación.
+
+La rama de usuario bloqueado termina actualmente con código 0. Debe evolucionar
+a un estado técnico explícito, por ejemplo `3270_USUARIO_BLOQUEADO`, para que
+una falla funcional no se interprete como éxito.
+
+## Transferencia a la macro
+
+Al volver a `ValidarExcel`, PAD ejecuta `macro_3270_runner.py` mediante
+`cmd.exe /d /c`, espera a que termine y usa:
+
+```text
+--config "%RutaConfiguracion%" browse-lot --lot "%IdLote%"
+```
+
+VBA vuelve a conectarse mediante `CONEXION.Init "A"` y realiza la consulta
+segura:
+
+```text
+PAUSA -> I003 -> opción 01 -> préstamo -> ENTER
+```
+
+Por ello es indispensable cerrar el manejador HLLAPI de PAD antes de invocar la
+macro, sin cerrar PCOMM.
+
+## Evidencia y criterio de aceptación
+
+Partiendo de PCOMM cerrado, se acepta `AsegurarSesion3270` cuando:
+
+1. PAD abre el perfil y se adjunta a HLLAPI sesión `A`.
+2. La autenticación se completa y no se detecta `BLOQUEA`.
+3. `qgtr` es aceptado, aparece `BXA0147`, se confirma con `Clear` y `0727` es
+   aceptado desde el cursor actual.
+4. PAD libera `TerminalSession`; PCOMM permanece abierto con sesión `A`
+   disponible.
+5. `browse-lot` vuelve a adjuntarse y consulta `PAUSA -> I003 -> 01 -> préstamo
+   -> ENTER` sin preparación manual ni escritura de negocio.
+
+## Incidencias resueltas y aprendizaje
+
+| Síntoma | Causa comprobada | Corrección validada |
+| --- | --- | --- |
+| `Se rechazó el texto de entrada` al enviar `0727`. | El cursor se movía a una posición protegida. | Escribir el centro en la posición actual después de confirmar `BXA0147`. |
+| Timeout esperando cambio de centro. | Tras `qgtr` aparece primero `BXA0147`. | Esperar `BXA0147`, enviar `Clear` y continuar. |
+| `qgtr` no progresaba. | Faltaba confirmar el contexto de host tras login. | Ejecutar `LIMPIAR_VENTANA` antes del comando. |
+| Error de subflujo inexistente. | La copia de la lógica omitió `LIMPIAR_VENTANA`. | Versionar y llamar el subflujo auxiliar. |
+| Doble login. | La preparación se llamaba desde `Main` y `ValidarExcel`. | Llamarla solo desde `ValidarExcel`. |
+| Ruta de configuración ausente. | Se heredó una variable de otro proceso. | Usar configuración explícita del proceso, sin valores sensibles en el flujo. |
+| VBA no lograba adjuntarse. | PAD mantenía HLLAPI abierto. | Cerrar `TerminalSession` al final y conservar PCOMM abierto. |
+
+Las acciones de terminal se basan en [la configuración HLLAPI de Microsoft](https://learn.microsoft.com/en-us/power-automate/desktop-flows/how-to/terminal-emulation-open-new-session) y su [referencia de terminal](https://learn.microsoft.com/es-es/power-automate/desktop-flows/actions-reference/terminalemulation).

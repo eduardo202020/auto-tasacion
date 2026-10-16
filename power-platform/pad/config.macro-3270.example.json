@@ -1,13 +1,13 @@
-﻿{
+{
   "schema_version": 1,
   "mode": "MACRO_3270",
   "location_profile": "production",
   "locations_config_path": "../../config/automation-locations.json",
-  "macro_template_path": "C:\\Users\\mailbox_27530\\OneDrive - NTT DATA EMEAL\\automatizaciones-jhglazar\\auto-tasaciones\\codigos\\plantillas\\Plantilla_MASIVO_AUTO_3270.xlsm",
+  "macro_template_path": "C:\\AutoTasacion\\plantillas\\Plantilla_MASIVO_AUTO_3270.xlsm",
   "macro_procedure": "AutoTasacion3270.EjecutarLote3270",
   "session_name": "A",
   "excel_visible": true,
   "stability_checks": 3,
   "stability_interval_seconds": 2,
-  "output_directory": "C:\\Users\\mailbox_27530\\OneDrive - NTT DATA EMEAL\\automatizaciones-jhglazar\\auto-tasaciones\\Procesados"
+  "output_directory": "C:\\AutoTasacion\\Procesados"
 }

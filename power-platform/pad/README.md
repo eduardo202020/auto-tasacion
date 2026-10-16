@@ -213,11 +213,18 @@ importe, dirección, seguro u otros datos de negocio. `run-lot` llama
 instalación de la plantilla, configuración de PAD y ubicación de resultados está en
 [`../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md`](../../docs/operacion/ejecucion-macro-3270-pad-2026-10-14.md).
 
-Cuando PCOMM no está abierto o el operador aún no inició sesión, el Desktop
-Flow debe ejecutar `AsegurarSesion3270` antes del comando `browse-lot`. La
-secuencia de apertura, HLLAPI, autenticación y cambio al centro `0727` está en
-[`AUTO_TASACION_LOGIN_3270.md`](AUTO_TASACION_LOGIN_3270.md). Esta preparación
-no habilita `run-lot` ni escribe datos de tasación.
+El Desktop Flow real mantiene `Main` con `InicializarLote` y
+`ValidarExcel`. Dentro de `ValidarExcel`, `AsegurarSesion3270` se ejecuta justo
+antes de `browse-lot`: abre PCOMM si es necesario, autentica la sesión `A`,
+prepara el centro `0727` y libera HLLAPI sin cerrar PCOMM. No se invoca desde
+`Main`, porque eso duplicaría el login.
+
+La configuración actual obtiene de forma transitoria las credenciales desde un
+Excel compartido; no se versionan rutas, usuarios ni contraseñas. La evolución
+pendiente es recuperar la contraseña desde un almacén seguro. La secuencia
+validada, sus pantallas intermedias y las acciones que siguen deshabilitadas
+están en [`AUTO_TASACION_LOGIN_3270.md`](AUTO_TASACION_LOGIN_3270.md). Esta
+preparación no habilita `run-lot` ni escribe datos de tasación.
 
 El simulador se conserva para diagnóstico y para lotes anteriores. El Desktop
 Flow de presentación debe invocar el ejecutor de macro, no `pad_simulator.py`.

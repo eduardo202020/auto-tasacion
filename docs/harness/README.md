@@ -59,6 +59,11 @@ Complete primero el perfil. Los valores opacos de conexiones, carpetas, chats, c
 - Las alertas contienen identificador, etapa, estado y siguiente acción. No incluyen documentos, datos personales, valores de negocio ni detalles técnicos que deban quedar en el registro seguro.
 - Un tramo se acepta solo cuando su salida esperada está presente y no vacía. Una alerta final emitida con campos vacíos requiere corregir o validar el mapeo de salidas antes del cierre.
 
+- En automatización de terminales, modele cada pantalla intermedia comprobada. No fuerce coordenadas si el host ya posiciona el cursor en el campo editable.
+- Separe abrir, autenticar y preparar sesión de la operación de negocio. Si otro cliente toma el control después, libere el manejador de terminal sin cerrar la aplicación que debe permanecer abierta.
+- Registre las acciones deshabilitadas como configuración pendiente, no como capacidad operativa. Una falla funcional debe devolver un estado de error observable, nunca un éxito técnico.
+- Las configuraciones compartidas solo pueden contener parámetros no sensibles; las contraseñas se obtienen desde un almacén seguro en tiempo de ejecución.
+
 ## Evidencia mínima E2E
 
 1. El disparador registra la llave de correlación.

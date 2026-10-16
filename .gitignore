@@ -36,3 +36,6 @@ artifacts/
 
 # Directorios de trabajo locales de las pruebas de tasaciones.
 tasaciones-150/
+
+# Referencia local sensible de autenticación 3270 (no versionar).
+/login.png
