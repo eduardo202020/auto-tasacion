@@ -108,3 +108,32 @@ cd cloud-run
 
 No habilites IA, no guardes secretos ni despliegues sin la aprobación
 correspondiente.
+
+## Benchmark externo de extracción
+
+`../tools/run_extraction_benchmark.py` lee uno o varios ZIPs externos en
+streaming y genera un informe JSON fuera del repositorio. No copia PDFs, XLSX
+ni XLSM al proyecto ni incluye texto del documento, préstamo o expediente en
+el informe. Cada entrada conserva SHA-256, tipo documental, proveedor,
+template/layout, candidatos de valor con página y contexto técnico, ruta e
+incidencias seguras.
+
+Ejemplo para el corpus externo de 150 casos:
+
+```powershell
+$out = Join-Path $env:TEMP 'auto-tasacion-benchmark\corpus-150.json'
+.venv/Scripts/python.exe ../tools/run_extraction_benchmark.py `
+  --dataset corpus-150 `
+  --zip ..\auto-tasacion-benchmark\49-tasaciones.zip `
+  --zip ..\auto-tasacion-benchmark\51-150-tasaciones.zip `
+  --control-workbook ..\auto-tasacion-benchmark\Control_Lote_150_Tasaciones.xlsx `
+  --baseline-workbook ..\auto-tasacion-benchmark\Resultado_Final_TAS-9E8CC2C97BF46EBCBE31.xlsx `
+  --output $out
+```
+
+El modo `golden-10` exige además `--operator-workbook` y mantiene ese
+dataset separado: asigna D01..D10 solo dentro de ese golden, nunca como
+regla de unión con el corpus de 150. Compara tipo, moneda, importe, pisos,
+sotanos, anio, clase, direccion estructurada, geografia y decision final sin
+persistir sus valores documentales. El comando verifica el workbook generado
+en un directorio temporal antes de escribir el informe.

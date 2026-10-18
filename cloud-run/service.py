@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 import re
+import unicodedata
 from datetime import timedelta
 from numbers import Real
 from uuid import uuid4
@@ -98,13 +99,14 @@ REQUIRED_MACRO_COLUMNS = (
 
 CONTROL_COLUMNS = [
     "ID_CASO", "ID / Codigo PDF", "PDF_Archivo", "Tasadora id", "Tasadora detectada", "Origen tasadora",
-    "Perfil plantilla", "Version perfil", "Confianza perfil", "Coincidencias perfil",
+    "Perfil plantilla", "Version perfil", "Template id", "Familia layout", "Estrategia extraccion",
+    "Confianza perfil", "Coincidencias perfil", "Tipo documento", "Motivo tipo documento",
     "ID_INGRESO", "PRESTAMO", "MONEDA_OPERADOR", "SEGURO_ORIGEN", "NRO_EXPEDIENTE", "Observacion control",
     "Direccion extraida", "Pagina direccion",
     "Tipo inmueble", "Tipo inmueble texto", "Pagina tipo inmueble", "Valor elegido tipo",
     "Valor elegido US$", "Valor elegido S/", "Valor comercial US$", "Valor comercial S/",
-    "Pagina valor comercial", "Valor reconstruccion US$", "Valor reconstruccion S/",
-    "Pagina valor reconstruccion", "Año construccion", "Pagina año construccion",
+    "Pagina valor comercial", "Candidatos valor comercial", "Valor reconstruccion US$", "Valor reconstruccion S/",
+    "Pagina valor reconstruccion", "Candidatos valor reconstruccion", "Año construccion", "Pagina año construccion",
     "Origen año construccion", "Edad efectiva", "Pagina edad efectiva",
     "Año expedicion", "Pagina año expedicion", "Codigo tipo inmueble", "Codigo MASIVO",
     "Codigo valor del bien", "Nro pisos edificio", "Nro sotanos edificio", "Pagina pisos/sotanos",
@@ -115,8 +117,9 @@ CONTROL_COLUMNS = [
 
 REVIEW_COLUMNS = [
     "ID_CASO", "PDF_Archivo", "ID_INGRESO", "PRESTAMO", "MONEDA_OPERADOR", "SEGURO_ORIGEN",
-    "Tasadora id", "Tasadora detectada", "Origen tasadora", "Perfil plantilla",
-    "Version perfil", "Confianza perfil", "Coincidencias perfil", "Estado", "Campos faltantes", "Incidencias de validacion",
+    "Tasadora id", "Tasadora detectada", "Origen tasadora", "Perfil plantilla", "Version perfil",
+    "Template id", "Familia layout", "Estrategia extraccion", "Confianza perfil", "Coincidencias perfil",
+    "Tipo documento", "Motivo tipo documento", "Estado", "Campos faltantes", "Incidencias de validacion",
     "Campos enviados a IA", "Motivo IA", "Correcciones IA", "Evidencia IA", "Modelo IA",
     "Siguiente accion",
 ]
@@ -252,13 +255,21 @@ def load_approved_rules() -> list[str]:
     return [str(rule).strip() for rule in rules if str(rule).strip()]
 
 
+def _positive_amount(value: object) -> float | None:
+    try:
+        parsed = float(str(value).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+
 def choose_importe(extracted: dict[str, Any]) -> tuple[Any, str]:
     """Prioriza el importe en PEN, como en la salida histórica de MASIVO."""
     usd = extracted.get("Valor elegido US$")
     pen = extracted.get("Valor elegido S/")
-    if not is_blank(pen):
+    if _positive_amount(pen) is not None:
         return pen, "PEN"
-    if not is_blank(usd):
+    if _positive_amount(usd) is not None:
         return usd, "USD"
     return "", ""
 
@@ -277,6 +288,9 @@ def apply_control_metadata(extracted: dict[str, Any], control: dict[str, Any] | 
 
     extracted["ID_INGRESO"] = str(control.get("id_ingreso") or "")
     extracted["PRESTAMO"] = str(control.get("prestamo") or "")
+    # Separar la proyección autorizada del campo de traza evita que una
+    # invocación interna o texto documental pueda poblar la columna operativa.
+    extracted["PRESTAMO autorizado"] = extracted["PRESTAMO"]
     extracted["MONEDA_OPERADOR"] = str(control.get("moneda_operador") or "")
     extracted["SEGURO_ORIGEN"] = str(control.get("seguro_origen") or "")
     extracted["NRO_EXPEDIENTE"] = str(control.get("nro_expediente") or "")
@@ -351,9 +365,14 @@ def to_macro_row(extracted: dict[str, Any]) -> tuple[list[Any], list[str]]:
     if parsed.get("TIPO VIA 1") and not via_code:
         observations.append("Tipo de vía sin abreviatura autorizada en DATOS")
     if parsed.get("UBICACION TIPO") and not ubicacion_code:
-        observations.append("Tipo de ubicación sin código autorizado en DATOS")
+        observations.append("UBICACION_NO_HOMOLOGADA: tipo de ubicación sin código autorizado en DATOS")
+    chosen_values = (extracted.get("Valor elegido US$"), extracted.get("Valor elegido S/"))
+    if str(extracted.get("Valor elegido tipo") or "").strip() and any(
+        not is_blank(value) for value in chosen_values
+    ) and not currency:
+        observations.append("IMPORTE_NO_POSITIVO")
     row = [""] * len(MACRO_COLUMNS)
-    row[0] = as_excel_value(extracted.get("PRESTAMO", ""))
+    row[0] = as_excel_value(extracted.get("PRESTAMO autorizado", ""))
     # La hoja operativa conserva las etiquetas completas que usaba MASIVO;
     # los códigos del catálogo permanecen auditables en CONTROL.
     row[1] = tipo
@@ -384,7 +403,14 @@ def persistent_extraction_observations(extracted: dict[str, Any]) -> list[str]:
     observations.extend(
         item.strip() for item in str(extracted.get("Observacion control") or "").split(";") if item.strip()
     )
-    return [item for item in observations if not any(item.startswith(prefix) for prefix in TRANSIENT_EXTRACTION_OBSERVATIONS)]
+    def normalized(value: str) -> str:
+        return "".join(
+            char for char in unicodedata.normalize("NFKD", value.upper())
+            if not unicodedata.combining(char)
+        )
+
+    transient = tuple(normalized(prefix) for prefix in TRANSIENT_EXTRACTION_OBSERVATIONS)
+    return [item for item in observations if not any(normalized(item).startswith(prefix) for prefix in transient)]
 
 
 def assess_case(extracted: dict[str, Any]) -> tuple[list[Any], list[str], list[str]]:
@@ -417,11 +443,7 @@ def _integer_value(value: object, *, lower: int, upper: int) -> int | None:
 
 
 def _amount_value(value: object) -> float | None:
-    try:
-        parsed = float(str(value).strip().replace(",", ""))
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
+    return _positive_amount(value)
 
 
 def apply_ai_corrections(
@@ -507,6 +529,7 @@ def next_action(route: str) -> str:
         "PENDIENTE_IA": "Configurar o reintentar la revisión IA.",
         "REGLA_NEGOCIO_PENDIENTE": "Validar la regla de negocio y reprocesar.",
         "REVISION_HUMANA": "Completar o confirmar la evidencia antes de reprocesar.",
+        "DOCUMENTO_NO_TASACION": "No procesar como tasación; validar la clasificación documental.",
     }.get(route, "")
 
 
@@ -707,8 +730,13 @@ def process_pdf_entries(
                 "Origen tasadora": "",
                 "Perfil plantilla": "generic-v1",
                 "Version perfil": "1",
+                "Template id": "",
+                "Familia layout": "",
+                "Estrategia extraccion": "",
                 "Confianza perfil": 0.0,
                 "Coincidencias perfil": "",
+                "Tipo documento": "DESCONOCIDO",
+                "Motivo tipo documento": "DOCUMENTO_TIPO_DESCONOCIDO",
                 "Observacion extraccion": "El archivo no tiene una firma PDF válida",
             }
         else:
@@ -717,10 +745,25 @@ def process_pdf_entries(
         extracted["ID_CASO"] = case_id
 
         deterministic = dict(extracted)
-        _, initial_missing, initial_issues = assess_case(deterministic)
         working = dict(deterministic)
-        macro_row, missing_fields, issues = assess_case(working)
-        route = "LISTO_DETERMINISTA" if not missing_fields and not issues else ""
+        # Extractores externos de pruebas o extensiones legadas que no aún
+        # publican el metadato conservan el comportamiento previo. El
+        # extractor propio siempre lo agrega antes de llegar a esta frontera.
+        document_type = str(deterministic.get("Tipo documento") or "TASACION")
+        document_reason = str(deterministic.get("Motivo tipo documento") or "").strip()
+        if document_type != "TASACION":
+            initial_missing = []
+            initial_issues = unique([
+                str(deterministic.get("Observacion extraccion") or ""), document_reason,
+            ])
+            macro_row = []
+            missing_fields = []
+            issues = initial_issues
+            route = "DOCUMENTO_NO_TASACION" if document_type == "ESTUDIO_TITULOS" else "REVISION_HUMANA"
+        else:
+            _, initial_missing, initial_issues = assess_case(deterministic)
+            macro_row, missing_fields, issues = assess_case(working)
+            route = "LISTO_DETERMINISTA" if not missing_fields and not issues else ""
         review_executed = False
         model_name = ""
         ai_reason = ""
@@ -783,8 +826,13 @@ def process_pdf_entries(
                 "Origen tasadora": deterministic.get("Origen tasadora", ""),
                 "Perfil plantilla": deterministic.get("Perfil plantilla", "generic-v1"),
                 "Version perfil": deterministic.get("Version perfil", "1"),
+                "Template id": deterministic.get("Template id", ""),
+                "Familia layout": deterministic.get("Familia layout", ""),
+                "Estrategia extraccion": deterministic.get("Estrategia extraccion", ""),
                 "Confianza perfil": deterministic.get("Confianza perfil", 0.0),
                 "Coincidencias perfil": deterministic.get("Coincidencias perfil", ""),
+                "Tipo documento": document_type,
+                "Motivo tipo documento": document_reason,
                 "Estado": route,
                 "Campos faltantes": "; ".join(missing_fields),
                 "Incidencias de validacion": "; ".join(issues),

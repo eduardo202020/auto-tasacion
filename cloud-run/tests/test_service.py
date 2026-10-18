@@ -22,13 +22,14 @@ from catalog import (
     lookup_location_from_text,
     lookup_property_codes,
 )
+from address_parser import parse_direccion
 from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
 from profile_registry import detect_document_profile, profile_uses_strategy, validate_reference_data
 from provider_ocr import extract_braschi_floor_table_ocr
 from service import (
     CONTROL_COLUMNS, MACRO_COLUMNS, MAX_ZIP_BYTES, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket,
     build_workbook, declared_zip_size,
-    download_staged_zip, procesar_tasaciones, process_zip, to_macro_row,
+    download_staged_zip, procesar_tasaciones, process_pdf_entries, process_zip, to_macro_row,
 )
 from tools.validate_correcciones_operador import validate as validate_corrections
 
@@ -61,6 +62,49 @@ def build_pdf_with_effective_age() -> bytes:
     page.insert_text((72, 72), "Edad Efectiva (años)", fontsize=10)
     page.insert_text((72, 88), "12", fontsize=10)
     page.insert_text((72, 110), "Fecha de Expedición 15/08/2025", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_multiple_commercial_values() -> bytes:
+    """Equivalente sintético a un layout con RRPP y valor final posterior."""
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        """Tasación
+Dirección: Avenida Prueba 123, Miraflores, Lima
+Tipo de inmueble: Departamento
+Valores inscritos en RRPP
+Valor Comercial S/ 0.00
+Valores no inscritos en RRPP
+Valor Comercial S/ 250,000.00
+Valor Comercial del inmueble S/ 314,367.68""",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_construction_start_date() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        "Tasación\nInmueble en construcción\nFecha de inicio de obra: 15/01/26",
+        fontsize=10,
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_estudio_titulos() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "ESTUDIO DE TÍTULOS\nPartida registral", fontsize=10)
     content = document.tobytes()
     document.close()
     return content
@@ -139,7 +183,8 @@ def build_pdf_with_first_construyo() -> bytes:
     page = document.new_page()
     page.insert_text(
         (72, 72),
-        """Se trata del primer construyo de una edificación proyectada a 2 pisos y azotea.
+        """Tasación
+Se trata del primer construyo de una edificación proyectada a 2 pisos y azotea.
 Se verificó el terreno sin construcciones.
 Fecha de Expedición 29-May-2026
 Fecha de Caducidad 29-May-2027""",
@@ -153,6 +198,7 @@ Fecha de Caducidad 29-May-2027""",
 def build_pdf_with_positioned_expedition_date() -> bytes:
     document = fitz.open()
     page = document.new_page()
+    page.insert_text((72, 52), "Tasación", fontsize=10)
     page.insert_text((72, 72), "Fecha de Expedición", fontsize=10)
     page.insert_text((250, 72), "29-May-2026", fontsize=10)
     page.insert_text((72, 90), "Fecha de Caducidad", fontsize=10)
@@ -234,8 +280,9 @@ def complete_row(extracted: dict) -> tuple[list, list[str]]:
     """Aísla el enrutamiento de las variaciones del parser de direcciones."""
     row = [""] * len(MACRO_COLUMNS)
     values = {
+        "PRESTAMO": extracted.get("PRESTAMO", "12345678901234567890"),
         "TIPO DE INMUEBLE": "DEPARTAMENTO", "VALOR DEL BIEN": "", "MONEDA": "PEN", "IMPORTE": "475,000.00",
-        "DIRECCION": "AVENIDA", "DIRECCION1": "PRUEBA", "MUNICIPIO": "WANCHAQ", "DIST_COD": "008",
+        "DIRECCION": "AVENIDA", "DIRECCION1": "PRUEBA", "EXTERIOR": "123", "MUNICIPIO": "WANCHAQ", "DIST_COD": "008",
         "PROV_COD": "01", "DEPT_COD": "08", "CLASE": "2", "PISOS": 7, "SOTANOS": 2,
         "AÑO": extracted.get("Año construccion", ""),
     }
@@ -306,6 +353,101 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(profile.provider_id, "braschi-tasaciones")
         self.assertEqual(profile.provider_source, "PERFIL_TECNICO")
         self.assertTrue(profile_uses_strategy(profile, "braschi_floor_table_ocr"))
+        self.assertEqual(profile.template_id, "braschi-construyo-tabla-v1")
+        self.assertEqual(profile.layout_family, "LF-BRASCHI-CONSTRUYO")
+
+    def test_known_provider_can_keep_safe_generic_template_fallback(self):
+        profile = detect_document_profile(["JALVO", "Valor Comercial S/ 100,000.00"])
+        self.assertEqual(profile.provider_id, "jalvo-tasaciones")
+        self.assertEqual(profile.profile_id, "generic-v1")
+        self.assertEqual(profile.template_id, "")
+        self.assertEqual(profile.layout_family, "")
+
+    def test_optional_location_and_interior_remain_empty(self):
+        parsed = parse_direccion("Avenida Prueba 123, Miraflores, Lima")
+        self.assertEqual(parsed["N. INTERIOR"], "")
+        self.assertEqual(parsed["UBICACION TIPO"], "")
+        self.assertEqual(parsed["UBICACION 1"], "")
+        self.assertEqual(parsed["REFERENCIA"], "SN")
+
+    def test_explicit_unhomologated_location_stays_in_review(self):
+        extracted = {
+            "PRESTAMO autorizado": "12345678901234567890",
+            "Valor elegido US$": "", "Valor elegido S/": 475000,
+            "Valor elegido tipo": "VALOR COMERCIAL", "Nro pisos edificio": 6,
+            "Nro sotanos edificio": 1, "Año construccion": 2018,
+            "Tipo inmueble": "DEPARTAMENTO",
+        }
+        parsed = {
+            "TIPO VIA 1": "AVENIDA", "DOMICILIO 1": "PRUEBA", "N. EXTERIOR": "123",
+            "N. INTERIOR": "", "REFERENCIA": "SN", "UBICACION TIPO": "ZONA ESPECIAL",
+            "UBICACION 1": "PRUEBA", "DISTRITO": "WANCHAQ", "DISTRITO_COD": "008",
+            "PROVINCIA_COD": "01", "DEPARTAMENTO_COD": "08",
+        }
+        with patch("service.parse_address", return_value=(parsed, [])):
+            _row, issues = to_macro_row(extracted)
+        self.assertIn("UBICACION_NO_HOMOLOGADA: tipo de ubicación sin código autorizado en DATOS", issues)
+
+    def test_selects_positive_final_commercial_value_after_zero_rrpp_value(self):
+        result = extract_pdf(build_pdf_with_multiple_commercial_values(), "D124.pdf")
+        self.assertEqual(result["Valor comercial S/"], 314367.68)
+        self.assertEqual(result["Valor elegido S/"], 314367.68)
+        self.assertIn('"amount":0.0', result["Candidatos valor comercial"])
+        self.assertIn('"amount":314367.68', result["Candidatos valor comercial"])
+
+    def test_uses_construction_start_year_only_for_explicit_work_in_progress(self):
+        result = extract_pdf(build_pdf_with_construction_start_date(), "D07.pdf")
+        self.assertEqual(result["Año construccion"], 2026)
+        self.assertEqual(result["Origen año construccion"], "INICIO DE OBRA")
+
+    def test_nonpositive_chosen_amount_never_enters_para_procesar(self):
+        extracted = {
+            "ID / Codigo PDF": "D112", "PDF_Archivo": "D112.pdf", "Tipo documento": "TASACION",
+            "Tipo inmueble": "DEPARTAMENTO", "Valor elegido tipo": "VALOR COMERCIAL",
+            "Valor elegido US$": "", "Valor elegido S/": 0.0,
+            "Nro pisos edificio": 6, "Nro sotanos edificio": 1, "Año construccion": 2018,
+            "Direccion extraida": "Avenida Prueba 123, Wanchaq, Cusco", "Observacion extraccion": "",
+        }
+        parsed = {
+            "TIPO VIA 1": "AVENIDA", "DOMICILIO 1": "PRUEBA", "N. EXTERIOR": "123",
+            "N. INTERIOR": "", "REFERENCIA": "SN", "UBICACION TIPO": "", "UBICACION 1": "",
+            "DISTRITO": "WANCHAQ", "DISTRITO_COD": "008", "PROVINCIA_COD": "01", "DEPARTAMENTO_COD": "08",
+        }
+        with patch("service.extract_pdf", return_value=extracted), patch("service.parse_address", return_value=(parsed, [])):
+            ready_rows, review_rows, control_rows = process_pdf_entries(
+                [("D112.pdf", build_pdf(), {"prestamo": "12345678901234567890", "moneda_operador": "PEN"})],
+                use_environment_reviewer=False,
+            )
+        self.assertEqual(ready_rows, [])
+        self.assertEqual(review_rows[0]["Estado"], "PENDIENTE_IA")
+        self.assertIn("IMPORTE_NO_POSITIVO", control_rows[0]["Incidencias de validacion"])
+
+    def test_estudio_titulos_never_uses_tasacion_route(self):
+        ready_rows, review_rows, control_rows = process_pdf_entries(
+            [("D130.pdf", build_pdf_with_estudio_titulos(), {"prestamo": "12345678901234567890"})],
+            use_environment_reviewer=False,
+        )
+        self.assertEqual(ready_rows, [])
+        self.assertEqual(review_rows[0]["Estado"], "DOCUMENTO_NO_TASACION")
+        self.assertEqual(control_rows[0]["Tipo documento"], "ESTUDIO_TITULOS")
+        self.assertIn("DOCUMENTO_NO_TASACION", control_rows[0]["Incidencias de validacion"])
+
+    def test_duplicate_pdf_keeps_document_evidence_and_control_metadata_separate(self):
+        content = build_pdf()
+        _ready, _review, control_rows = process_pdf_entries(
+            [
+                ("D04.pdf", content, {"prestamo": "12345678901234567890", "seguro_origen": "A"}),
+                ("D05.pdf", content, {"prestamo": "12345678901234567891", "seguro_origen": "B"}),
+            ],
+            use_environment_reviewer=False,
+        )
+        self.assertEqual(len(control_rows), 2)
+        self.assertNotEqual(control_rows[0]["ID_CASO"], control_rows[1]["ID_CASO"])
+        self.assertEqual(control_rows[0]["Valor comercial S/"], control_rows[1]["Valor comercial S/"])
+        self.assertEqual(
+            [(row["PRESTAMO"], row["SEGURO_ORIGEN"]) for row in control_rows],
+            [("12345678901234567890", "A"), ("12345678901234567891", "B")],
+        )
 
     def test_braschi_profile_uses_local_ocr_only_when_text_table_is_missing(self):
         with patch("pdf_extractor.extract_braschi_floor_table_ocr", return_value=(6, 2, 1)) as ocr:

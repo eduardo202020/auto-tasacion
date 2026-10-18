@@ -26,6 +26,19 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
   referencia de ubicación necesaria exige ampliar `DATOS`, sin inventar código.
 - Campos críticos sin evidencia, catálogos no autorizados o conflictos quedan
   en revisión.
+- Antes de extraer campos, cada PDF se clasifica como `TASACION`,
+  `ESTUDIO_TITULOS` o `DESCONOCIDO`. Un estudio de títulos no atraviesa la
+  ruta operativa y se registra con `DOCUMENTO_NO_TASACION`.
+- `provider_id`, `template_id` y `layout_family` son conceptos distintos:
+  una firma de tasadora puede conservar el perfil genérico hasta que una
+  plantilla tenga evidencia suficiente. El perfil solo declara dónde buscar;
+  la regla de negocio decide el valor para `CASA` o `DEPARTAMENTO`.
+- `N. INTERIOR`, `UBICACION` y `UBICACION1` permanecen vacíos cuando no hay
+  evidencia. `SN` se conserva únicamente como referencia textual; una
+  ubicación explícita sin código autorizado deriva a revisión.
+- El importe seleccionado debe ser numérico y mayor que cero antes de entrar
+  a `PARA_PROCESAR`. `CONTROL` conserva candidatos con moneda, página,
+  ancla segura y prioridad, sin texto documental completo.
 - La IA es excepcional, aporta evidencia y se revalida.
 - El lote masivo no reúne PDFs, no usa Base64 y no carga el lote total en
   memoria.

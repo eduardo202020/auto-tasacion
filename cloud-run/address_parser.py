@@ -1180,10 +1180,14 @@ def parse_direccion(d):
         "TIPO VIA 1": default_sn(tipo_via_1),
         "DOMICILIO 1": default_sn(domicilio),
         "N. EXTERIOR": default_sn(limit(ext_val, EXT_MAX)),
-        "N. INTERIOR": default_sn(limit(interior, INT_MAX)),
+        # Interior y ubicación son atributos opcionales. ``SN`` es útil para
+        # una referencia textual, pero inventarlo en estos campos hace que el
+        # validador intente homologar una ubicación que el documento nunca
+        # declaró. Conservamos el blanco cuando no hay evidencia.
+        "N. INTERIOR": limit(interior, INT_MAX).strip(),
         "REFERENCIA": default_sn(limit(ref_final, REF_MAX)),
-        "UBICACION TIPO": default_sn(ubic_tipo),
-        "UBICACION 1": default_sn(limit(ubic, UBIC_MAX)),
+        "UBICACION TIPO": (ubic_tipo or "").strip(),
+        "UBICACION 1": limit(ubic, UBIC_MAX).strip(),
         "DISTRITO": admin["DISTRITO"],
         "PROVINCIA": admin["PROVINCIA"],
         "DEPARTAMENTO": admin["DEPARTAMENTO"],

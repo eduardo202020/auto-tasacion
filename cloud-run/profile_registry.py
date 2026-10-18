@@ -33,6 +33,8 @@ class ProfileDefinition:
     any_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
     strategies: tuple[str, ...]
+    template_id: str
+    layout_family: str
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,8 @@ class DocumentProfile:
     matched_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
     strategies: tuple[str, ...]
+    template_id: str
+    layout_family: str
 
 
 GENERIC_PROFILE = DocumentProfile(
@@ -60,6 +64,8 @@ GENERIC_PROFILE = DocumentProfile(
     matched_terms=(),
     anchor_aliases={},
     strategies=(),
+    template_id="",
+    layout_family="",
 )
 
 
@@ -134,6 +140,8 @@ def _load_profile(path: Path) -> ProfileDefinition:
         any_terms=any_terms,
         anchor_aliases=normalized_aliases,
         strategies=strategies,
+        template_id=str(raw.get("template_id", "")).strip(),
+        layout_family=str(raw.get("layout_family", "")).strip(),
     )
 
 
@@ -356,6 +364,8 @@ def detect_document_profile(
             matched_terms=GENERIC_PROFILE.matched_terms,
             anchor_aliases=GENERIC_PROFILE.anchor_aliases,
             strategies=GENERIC_PROFILE.strategies,
+            template_id=GENERIC_PROFILE.template_id,
+            layout_family=GENERIC_PROFILE.layout_family,
         )
     provider_id, provider_name, provider_source = _provider_for(
         pages,
@@ -373,6 +383,8 @@ def detect_document_profile(
         matched_terms=matched,
         anchor_aliases=selected.anchor_aliases,
         strategies=selected.strategies,
+        template_id=selected.template_id,
+        layout_family=selected.layout_family,
     )
 
 

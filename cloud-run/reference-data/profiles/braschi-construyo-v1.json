@@ -4,6 +4,8 @@
   "description": "Informe Braschi con anexo Construyo y tabla estructurada de pisos y sótanos.",
   "default": false,
   "priority": 120,
+  "template_id": "braschi-construyo-tabla-v1",
+  "layout_family": "LF-BRASCHI-CONSTRUYO",
   "provider_id": "braschi-tasaciones",
   "match": {
     "all_terms": [

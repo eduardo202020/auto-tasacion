@@ -5,12 +5,15 @@ IA: conserva evidencia por página y deja vacío todo dato sin evidencia.
 """
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
+import json
 import re
 import unicodedata
 from typing import Any, Optional
 
 import fitz
 
+from document_classifier import classify_document
 from profile_registry import detect_document_profile, profile_anchor_aliases, profile_uses_strategy
 from provider_ocr import extract_braschi_floor_table_ocr, iter_provider_ocr_texts
 
@@ -20,7 +23,11 @@ RAW_DEPTO_RE = re.compile(r"\b(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT)\b", re.I)
 RAW_TERRENO_RE = re.compile(r"\bTERRENO(?:\s+SIN\s+CONSTRUCCIONES)?\b", re.I)
 VALOR_COMERCIAL_RE = re.compile(r"\bVALOR\s+COMERCIAL\b", re.I)
 VALOR_RECONSTRUCCION_RE = re.compile(
-    r"\b(VALORES?\s+DE\s+RECONSTRUCCION|VALOR\s+DE\s+RECONSTRUCCION|RECONSTRUCCION)\b",
+    r"\b(VALORES?\s+DE\s+(?:RECONSTRUCCION|REPOSICION)|VALOR\s+DE\s+(?:RECONSTRUCCION|REPOSICION)|RECONSTRUCCION|REPOSICION)\b",
+    re.I,
+)
+VALUE_BOUNDARY_RE = re.compile(
+    r"\bVALOR(?:ES)?\s+(?:COMERCIAL|DE\s+(?:RECONSTRUCCION|REPOSICION)|INSCRITOS?|NO\s+INSCRITOS?)\b",
     re.I,
 )
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
@@ -290,14 +297,76 @@ def anchor_position(text: str, anchor_re: re.Pattern[str], aliases: tuple[str, .
     return min(positions) if positions else -1
 
 
-def extract_values_by_anchor(
+@dataclass(frozen=True)
+class ValueCandidate:
+    """Un importe vinculado a una ancla y contexto documental acotado."""
+
+    field: str
+    currency: str
+    amount: float
+    page: int
+    anchor: str
+    section: str
+    source_priority: int
+
+
+@dataclass(frozen=True)
+class ValueSelection:
+    usd: Optional[float]
+    pen: Optional[float]
+    page: Optional[int]
+    candidates: tuple[ValueCandidate, ...]
+    issues: tuple[str, ...]
+
+
+def _anchor_occurrences(text: str, anchor_re: re.Pattern[str], aliases: tuple[str, ...]) -> list[tuple[int, int, str]]:
+    """Encuentra todas las anclas, incluidas las variantes declarativas."""
+    occurrences = [(match.start(), match.end(), collapse_spaces(match.group(0))) for match in anchor_re.finditer(text)]
+    normalized = norm_up(text)
+    for alias in aliases:
+        start = 0
+        while (position := normalized.find(alias, start)) >= 0:
+            occurrences.append((position, position + len(alias), alias))
+            start = position + len(alias)
+    return sorted(set(occurrences), key=lambda item: item[0])
+
+
+def _value_context(anchor_text: str, before: str) -> tuple[str, int, str]:
+    """Clasifica contexto por etiquetas conocidas, sin conservar texto del PDF."""
+    normalized_anchor = norm_up(anchor_text)
+    combined = norm_up(f"{before} {anchor_text}")
+    if re.match(r"VALOR\s+COMERCIAL\s+DEL\s+INMUEBLE\b", normalized_anchor):
+        return "VALOR_COMERCIAL_FINAL", 300, "VALOR COMERCIAL DEL INMUEBLE"
+    if "VALORES NO INSCRITOS" in combined:
+        return "VALORES_NO_INSCRITOS_RRPP", 220, "VALOR COMERCIAL"
+    if "VALORES INSCRITOS" in combined:
+        return "VALORES_INSCRITOS_RRPP", 120, "VALOR COMERCIAL"
+    if "REPOSICION" in combined or "RECONSTRUCCION" in combined:
+        return "REPOSICION", 220, "VALOR DE RECONSTRUCCION"
+    if "COMERCIAL" in normalized_anchor:
+        return "ANCLA_GENERAL", 180, "VALOR COMERCIAL"
+    return "ANCLA_DECLARADA", 180, "VALOR DE RECONSTRUCCION"
+
+
+def extract_value_candidates(
     doc: fitz.Document,
     anchor_re: re.Pattern[str],
     *,
+    field: str,
     aliases: tuple[str, ...] = (),
-) -> tuple[Optional[float], Optional[float], Optional[int]]:
+) -> tuple[ValueCandidate, ...]:
+    """Recolecta todos los importes razonables asociados a una misma ancla.
+
+    El extractor anterior devolvía el primero. La lista permite conservar el
+    cero de una sección registral como evidencia sin ocultar el valor final
+    positivo que el layout pueda declarar después.
+    """
+    found: list[ValueCandidate] = []
     for page_index in range(min(len(doc), 10)):
         page = doc[page_index]
+        # La capa de texto puede desordenar una tabla. Conservamos la lectura
+        # geométrica de la implementación anterior como evidencia de mayor
+        # proximidad al rótulo, pero ahora acumulamos todos los candidatos.
         blocks = get_blocks(page)
         for block in blocks:
             if anchor_position(block["up"], anchor_re, aliases) < 0:
@@ -309,20 +378,83 @@ def extract_values_by_anchor(
             ]
             related.sort(key=lambda item: (item["y0"], item["x0"]))
             section = " ".join(item["text"] for item in related)
+            context, priority, normalized_anchor = _value_context(block["text"], "")
             usd = first_amount_after_currency(section, r"(?:US\$|USD\$?|U\.?S\.?\$)")
             pen = first_amount_after_currency(section, r"(?:S/\.?|SOLES?)")
-            if usd is not None or pen is not None:
-                return usd, pen, page_index + 1
+            if usd is not None:
+                found.append(ValueCandidate(field, "USD", usd, page_index + 1, normalized_anchor, context, priority + 40))
+            if pen is not None:
+                found.append(ValueCandidate(field, "PEN", pen, page_index + 1, normalized_anchor, context, priority + 40))
 
         page_text = page.get_text("text")
-        position = anchor_position(norm_up(page_text), anchor_re, aliases)
-        if position >= 0:
-            section = page_text[position:position + 1200]
+        occurrences = _anchor_occurrences(page_text, anchor_re, aliases)
+        boundaries = [match.start() for match in VALUE_BOUNDARY_RE.finditer(page_text)]
+        for position, end, anchor in occurrences:
+            next_boundary = next((boundary for boundary in boundaries if boundary > position), None)
+            section_end = next_boundary if next_boundary is not None else min(len(page_text), end + 600)
+            section = page_text[end:section_end]
             usd = first_amount_after_currency(section, r"(?:US\$|USD\$?|U\.?S\.?\$)")
             pen = first_amount_after_currency(section, r"(?:S/\.?|SOLES?)")
-            if usd is not None or pen is not None:
-                return usd, pen, page_index + 1
-    return None, None, None
+            context, priority, normalized_anchor = _value_context(
+                page_text[position:min(len(page_text), end + 35)],
+                page_text[max(0, position - 180):position],
+            )
+            if usd is not None:
+                found.append(ValueCandidate(field, "USD", usd, page_index + 1, normalized_anchor, context, priority))
+            if pen is not None:
+                found.append(ValueCandidate(field, "PEN", pen, page_index + 1, normalized_anchor, context, priority))
+    unique_candidates = {
+        (item.field, item.currency, item.amount, item.page, item.anchor, item.section, item.source_priority): item
+        for item in found
+    }
+    # Dict conserva el orden de hallazgo: geometría de la página antes que
+    # el respaldo lineal y páginas en orden documental. Es la prioridad
+    # heredada para candidatos con la misma etiqueta y evita convertir un
+    # valor posterior de una tabla auxiliar en el resultado operativo.
+    return tuple(unique_candidates.values())
+
+
+def select_value_candidates(candidates: tuple[ValueCandidate, ...], *, issue_code: str) -> ValueSelection:
+    """Selecciona por prioridad declarada y nunca promociona un importe cero."""
+    selected: dict[str, ValueCandidate] = {}
+    issues: list[str] = []
+    for currency in ("USD", "PEN"):
+        currency_candidates = [item for item in candidates if item.currency == currency]
+        positive = [item for item in currency_candidates if item.amount > 0]
+        pool = positive or currency_candidates
+        if not pool:
+            continue
+        highest_priority = max(item.source_priority for item in pool)
+        finalists = [item for item in pool if item.source_priority == highest_priority]
+        amounts = {item.amount for item in finalists}
+        # Un mismo informe puede repetir valores de trabajo en páginas o
+        # bloques distintos. Sin una regla de layout que los haga
+        # contradictorios, se conserva el primer candidato según la prioridad
+        # documental heredada. Solo se marca ambigüedad cuando el mismo
+        # rótulo final presenta importes distintos en la misma página.
+        same_final_label = all(
+            item.section == "VALOR_COMERCIAL_FINAL" and item.anchor == "VALOR COMERCIAL DEL INMUEBLE"
+            for item in finalists
+        )
+        same_page = len({item.page for item in finalists}) == 1
+        if len(amounts) > 1 and same_final_label and same_page:
+            issues.append(issue_code)
+            continue
+        selected[currency] = finalists[0]
+    final = [item for item in selected.values()]
+    page = max(final, key=lambda item: item.source_priority).page if final else None
+    return ValueSelection(
+        usd=selected.get("USD").amount if "USD" in selected else None,
+        pen=selected.get("PEN").amount if "PEN" in selected else None,
+        page=page,
+        candidates=candidates,
+        issues=tuple(dict.fromkeys(issues)),
+    )
+
+
+def candidates_for_control(candidates: tuple[ValueCandidate, ...]) -> str:
+    """Serializa solo metadatos técnicos; no incluye contenido del PDF."""
+    return json.dumps([asdict(item) for item in candidates], ensure_ascii=False, separators=(",", ":"))
 
 
 def extract_anio_construccion(doc: fitz.Document) -> tuple[Optional[int], Optional[int]]:
@@ -357,6 +489,25 @@ def extract_anio_construccion(doc: fitz.Document) -> tuple[Optional[int], Option
             nearby = excluded.sub("", norm_up(nearby))
             if match := YEAR_RE.search(nearby):
                 return int(match.group(1)), page_index + 1
+    return None, None
+
+
+def extract_anio_inicio_obra(doc: fitz.Document) -> tuple[Optional[int], Optional[int]]:
+    """Acepta inicio de obra solo para una construcción explícitamente vigente."""
+    start_re = re.compile(r"(?:FECHA\s+DE\s+)?INICIO\s+DE\s+(?:OBRA|CONSTRUCCION)(.*)", re.I)
+    for page_index, page in enumerate(doc):
+        text = norm_up(page.get_text("text"))
+        if "EN CONSTRUCCION" not in text and "PRIMER CONSTRUYO" not in text:
+            continue
+        match = start_re.search(text)
+        if not match:
+            continue
+        tail = match.group(1)[:100]
+        date = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-](\d{2}|19\d{2}|20\d{2})\b", tail)
+        year = date.group(1) if date else next(iter(re.findall(r"\b(19\d{2}|20\d{2})\b", tail)), "")
+        if year:
+            parsed = int(year)
+            return (2000 + parsed if len(year) == 2 else parsed), page_index + 1
     return None, None
 
 
@@ -632,8 +783,13 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Origen tasadora": "",
         "Perfil plantilla": "generic-v1",
         "Version perfil": "1",
+        "Template id": "",
+        "Familia layout": "",
+        "Estrategia extraccion": "",
         "Confianza perfil": 0.0,
         "Coincidencias perfil": "",
+        "Tipo documento": "DESCONOCIDO",
+        "Motivo tipo documento": "",
         "Direccion extraida": "",
         "Pagina direccion": "",
         "Tipo inmueble": "",
@@ -645,9 +801,11 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Valor comercial US$": "",
         "Valor comercial S/": "",
         "Pagina valor comercial": "",
+        "Candidatos valor comercial": "",
         "Valor reconstruccion US$": "",
         "Valor reconstruccion S/": "",
         "Pagina valor reconstruccion": "",
+        "Candidatos valor reconstruccion": "",
         "Año construccion": "",
         "Pagina año construccion": "",
         "Origen año construccion": "",
@@ -665,6 +823,12 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     try:
         with fitz.open(stream=content, filetype="pdf") as doc:
             page_texts = tuple(page.get_text("text") for page in doc)
+            document_classification = classify_document(page_texts)
+            result["Tipo documento"] = document_classification.document_type
+            result["Motivo tipo documento"] = document_classification.reason_code
+            if document_classification.document_type != "TASACION":
+                result["Observacion extraccion"] = document_classification.reason_code
+                return result
             profile = detect_document_profile(page_texts)
             if not profile.provider_id:
                 ocr_texts = tuple(iter_provider_ocr_texts(doc))
@@ -674,17 +838,34 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             if solicitud_direccion and not has_complete_administrative_location(direccion):
                 direccion, page_direccion = solicitud_direccion, solicitud_page
             tipo, tipo_texto, page_tipo = extract_tipo_inmueble(doc, direccion)
-            commercial_usd, commercial_pen, page_commercial = extract_values_by_anchor(
+            commercial_candidates = extract_value_candidates(
                 doc,
                 VALOR_COMERCIAL_RE,
+                field="commercial_value",
                 aliases=profile_anchor_aliases(profile, "commercial_value"),
             )
-            reconstruction_usd, reconstruction_pen, page_reconstruction = extract_values_by_anchor(
+            commercial_selection = select_value_candidates(
+                commercial_candidates, issue_code="VALOR_COMERCIAL_AMBIGUO",
+            )
+            reconstruction_candidates = extract_value_candidates(
                 doc,
                 VALOR_RECONSTRUCCION_RE,
+                field="reconstruction_value",
                 aliases=profile_anchor_aliases(profile, "reconstruction_value"),
             )
+            reconstruction_selection = select_value_candidates(
+                reconstruction_candidates, issue_code="VALOR_RECONSTRUCCION_AMBIGUO",
+            )
+            commercial_usd, commercial_pen, page_commercial = (
+                commercial_selection.usd, commercial_selection.pen, commercial_selection.page,
+            )
+            reconstruction_usd, reconstruction_pen, page_reconstruction = (
+                reconstruction_selection.usd, reconstruction_selection.pen, reconstruction_selection.page,
+            )
+            observations.extend(commercial_selection.issues)
+            observations.extend(reconstruction_selection.issues)
             anio, page_anio = extract_anio_construccion(doc)
+            inicio_obra, page_inicio_obra = extract_anio_inicio_obra(doc)
             edad_efectiva, page_edad_efectiva = extract_edad_efectiva(doc)
             anio_expedicion, page_anio_expedicion = extract_anio_expedicion(doc)
             pisos, sotanos, page_pisos = extract_pisos_sotanos(doc)
@@ -699,7 +880,7 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             address_conflict = detect_address_conflict(doc, direccion)
             floors_conflict = detect_pisos_sotanos_conflict(doc)
     except Exception as error:
-        result["Observacion extraccion"] = f"Error procesando PDF: {error}"
+        result["Observacion extraccion"] = f"ERROR_EXTRACCION_{type(error).__name__.upper()}"
         return result
 
     if tipo == "DEPARTAMENTO":
@@ -718,6 +899,12 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             anio = calculated_year
             page_anio = page_edad_efectiva
             origen_anio = "EDAD EFECTIVA"
+    # En una obra declarada en construcción, el inicio explícito documenta
+    # el año operativo incluso si una tabla trae otro año de referencia.
+    if inicio_obra is not None:
+        anio = inicio_obra
+        page_anio = page_inicio_obra
+        origen_anio = "INICIO DE OBRA"
 
     result.update({
         "Tasadora id": profile.provider_id,
@@ -725,6 +912,9 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Origen tasadora": profile.provider_source,
         "Perfil plantilla": profile.profile_id,
         "Version perfil": profile.version,
+        "Template id": profile.template_id,
+        "Familia layout": profile.layout_family,
+        "Estrategia extraccion": "; ".join(profile.strategies),
         "Confianza perfil": profile.confidence,
         "Coincidencias perfil": "; ".join(profile.matched_terms),
         "Direccion extraida": direccion,
@@ -738,9 +928,11 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Valor comercial US$": commercial_usd if commercial_usd is not None else "",
         "Valor comercial S/": commercial_pen if commercial_pen is not None else "",
         "Pagina valor comercial": page_commercial or "",
+        "Candidatos valor comercial": candidates_for_control(commercial_selection.candidates),
         "Valor reconstruccion US$": reconstruction_usd if reconstruction_usd is not None else "",
         "Valor reconstruccion S/": reconstruction_pen if reconstruction_pen is not None else "",
         "Pagina valor reconstruccion": page_reconstruction or "",
+        "Candidatos valor reconstruccion": candidates_for_control(reconstruction_selection.candidates),
         "Año construccion": anio or "",
         "Pagina año construccion": page_anio or "",
         "Origen año construccion": origen_anio,

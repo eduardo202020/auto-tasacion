@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-06",
+  "version": "2026-10-18",
   "providers": [
     {
       "id": "braschi-tasaciones",
@@ -45,6 +45,24 @@
       "name": "Quantum Valuaciones",
       "aliases": ["QUANTUM VALUACIONES S.A.C."],
       "evidence_status": "observed_local_samples"
+    },
+    {
+      "id": "jalvo-tasaciones",
+      "name": "Quota Jalvo",
+      "aliases": ["JALVO"],
+      "evidence_status": "observed_benchmark_150_exact_signature"
+    },
+    {
+      "id": "aset-appraisals-consulting",
+      "name": "ASET Appraisals & Consulting",
+      "aliases": ["ASET", "APPRAISALS & CONSULTING CORPORATE S.A.C."],
+      "evidence_status": "observed_benchmark_150_exact_signature"
+    },
+    {
+      "id": "outsourcing-tasaciones",
+      "name": "Outsourcing Empresarial del Perú",
+      "aliases": ["OUTSOURCING"],
+      "evidence_status": "observed_benchmark_150_exact_signature"
     }
   ]
 }

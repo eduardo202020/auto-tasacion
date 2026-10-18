@@ -4,6 +4,8 @@
   "description": "Variante técnica identificada por la firma OP-D y el anexo Construyo.",
   "default": false,
   "priority": 100,
+  "template_id": "opd-construyo-layout-v1",
+  "layout_family": "LF-OPD-CONSTRUYO",
   "match": {
     "all_terms": ["OP-D"],
     "any_terms": ["SOLICITUD CONSTRUYO", "PRIMER CONSTRUYO"]
