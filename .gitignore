@@ -39,3 +39,5 @@ tasaciones-150/
 
 # Referencia local sensible de autenticación 3270 (no versionar).
 /login.png
+
+auto-tasacion-benchmark/
