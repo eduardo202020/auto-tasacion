@@ -20,7 +20,8 @@
   "extraction": {
     "anchor_aliases": {},
     "strategies": [
-      "braschi_floor_table_ocr"
+      "braschi_floor_table_ocr",
+      "braschi_construyo_total_table"
     ]
   }
 }

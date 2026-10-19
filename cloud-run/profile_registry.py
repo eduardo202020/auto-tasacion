@@ -19,7 +19,7 @@ from typing import Any, Iterable
 REFERENCE_DATA = Path(__file__).parent / "reference-data"
 PROFILES_DIR = REFERENCE_DATA / "profiles"
 PROVIDERS_FILE = REFERENCE_DATA / "tasadoras.json"
-ALLOWED_EXTRACTION_STRATEGIES = frozenset({"braschi_floor_table_ocr"})
+ALLOWED_EXTRACTION_STRATEGIES = frozenset({"braschi_floor_table_ocr", "braschi_construyo_total_table"})
 ALLOWED_VALUE_SECTIONS = frozenset({
     "VALOR_COMERCIAL_FINAL", "VALORES_NO_INSCRITOS_RRPP", "VALORES_INSCRITOS_RRPP",
     "REPOSICION", "ANCLA_GENERAL", "ANCLA_DECLARADA",

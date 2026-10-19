@@ -53,8 +53,8 @@ empresa no fuerza una plantilla.
 | Listos deterministas | 8/10 |
 | Pendientes por conflicto de importe | 2/10 |
 | Tipo | 10/10 |
-| Moneda | 8/10 |
-| Importe | 7/10 |
+| Moneda | 9/10 |
+| Importe | 9/10 |
 | Pisos | 7/10 |
 | Sotanos | 9/10 |
 | Anio | 10/10 |
@@ -63,10 +63,12 @@ empresa no fuerza una plantilla.
 | Geografia | 7/10 |
 | Decision final | 8/10 |
 
-D01 y D07 quedan bloqueados por candidatos de reconstruccion de igual prioridad
-sin regla documental aprobada. D08 conserva una diferencia de importe con el
-golden y D09 una diferencia de pisos: son discrepancias abiertas, no se corrigio
-el extractor por nombre de archivo ni se copio el valor del operador.
+D01 ya toma el importe y moneda de la columna documentada `VALOR TOTAL`, pero
+permanece pendiente por pisos y sotanos. D07 queda bloqueado por candidatos de
+reconstruccion de igual prioridad sin regla documental aprobada. D08 resuelve el
+importe mediante la misma estrategia Braschi; D09 conserva una diferencia de
+pisos cuyo texto del PDF declara dos pisos. Las diferencias de direccion y
+geografia permanecen abiertas; no se corrigieron por nombre de archivo.
 
 ## Corpus comparable de 120 casos
 
@@ -94,7 +96,7 @@ un monto no sustentado.
 | `REVISION_HUMANA` | 4 |
 
 Controles de calidad: cero listos con importe no positivo, cero prestamos de
-control invalidos y cero casos sin geografia. Hay 36 ambiguedades de importe,
+control invalidos y cero casos sin geografia. Hay 35 ambiguedades de importe,
 10 conflictos de moneda y 4 documentos `DESCONOCIDO`; se mantienen fuera de
 la ruta automatica.
 
@@ -112,7 +114,7 @@ proceso.
 
 ## Puertas de calidad y decision
 
-- `unittest discover -s cloud-run/tests -v`: 103 pruebas, OK.
+- `unittest discover -s cloud-run/tests -v`: 104 pruebas, OK.
 - Catalogo de perfiles: 0 errores.
 - `compileall`: OK.
 - XLSX de prueba y contrato de workbook: OK.

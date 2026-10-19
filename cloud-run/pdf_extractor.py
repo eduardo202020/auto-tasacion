@@ -420,6 +420,57 @@ def extract_value_candidates(
     return tuple(unique_candidates.values())
 
 
+def extract_braschi_construyo_total_candidates(doc: fitz.Document) -> tuple[ValueCandidate, ...]:
+    """Read the documented ``VALOR TOTAL`` column in Braschi Construyo tables.
+
+    This strategy is restricted to the profile signed by Braschi, Construyo and
+    the building table. The total, existing-building and projected-building
+    columns coexist in the same row; this reads only the amount below the
+    documented total column.
+    """
+    candidates: list[ValueCandidate] = []
+    for page_index, page in enumerate(doc):
+        words = get_words(page)
+        rows: dict[float, list[dict[str, Any]]] = {}
+        for word in words:
+            rows.setdefault(round(word["y0"], 1), []).append(word)
+        ordered_rows = sorted(rows.items())
+        for y, row in ordered_rows:
+            row.sort(key=lambda item: item["x0"])
+            for word_index, word in enumerate(row[:-1]):
+                next_word = row[word_index + 1]
+                if word["up"] != "VALOR" or next_word["up"] != "TOTAL":
+                    continue
+                header_x = word["x0"]
+                has_non_registered_section = any(
+                    y - 25 <= nearby_y <= y + 25
+                    and {"VALORES", "NO", "INSCRITOS"}.issubset({item["up"] for item in candidate_row})
+                    for nearby_y, candidate_row in ordered_rows
+                )
+                if not has_non_registered_section:
+                    continue
+                for currency, tokens in (("USD", {"US$", "USD$"}), ("PEN", {"S/", "S/."})):
+                    selected = None
+                    for value_y, value_row in ordered_rows:
+                        if not y < value_y <= y + 80 or not any(item["up"] in tokens for item in value_row):
+                            continue
+                        numeric = [
+                            item for item in value_row
+                            if header_x - 12 <= item["x0"] <= header_x + 105
+                            and parse_amount(item["text"]) is not None
+                        ]
+                        if numeric:
+                            selected = min(numeric, key=lambda item: abs(item["x0"] - header_x))
+                            break
+                    if selected is not None:
+                        candidates.append(ValueCandidate(
+                            "reconstruction_value", currency, parse_amount(selected["text"]),
+                            page_index + 1, "VALOR TOTAL CONSTRUYO", "REPOSICION", 340,
+                        ))
+    unique = {(item.currency, item.amount, item.page): item for item in candidates}
+    return tuple(unique.values())
+
+
 def select_value_candidates(
     candidates: tuple[ValueCandidate, ...], *, issue_code: str,
     preferred_sections: tuple[str, ...] = (),
@@ -906,6 +957,11 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
                 field="reconstruction_value",
                 aliases=profile_anchor_aliases(profile, "reconstruction_value"),
             )
+            if profile_uses_strategy(profile, "braschi_construyo_total_table"):
+                reconstruction_candidates = (
+                    *extract_braschi_construyo_total_candidates(doc),
+                    *reconstruction_candidates,
+                )
             reconstruction_selection = select_value_candidates(
                 reconstruction_candidates,
                 issue_code="VALOR_RECONSTRUCCION_AMBIGUO",

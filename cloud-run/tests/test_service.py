@@ -112,6 +112,19 @@ def build_pdf_with_split_construction_evidence() -> bytes:
     return content
 
 
+def build_pdf_with_braschi_construyo_total_table() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "BRASCHI TASACIONES\nSOLICITUD CONSTRUYO\nPISOS EN EL EDIFICIO\nSOTANOS Y/O SEMISOTANOS\nCASA", fontsize=10)
+    page.insert_text((198, 300), "VALORES NO INSCRITOS", fontsize=10)
+    page.insert_text((300, 294), "VALOR TOTAL", fontsize=10)
+    page.insert_text((286, 330), "S/", fontsize=10)
+    page.insert_text((304, 330), "266,136.00", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
 def build_pdf_with_estudio_titulos() -> bytes:
     document = fitz.open()
     page = document.new_page()
@@ -451,6 +464,12 @@ class TasacionesServiceTests(unittest.TestCase):
             profile_selection_sections(profile, "commercial_value"),
             ("VALOR_COMERCIAL_FINAL", "ANCLA_GENERAL"),
         )
+
+    def test_braschi_construyo_total_table_uses_documented_total_column(self):
+        result = extract_pdf(build_pdf_with_braschi_construyo_total_table(), "D08.pdf")
+        self.assertEqual(result["Valor elegido S/"], 266136.0)
+        self.assertEqual(result["Valor reconstruccion S/"], 266136.0)
+        self.assertIn("braschi_construyo_total_table", result["Estrategia extraccion"])
 
     def test_tasacion_with_estudio_titulos_annex_remains_tasacion(self):
         result = extract_pdf(build_pdf_with_estudio_titulos_annex(), "D99.pdf")
