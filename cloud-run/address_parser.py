@@ -656,6 +656,19 @@ def build_vias_todas(vias, text):
 # -------------------------------
 # INTERIOR
 # -------------------------------
+def _is_administrative_department(label, value):
+    """Distinguish the geographic ``Departamento Lima`` from a unit number.
+
+    A department identifier can be a valid interior only when it actually
+    identifies a unit (for example, ``Departamento 101``).  The department
+    names in the country hierarchy are not interior identifiers, even though
+    the textual labels are the same.
+    """
+    normalized_label = upper(strip_accents(label or ""))
+    normalized_value = upper(strip_accents(value or ""))
+    return normalized_label in {"DEPARTAMENTO", "DEP", "DPTO", "DEPTO"} and normalized_value in PERU_DEPARTAMENTOS
+
+
 def _normalize_interior_val(val):
     val = upper(val or "").strip()
     mfix = re.match(r'^(\d{1,6})-[A-ZÁÉÍÓÚÜÑ]{2,}$', val, re.I)
@@ -681,6 +694,8 @@ def extract_interior(text):
     for p in patterns_numtag_first:
         m = re.search(p, text, re.I)
         if m:
+            if _is_administrative_department(m.group(1), m.group(2)):
+                continue
             val = _normalize_interior_val(m.group(2))
             return limit(val, INT_MAX) if val else ""
 
@@ -695,6 +710,8 @@ def extract_interior(text):
     for p in patterns_fallback:
         m = re.search(p, text, re.I)
         if m:
+            if _is_administrative_department(m.group(1), m.group(2)):
+                continue
             val = _normalize_interior_val(m.group(2))
             return limit(val, INT_MAX) if val else ""
     return ""

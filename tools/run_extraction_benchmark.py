@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 import sys
 import zipfile
@@ -23,8 +24,15 @@ from openpyxl import load_workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "cloud-run"))
 
-from service import PARA_PROCESAR_COLUMNS, build_workbook, process_pdf_entries  # noqa: E402
+from service import (  # noqa: E402
+    MACRO_COLUMNS,
+    build_workbook,
+    process_pdf_entries,
+    to_macro_row,
+)
+from pdf_extractor import extract_pdf  # noqa: E402
 from verify_workbook import validate as validate_workbook  # noqa: E402
+from catalog import load_catalog  # noqa: E402
 
 
 GOLDEN_FILENAMES = tuple(f"D{number:02d}.pdf" for number in range(1, 11))
@@ -206,18 +214,77 @@ def _result_entry(descriptor: dict[str, str], control: dict[str, Any], baseline:
     }
 
 
-def _macro_rows_by_case(ready_rows: list[list[Any]]) -> dict[str, dict[str, Any]]:
-    """Build final-row semantics only in memory for golden comparisons."""
-    case_index = PARA_PROCESAR_COLUMNS.index("ID_CASO")
-    return {
-        str(row[case_index]): dict(zip(PARA_PROCESAR_COLUMNS, row))
-        for row in ready_rows
-        if len(row) > case_index and row[case_index]
-    }
+def _macro_fields_from_extracted(extracted: dict[str, Any]) -> dict[str, Any]:
+    """Build comparable address fields even when a case is not operational.
+
+    A review-only case intentionally has no row in ``PARA_PROCESAR``.  Its
+    documented address can still be compared against the golden without
+    treating that comparison as authorization to process the case.
+    """
+    row, _ = to_macro_row(extracted)
+    return dict(zip(MACRO_COLUMNS, row))
+
+
+def _golden_macro_rows(zip_paths: list[Path]) -> dict[str, dict[str, Any]]:
+    """Extract only Golden address candidates from external PDF archives."""
+    candidates: dict[str, dict[str, Any]] = {}
+    for zip_path in zip_paths:
+        with zipfile.ZipFile(zip_path) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                filename = Path(member.filename).name
+                if filename not in GOLDEN_FILENAMES:
+                    continue
+                candidates[filename] = _macro_fields_from_extracted(
+                    extract_pdf(archive.read(member), filename)
+                )
+    return candidates
 
 
 def _normalized_text(value: object) -> str:
     return " ".join(str(value or "").upper().split())
+
+
+def _semantic_address_text(value: object) -> str:
+    """Normalize only representation approved by the MASIVO catalog.
+
+    This comparison is limited to case, accents, whitespace, basic punctuation
+    and the abbreviations declared in ``DATOS``.  It deliberately preserves
+    numbers and every other lexical token, so different streets, districts or
+    property identifiers never become equivalent.
+    """
+    plain = "".join(
+        character for character in unicodedata.normalize("NFKD", str(value or ""))
+        if not unicodedata.combining(character)
+    ).upper()
+    tokens = re.sub(r"[^A-Z0-9]+", " ", plain).split()
+    abbreviations: dict[str, str] = {}
+    for label, abbreviation in load_catalog()["directions"].items():
+        canonical = re.sub(r"[^A-Z0-9]+", "", str(label).upper())
+        short = re.sub(r"[^A-Z0-9]+", "", str(abbreviation).upper())
+        if canonical:
+            abbreviations[canonical] = canonical
+        if short:
+            abbreviations[short] = canonical
+    return " ".join(abbreviations.get(token, token) for token in tokens)
+
+
+def address_match_status(actual: object, expected: object) -> str:
+    """Return a privacy-safe exact, semantic or real address comparison."""
+    if str(actual or "") == str(expected or ""):
+        return "EXACT_MATCH"
+    if _semantic_address_text(actual) == _semantic_address_text(expected):
+        return "SEMANTIC_MATCH"
+    return "DIFFERENT"
+
+
+def address_group_status(field_statuses: dict[str, str]) -> str:
+    if all(status == "EXACT_MATCH" for status in field_statuses.values()):
+        return "EXACT_MATCH"
+    if all(status != "DIFFERENT" for status in field_statuses.values()):
+        return "SEMANTIC_MATCH"
+    return "DIFFERENT"
 
 
 def _field_with_suffix(fields: dict[str, Any], suffix: str) -> Any:
@@ -266,10 +333,12 @@ def _golden_comparison(
             )
             for key in ("tipo", "moneda", "importe", "pisos", "sotanos", "anio", "clase", "decision_final")
         }
-        matches["direccion_estructurada"] = all(
-            _normalized_text(actual["direccion_estructurada"].get(key)) == _normalized_text(value)
+        address_fields = {
+            key: address_match_status(actual["direccion_estructurada"].get(key), value)
             for key, value in reference["direccion_estructurada"].items()
-        )
+        }
+        address_status = address_group_status(address_fields)
+        matches["direccion_estructurada"] = address_status != "DIFFERENT"
         matches["geografia"] = all(
             _normalized_text(actual["geografia"].get(key)) == _normalized_text(value)
             for key, value in reference["geografia"].items()
@@ -278,6 +347,10 @@ def _golden_comparison(
             "filename": entry["filename"],
             "route": entry["route"],
             "matches": matches,
+            "address_comparison": {
+                "status": address_status,
+                "fields": address_fields,
+            },
         })
     return {
         "total": len(compared),
@@ -287,6 +360,24 @@ def _golden_comparison(
                 "tipo", "moneda", "importe", "pisos", "sotanos", "anio", "clase",
                 "direccion_estructurada", "geografia", "decision_final",
             )
+        },
+        "address_comparison": {
+            "exact_matches": sum(
+                item["address_comparison"]["status"] == "EXACT_MATCH" for item in compared
+            ),
+            "semantic_matches": sum(
+                item["address_comparison"]["status"] == "SEMANTIC_MATCH" for item in compared
+            ),
+            "real_mismatches": sum(
+                item["address_comparison"]["status"] == "DIFFERENT" for item in compared
+            ),
+            "field_statuses": {
+                field: {
+                    status: sum(item["address_comparison"]["fields"].get(field) == status for item in compared)
+                    for status in ("EXACT_MATCH", "SEMANTIC_MATCH", "DIFFERENT")
+                }
+                for field in ("direccion", "direccion1", "exterior", "interior", "referencia", "ubicacion", "ubicacion1")
+            },
         },
         "cases": compared,
     }
@@ -419,13 +510,8 @@ def main() -> int:
         "entries": entries,
     }
     if args.dataset == "golden-10":
-        macro_by_case = _macro_rows_by_case(ready)
-        macro_by_filename = {
-            filename: macro_by_case.get(str(row.get("ID_CASO") or ""), {})
-            for filename, row in rows_by_filename.items()
-        }
         report["golden_comparison"] = _golden_comparison(
-            entries, golden_expected(args.operator_workbook), macro_by_filename,
+            entries, golden_expected(args.operator_workbook), _golden_macro_rows(args.zip_paths),
         )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

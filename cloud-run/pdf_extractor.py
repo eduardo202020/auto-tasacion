@@ -28,7 +28,7 @@ RAW_DEPTO_RE = re.compile(r"\b(DEPARTAMENTO|DPTO\.?|DUPLEX|FLAT)\b", re.I)
 RAW_TERRENO_RE = re.compile(r"\bTERRENO(?:\s+SIN\s+CONSTRUCCIONES)?\b", re.I)
 VALOR_COMERCIAL_RE = re.compile(r"\bVALOR\s+COMERCIAL\b", re.I)
 VALOR_RECONSTRUCCION_RE = re.compile(
-    r"\b(VALORES?\s+DE\s+(?:RECONSTRUCCION|REPOSICION)|VALOR\s+DE\s+(?:RECONSTRUCCION|REPOSICION)|RECONSTRUCCION|REPOSICION)\b",
+    r"\b(?:VALORES?\s+DE\s+(?:RECONSTRUCCION|REPOSICION)|VALOR\s+DE\s+(?:RECONSTRUCCION|REPOSICION)|V\.?\s*RECONSTRUCCION)\b",
     re.I,
 )
 VALUE_BOUNDARY_RE = re.compile(
@@ -837,7 +837,24 @@ def extract_pisos_sotanos(doc: fitz.Document) -> tuple[Optional[int], Optional[i
 
 
 def detect_pisos_sotanos_conflict(doc: fitz.Document) -> str:
-    """La tabla prevalece sobre la descripción según la regla operativa."""
+    """Block first-construction reports whose declared and listed floors conflict.
+
+    A heading such as ``proyectada a 2 pisos y azotea`` is not enough when the
+    distribution of that same construction lists a higher numbered floor.  The
+    extractor keeps the documented value for traceability, but does not make a
+    business decision about which source must prevail.
+    """
+    declaration = re.compile(
+        r"\b(?:PRIMER|1)\s+CONSTRUYO\b.{0,220}?\b(?:PROYECTAD[AO]\s+A\s+)?(\d{1,3})\s+PISOS?\b.{0,60}?\bAZOTEA\b",
+        re.I,
+    )
+    listed_floor = re.compile(r"(?:^|\s-\s)(\d{1,3})\s+PISO\b", re.I)
+    for page in doc:
+        text = norm_up(page.get_text("text"))
+        declared = [int(match.group(1)) for match in declaration.finditer(text)]
+        listed = [int(match.group(1)) for match in listed_floor.finditer(text)]
+        if declared and listed and max(listed) > max(declared):
+            return "Conflicto documental de pisos: declaracion y distribucion no coinciden"
     return ""
 
 

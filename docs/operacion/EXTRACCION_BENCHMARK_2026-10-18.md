@@ -1,125 +1,91 @@
-# Benchmark de extraccion determinista: segunda iteracion
+# Benchmark de extraccion determinista: auditoria de precision
 
-Fecha de corrida: 2026-10-18.
+Fecha de corrida final: 2026-10-19.
 
 ## Alcance y resguardo de evidencia
 
-La corrida usa `auto-tasacion-benchmark/` exclusivamente como corpus externo.
-El harness lee los PDF directamente desde los ZIP y deja los JSON y los XLSX de
-validacion en `%TEMP%`, fuera del repositorio. No se versionan PDF, XLSX, XLSM,
-prestamos, expedientes, direcciones completas ni texto documental. Este informe
-conserva solo metricas, identificadores tecnicos y diferencias semanticas.
+La corrida usa `auto-tasacion-benchmark/` solo como corpus externo. El harness
+lee PDFs desde los ZIP y guarda JSON de auditoria y libros de comprobacion en
+`%TEMP%`. No se versionan PDFs, XLSX, XLSM, direcciones completas, prestamos,
+expedientes ni texto documental.
 
-## Cambios evaluados
+## Auditoria focalizada D01, D07, D08 y D09
 
-- La clasificacion previa distingue `TASACION`, `ESTUDIO_TITULOS` y
-  `DESCONOCIDO`. Un estudio de titulos solo se acepta cuando aparece temprano,
-  tiene evidencia juridica y no hay senales fuertes de tasacion. Un anexo
-  juridico no convierte una tasacion en documento no tasable.
-- Si no hay capa de texto suficiente y la primera clasificacion es
-  `DESCONOCIDO`, se ejecuta OCR local acotado unicamente para clasificacion y
-  proveedor. El OCR no completa ni elige importes, pisos, moneda ni otros datos
-  criticos.
-- Un perfil tecnico separa `provider_id`, `template_id` y `layout_family`.
-  Las estrategias y prioridades de seccion solo se aplican a firmas documentales
-  verificables.
-- La seleccion de valores es fail-closed: dos importes positivos diferentes en
-  la prioridad maxima quedan sin elegir si la plantilla no declara una prioridad
-  de seccion. Los ceros se mantienen como evidencia y nunca se envian a
-  `PARA_PROCESAR`.
-- La fecha de inicio de obra se admite solo para documentos que declaran una
-  obra vigente; la fecha y la condicion pueden estar en paginas distintas.
-- El contrato de workbook, las primeras 24 columnas de `PARA_PROCESAR`, el
-  orden de columnas y el origen autorizado de `PRESTAMO` no cambiaron.
-
-## Perfiles tecnicos incorporados
-
-| Perfil | Provider | Template | Layout |
+| Caso | Evidencia documental auditada | Clasificacion | Decision fail-closed |
 | --- | --- | --- | --- |
-| Braschi A | Braschi | `braschi-layout-a-v1` | `LF-BRASCHI-A` |
-| Braschi Construyo | Braschi | `braschi-construyo-tabla-v1` | `LF-BRASCHI-CONSTRUYO` |
-| Layseca OP-D A/B | Layseca | `layseca-opd-layout-a/b-v1` | `LF-LAYSECA-OPD-A/B` |
-| Layseca Construyo | Layseca | `layseca-construyo-v1` | `LF-LAYSECA-CONSTRUYO` |
-| Quota A/B | Jalvo | `quota-layout-a/b-v1` | `LF-QUOTA-A/B` |
-| Layout compartido A | varios | `shared-valuation-layout-a-v1` | `LF-A` |
+| D01 | En pagina 3 de Braschi Construyo, las celdas de `N de pisos en el edificio` y `N de sotanos y/o semisotanos` estan vacias. El unico `1` de la fila pertenece a `N Unidades en el conjunto`. | `SIN_EVIDENCIA` | No se infieren pisos, sotanos ni clase. Ruta `PENDIENTE_IA`; queda fuera de `PARA_PROCESAR`. |
+| D07 | La coincidencia generica con `Reposicion` tomaba `Metodo de Costos o Reposicion`, que documenta el metodo de valor comercial. El valor de reconstruccion se presenta en su seccion propia. | `BUG_EXTRACCION`, resuelto | El ancla exige `Valor(es) de reconstruccion/reposicion` o `V. Reconstruccion`. Se descarta el metodo comercial y se conserva la seleccion respaldada por la seccion de reconstruccion. |
+| D08 | El PDF contiene una jerarquia geografica distinta de la fila golden. `Departamento <nombre geografico>` se interpretaba como interior. | `BUG_PARSING` y `GOLDEN_POSIBLEMENTE_INCORRECTO` | Un departamento geografico no llena `INTERIOR`; un identificador como `Departamento 101` sigue siendo interior valido. Se preserva la geografia del PDF y catalogo. |
+| D09 | Paginas 3 y 9 declaran primer construyo de dos pisos y azotea. En pagina 5 la tabla de pisos esta vacia, pero la distribucion enumera hasta un tercer piso. | `CONFLICTO_DOCUMENTAL` | La extraccion mantiene la trazabilidad del valor declarado, pero la ruta pasa a `REGLA_NEGOCIO_PENDIENTE`. No genera fila operativa hasta definir que evidencia prevalece. |
 
-Los proveedores sin evidencia suficiente conservan `generic-v1`; reconocer una
-empresa no fuerza una plantilla.
+La auditoria detallada con valores, paginas y coordenadas se genero fuera de Git
+en `%TEMP%/auto-tasacion-benchmark-20261019/`.
+
+## Cambios implementados con evidencia
+
+- Se acoto el ancla de valor de reconstruccion para que el nombre de un metodo
+  comercial no sea considerado un valor. La regla es semantica y reutilizable;
+  no depende de archivo, proveedor ni importe.
+- El parser conserva `Departamento <nombre de departamento peruano>` como nivel
+  geografico y no como interior. `Departamento 101` sigue siendo un interior
+  valido.
+- Se detecta el conflicto entre una declaracion de primer construyo con pisos y
+  azotea y una distribucion posterior con un piso de numeracion mayor. El caso
+  se deriva a regla de negocio, sin decidir por una fuente documental.
+- El benchmark golden informa por cada direccion estructurada `EXACT_MATCH`,
+  `SEMANTIC_MATCH` o `DIFFERENT`. La equivalencia semantica se limita a
+  mayusculas, tildes, espacios, signos basicos y abreviaturas de direccion
+  declaradas por `DATOS`; no altera datos operativos ni unifica numeros, vias,
+  urbanizaciones o distritos distintos.
 
 ## Golden 10
 
-| Metrica | Resultado |
-| --- | ---: |
-| Listos deterministas | 8/10 |
-| Pendientes por conflicto de importe | 2/10 |
-| Tipo | 10/10 |
-| Moneda | 9/10 |
-| Importe | 9/10 |
-| Pisos | 7/10 |
-| Sotanos | 9/10 |
-| Anio | 10/10 |
-| Clase | 8/10 |
-| Direccion estructurada | 2/10 |
-| Geografia | 7/10 |
-| Decision final | 8/10 |
+| Metrica | Antes de esta iteracion | Resultado final |
+| --- | ---: | ---: |
+| `LISTO_DETERMINISTA` | 8 | 8 |
+| `PENDIENTE_IA` | 2 | 1 |
+| `REGLA_NEGOCIO_PENDIENTE` | 0 | 1 |
+| Ambiguedades de importe | 1 | 0 |
+| Moneda conciliada | 9/10 | 10/10 |
+| Importe conciliado | 9/10 | 10/10 |
+| Decision final conciliada | 8/10 | 8/10 |
 
-D01 ya toma el importe y moneda de la columna documentada `VALOR TOTAL`, pero
-permanece pendiente por pisos y sotanos. D07 queda bloqueado por candidatos de
-reconstruccion de igual prioridad sin regla documental aprobada. D08 resuelve el
-importe mediante la misma estrategia Braschi; D09 conserva una diferencia de
-pisos cuyo texto del PDF declara dos pisos. Las diferencias de direccion y
-geografia permanecen abiertas; no se corrigieron por nombre de archivo.
+El total de casos listos no aumenta porque D09 pasa intencionalmente de listo a
+regla de negocio ante evidencia documental contradictoria. Esa derivacion evita
+una fila operativa con una decision de pisos no aprobada.
 
-## Corpus comparable de 120 casos
+La comparacion de direccion final registra 9 `EXACT_MATCH`, 0
+`SEMANTIC_MATCH` y 1 `DIFFERENT`. El unico desajuste real es D01; no se
+modifica por no existir una regla operativa aprobada para reasignar componentes
+estructurados de direccion. D09 conserva coincidencia de direccion aunque su
+decision de pisos se mantiene bloqueada.
 
-| Ruta | Baseline | a3358de | Segunda iteracion |
-| --- | ---: | ---: | ---: |
-| `LISTO_DETERMINISTA` | 51 | 91 | 74 |
-| `PENDIENTE_IA` | 64 | 17 | 35 |
-| `REGLA_NEGOCIO_PENDIENTE` | 5 | - | 7 |
-| `DOCUMENTO_NO_TASACION` | 0 | - | 2 |
-| `REVISION_HUMANA` | 0 | - | 2 |
+## Corpus comparable de 120 y corpus completo de 150
 
-La disminucion de listos frente a `a3358de` es intencional cuando aparece una
-ambiguedad critica de importe. Es una regresion de throughput que evita copiar
-un monto no sustentado.
+| Ruta | Baseline 120 | Antes del control D09 120 | Final 120 | Antes del control D09 150 | Final 150 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `LISTO_DETERMINISTA` | 51 | 76 | 75 | 93 | 92 |
+| `PENDIENTE_IA` | 64 | 33 | 33 | 41 | 41 |
+| `REGLA_NEGOCIO_PENDIENTE` | 5 | 7 | 8 | 10 | 11 |
+| `DOCUMENTO_NO_TASACION` | - | 2 | 2 | 2 | 2 |
+| `REVISION_HUMANA` | - | 2 | 2 | 4 | 4 |
 
-## Corpus completo de 150 casos
-
-| Ruta | Casos |
-| --- | ---: |
-| `LISTO_DETERMINISTA` | 91 |
-| `LISTO_IA_VERIFICADO` | 0 |
-| `PENDIENTE_IA` | 43 |
-| `REGLA_NEGOCIO_PENDIENTE` | 10 |
-| `DOCUMENTO_NO_TASACION` | 2 |
-| `REVISION_HUMANA` | 4 |
-
-Controles de calidad: cero listos con importe no positivo, cero prestamos de
-control invalidos y cero casos sin geografia. Hay 35 ambiguedades de importe,
-10 conflictos de moneda y 4 documentos `DESCONOCIDO`; se mantienen fuera de
-la ruta automatica.
-
-La cobertura de plantilla alcanza 64/150 documentos: `LF-A` 30,
-`LF-LAYSECA-OPD-A` 10, `LF-BRASCHI-A` 7, `LF-QUOTA-A` 6, `LF-QUOTA-B` 5,
-`LF-LAYSECA-OPD-B` 2, `LF-LAYSECA-CONSTRUYO` 2 y
-`LF-BRASCHI-CONSTRUYO` 2. Los 86 restantes conservan plantilla y layout
-vacios mediante `generic-v1`.
-
-Los cuatro PDF sin texto de referencia activaron OCR local acotado. Ninguno
-aporto evidencia suficiente de documento o proveedor; los cuatro fueron a
-`REVISION_HUMANA`, sin inventar valores criticos. Los documentos de referencia
-D130 y D131 se clasificaron como `ESTUDIO_TITULOS` y no entran a la ruta de
-proceso.
+La reduccion de un listo corresponde al mismo conflicto documental D09. Los
+controles finales conservan cero listos con importe no positivo, cero prestamos
+de control invalidos y cero casos listos sin geografia. D124 conserva la
+seleccion PEN documentada; D130 y D131 siguen como `ESTUDIO_TITULOS` y
+`DOCUMENTO_NO_TASACION`.
 
 ## Puertas de calidad y decision
 
-- `unittest discover -s cloud-run/tests -v`: 104 pruebas, OK.
-- Catalogo de perfiles: 0 errores.
-- `compileall`: OK.
-- XLSX de prueba y contrato de workbook: OK.
+- `python -m unittest discover -s cloud-run/tests -v`: 112 pruebas, OK.
+- `python tools/validate_profile_catalog.py`: 0 errores.
+- `python -m compileall -q cloud-run tools`: OK.
+- `python tools/verify_workbook.py`: contrato XLSX OK.
+- Golden 10 y corpus 150: contratos XLSX sin incidencias.
 
-**No apto para despliegue.** El contrato y los controles tecnicos pasan, pero
-el Golden conserva diferencias criticas y el bloqueo fail-closed reduce el
-throughput hasta que Operaciones documente reglas de seleccion para las tablas
-de reconstruccion y se resuelvan D08 y D09 con evidencia verificable.
+**No apto para despliegue.** D01 no tiene evidencia de pisos/sotanos. D09 tiene
+un conflicto documental que requiere regla de Operaciones. La representacion
+operativa de las direcciones D01 y D09, y la geografia golden de D08, requieren
+validacion del propietario del dato antes de aceptar discrepancias como
+resultado esperado.
