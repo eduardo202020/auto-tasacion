@@ -1,0 +1,30 @@
+{
+  "id": "braschi-layout-a-v1",
+  "version": "1",
+  "description": "Braschi standard layout with the documented floors and basements table.",
+  "default": false,
+  "priority": 115,
+  "provider_id": "braschi-tasaciones",
+  "template_id": "braschi-layout-a-v1",
+  "layout_family": "LF-BRASCHI-A",
+  "match": {
+    "all_terms": [
+      "BRASCHI TASACIONES",
+      "PISOS EN EL EDIFICIO",
+      "SOTANOS Y/O SEMISOTANOS"
+    ],
+    "none_terms": [
+      "SOLICITUD CONSTRUYO",
+      "PRIMER CONSTRUYO"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {},
+    "selection": {
+      "commercial_value": [
+        "VALOR_COMERCIAL_FINAL",
+        "ANCLA_GENERAL"
+      ]
+    }
+  }
+}

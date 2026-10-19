@@ -11,6 +11,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from pathlib import Path
 import sys
 import zipfile
@@ -290,6 +291,61 @@ def _golden_comparison(
         "cases": compared,
     }
 
+def _counter_with_empty(counter: Counter[str], keys: tuple[str, ...]) -> dict[str, int]:
+    return {key: int(counter.get(key, 0)) for key in keys}
+
+
+def _benchmark_quality(entries: list[dict[str, Any]], controls: list[dict[str, Any]]) -> dict[str, int]:
+    ready_routes = {"LISTO_DETERMINISTA", "LISTO_IA_VERIFICADO"}
+    ready_nonpositive = 0
+    for entry in entries:
+        if entry["route"] not in ready_routes:
+            continue
+        fields = entry["fields"]
+        amount = fields.get("Valor elegido S/") or fields.get("Valor elegido US$")
+        try:
+            ready_nonpositive += int(float(str(amount)) <= 0)
+        except (TypeError, ValueError):
+            ready_nonpositive += 1
+
+    invalid_loans = sum(
+        not re.fullmatch(r"\d{20}", str(row.get("PRESTAMO") or ""))
+        for row in controls
+    )
+    currency_conflicts = sum(
+        "MONEDA" in str(entry["fields"].get("Incidencias de validacion") or "").upper()
+        for entry in entries
+    )
+    no_geography = sum(
+        any(token in str(entry["fields"].get("Campos faltantes") or "").upper()
+            for token in ("MUNICIPIO", "DISTRITO", "PROVINCIA", "DEPARTAMENTO"))
+        for entry in entries
+    )
+    amount_ambiguities = sum(
+        "VALOR_" in str(entry["fields"].get("Incidencias de validacion") or "")
+        and "AMBIGUO" in str(entry["fields"].get("Incidencias de validacion") or "")
+        for entry in entries
+    )
+    return {
+        "ready_with_nonpositive_amount": ready_nonpositive,
+        "invalid_control_loans": invalid_loans,
+        "currency_conflicts": currency_conflicts,
+        "without_geography": no_geography,
+        "unknown_documents": sum(entry["document_type"] == "DESCONOCIDO" for entry in entries),
+        "amount_ambiguities": amount_ambiguities,
+        "provider_ocr_matches": sum(entry["provider_source"] == "OCR_LOCAL" for entry in entries),
+    }
+
+
+def _coverage(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    return {
+        "provider_id": dict(sorted(Counter(entry["provider_id"] or "NO_IDENTIFICADO" for entry in entries).items())),
+        "template_id": dict(sorted(Counter(entry["template_id"] or "SIN_TEMPLATE" for entry in entries).items())),
+        "layout_family": dict(sorted(Counter(entry["layout_family"] or "SIN_LAYOUT" for entry in entries).items())),
+        "profile_id": dict(sorted(Counter(entry["profile_id"] or "SIN_PROFILE" for entry in entries).items())),
+    }
+
+
 def _write_temp_workbook(ready, review, control) -> list[str]:
     """Ejecuta el verificador sin persistir un resultado en el repositorio."""
     import tempfile
@@ -339,11 +395,16 @@ def main() -> int:
     rows_by_filename = {Path(str(row.get("PDF_Archivo") or "")).name: row for row in control}
     baseline = baseline_routes(args.baseline_workbook)
     entries = [_result_entry(item, rows_by_filename.get(item["filename"], {}), baseline) for item in descriptors]
+    route_counter = Counter(entry["route"] for entry in entries)
     summary = {
         "total": len(entries),
-        "routes": dict(sorted(Counter(entry["route"] for entry in entries).items())),
+        "routes": _counter_with_empty(route_counter, (
+            "LISTO_DETERMINISTA", "LISTO_IA_VERIFICADO", "PENDIENTE_IA",
+            "REGLA_NEGOCIO_PENDIENTE", "DOCUMENTO_NO_TASACION", "REVISION_HUMANA",
+        )),
         "document_types": dict(sorted(Counter(entry["document_type"] for entry in entries).items())),
-        "providers": dict(sorted(Counter(entry["provider_id"] or "NO_IDENTIFICADO" for entry in entries).items())),
+        "coverage": _coverage(entries),
+        "quality": _benchmark_quality(entries, control),
         "baseline_comparable": {
             "total": sum(1 for entry in entries if entry["baseline_route"]),
             "before_routes": dict(sorted(Counter(entry["baseline_route"] for entry in entries if entry["baseline_route"]).items())),

@@ -23,8 +23,8 @@ from catalog import (
     lookup_property_codes,
 )
 from address_parser import parse_direccion
-from pdf_extractor import extract_address, extract_pdf, extract_pisos_sotanos
-from profile_registry import detect_document_profile, profile_uses_strategy, validate_reference_data
+from pdf_extractor import ValueCandidate, extract_address, extract_pdf, extract_pisos_sotanos, select_value_candidates
+from profile_registry import detect_document_profile, profile_selection_sections, profile_uses_strategy, validate_reference_data
 from provider_ocr import extract_braschi_floor_table_ocr
 from service import (
     CONTROL_COLUMNS, MACRO_COLUMNS, MAX_ZIP_BYTES, PARA_PROCESAR_COLUMNS, REVIEW_COLUMNS, build_upload_ticket,
@@ -101,14 +101,43 @@ def build_pdf_with_construction_start_date() -> bytes:
     return content
 
 
-def build_pdf_with_estudio_titulos() -> bytes:
+def build_pdf_with_split_construction_evidence() -> bytes:
     document = fitz.open()
-    page = document.new_page()
-    page.insert_text((72, 72), "ESTUDIO DE TÍTULOS\nPartida registral", fontsize=10)
+    page_one = document.new_page()
+    page_one.insert_text((72, 72), "Inicio de la obra fue el 15 de enero de 2026", fontsize=10)
+    page_two = document.new_page()
+    page_two.insert_text((72, 72), "Tasacion\nInmueble en construccion", fontsize=10)
     content = document.tobytes()
     document.close()
     return content
 
+
+def build_pdf_with_estudio_titulos() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "ESTUDIO DE TITULOS\nPartida registral\nAsiento de inscripcion", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_pdf_with_estudio_titulos_annex() -> bytes:
+    document = fitz.open()
+    main = document.new_page()
+    main.insert_text((72, 72), "Tasacion\nValor Comercial S/ 300,000.00", fontsize=10)
+    annex = document.new_page()
+    annex.insert_text((72, 72), "Estudio de titulos\nPartida registral\nAsiento de inscripcion", fontsize=10)
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def build_blank_pdf() -> bytes:
+    document = fitz.open()
+    document.new_page()
+    content = document.tobytes()
+    document.close()
+    return content
 
 def build_pdf_with_year_in_adjacent_cell() -> bytes:
     document = fitz.open()
@@ -388,15 +417,69 @@ class TasacionesServiceTests(unittest.TestCase):
             _row, issues = to_macro_row(extracted)
         self.assertIn("UBICACION_NO_HOMOLOGADA: tipo de ubicación sin código autorizado en DATOS", issues)
 
+    def test_conflicting_top_value_candidates_stay_unselected_without_template_rule(self):
+        selection = select_value_candidates(
+            (
+                ValueCandidate("commercial_value", "PEN", 300000.0, 1, "VALOR COMERCIAL", "ANCLA_GENERAL", 180),
+                ValueCandidate("commercial_value", "PEN", 350000.0, 2, "VALOR COMERCIAL", "ANCLA_GENERAL", 180),
+            ),
+            issue_code="VALOR_COMERCIAL_AMBIGUO",
+        )
+        self.assertIsNone(selection.pen)
+        self.assertEqual(selection.issues, ("VALOR_COMERCIAL_AMBIGUO",))
+
+    def test_explicit_template_section_rule_resolves_a_top_priority_conflict(self):
+        selection = select_value_candidates(
+            (
+                ValueCandidate("commercial_value", "PEN", 300000.0, 1, "VALOR COMERCIAL", "ANCLA_GENERAL", 180),
+                ValueCandidate("commercial_value", "PEN", 350000.0, 1, "VALOR COMERCIAL", "VALOR_COMERCIAL_FINAL", 180),
+            ),
+            issue_code="VALOR_COMERCIAL_AMBIGUO",
+            preferred_sections=("VALOR_COMERCIAL_FINAL", "ANCLA_GENERAL"),
+        )
+        self.assertEqual(selection.pen, 350000.0)
+        self.assertEqual(selection.issues, ())
+
+    def test_known_provider_with_evidence_gets_a_specific_template(self):
+        profile = detect_document_profile([
+            "JALVO", "Nro de sotanos y/o semisotanos", "Hoja Resumen",
+        ])
+        self.assertEqual(profile.provider_id, "jalvo-tasaciones")
+        self.assertEqual(profile.template_id, "quota-layout-b-v1")
+        self.assertEqual(profile.layout_family, "LF-QUOTA-B")
+        self.assertEqual(
+            profile_selection_sections(profile, "commercial_value"),
+            ("VALOR_COMERCIAL_FINAL", "ANCLA_GENERAL"),
+        )
+
+    def test_tasacion_with_estudio_titulos_annex_remains_tasacion(self):
+        result = extract_pdf(build_pdf_with_estudio_titulos_annex(), "D99.pdf")
+        self.assertEqual(result["Tipo documento"], "TASACION")
+        self.assertEqual(result["Motivo tipo documento"], "")
+
+    def test_insufficient_text_uses_bounded_ocr_only_for_classification_and_provider(self):
+        with patch("pdf_extractor.iter_provider_ocr_texts", return_value=("Tinsa Tasacion Valor Comercial",)):
+            result = extract_pdf(build_blank_pdf(), "D71.pdf")
+        self.assertEqual(result["Tipo documento"], "TASACION")
+        self.assertEqual(result["Tasadora id"], "tinsa-peru")
+        self.assertEqual(result["Origen tasadora"], "OCR_LOCAL")
+        self.assertEqual(result["Valor elegido S/"], "")
+
     def test_selects_positive_final_commercial_value_after_zero_rrpp_value(self):
         result = extract_pdf(build_pdf_with_multiple_commercial_values(), "D124.pdf")
         self.assertEqual(result["Valor comercial S/"], 314367.68)
         self.assertEqual(result["Valor elegido S/"], 314367.68)
         self.assertIn('"amount":0.0', result["Candidatos valor comercial"])
         self.assertIn('"amount":314367.68', result["Candidatos valor comercial"])
+        self.assertNotIn("VALOR_COMERCIAL_AMBIGUO", result["Observacion extraccion"])
 
     def test_uses_construction_start_year_only_for_explicit_work_in_progress(self):
         result = extract_pdf(build_pdf_with_construction_start_date(), "D07.pdf")
+        self.assertEqual(result["Año construccion"], 2026)
+        self.assertEqual(result["Origen año construccion"], "INICIO DE OBRA")
+
+    def test_uses_construction_start_year_when_status_is_on_another_page(self):
+        result = extract_pdf(build_pdf_with_split_construction_evidence(), "D07.pdf")
         self.assertEqual(result["Año construccion"], 2026)
         self.assertEqual(result["Origen año construccion"], "INICIO DE OBRA")
 

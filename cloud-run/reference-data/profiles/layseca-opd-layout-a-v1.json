@@ -1,0 +1,23 @@
+{
+  "id": "layseca-opd-layout-a-v1",
+  "version": "1",
+  "description": "Layseca OP-D layout without Hoja Resumen.",
+  "default": false,
+  "priority": 110,
+  "provider_id": "layseca-asociados",
+  "template_id": "layseca-opd-layout-a-v1",
+  "layout_family": "LF-LAYSECA-OPD-A",
+  "match": {
+    "all_terms": [
+      "LAYSECA ASOCIADOS",
+      "OP-D"
+    ],
+    "none_terms": [
+      "HOJA RESUMEN",
+      "SOLICITUD CONSTRUYO"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {}
+  }
+}

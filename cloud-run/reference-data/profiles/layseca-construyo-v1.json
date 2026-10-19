@@ -1,0 +1,29 @@
+{
+  "id": "layseca-construyo-v1",
+  "version": "1",
+  "description": "Layseca construction variant supported by a documented Construyo marker.",
+  "default": false,
+  "priority": 130,
+  "provider_id": "layseca-asociados",
+  "template_id": "layseca-construyo-v1",
+  "layout_family": "LF-LAYSECA-CONSTRUYO",
+  "match": {
+    "all_terms": [
+      "LAYSECA ASOCIADOS"
+    ],
+    "any_terms": [
+      "SOLICITUD CONSTRUYO",
+      "PRIMER CONSTRUYO"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {
+      "commercial_value": [
+        "VALOR COMERCIAL PROYECTADO"
+      ],
+      "reconstruction_value": [
+        "VALOR DE REPOSICION"
+      ]
+    }
+  }
+}

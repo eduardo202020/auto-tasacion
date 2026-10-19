@@ -20,6 +20,11 @@ REFERENCE_DATA = Path(__file__).parent / "reference-data"
 PROFILES_DIR = REFERENCE_DATA / "profiles"
 PROVIDERS_FILE = REFERENCE_DATA / "tasadoras.json"
 ALLOWED_EXTRACTION_STRATEGIES = frozenset({"braschi_floor_table_ocr"})
+ALLOWED_VALUE_SECTIONS = frozenset({
+    "VALOR_COMERCIAL_FINAL", "VALORES_NO_INSCRITOS_RRPP", "VALORES_INSCRITOS_RRPP",
+    "REPOSICION", "ANCLA_GENERAL", "ANCLA_DECLARADA",
+})
+ALLOWED_SELECTION_FIELDS = frozenset({"commercial_value", "reconstruction_value"})
 
 
 @dataclass(frozen=True)
@@ -31,8 +36,10 @@ class ProfileDefinition:
     provider_id: str
     all_terms: tuple[str, ...]
     any_terms: tuple[str, ...]
+    none_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
     strategies: tuple[str, ...]
+    selection_rules: dict[str, tuple[str, ...]]
     template_id: str
     layout_family: str
 
@@ -50,6 +57,7 @@ class DocumentProfile:
     matched_terms: tuple[str, ...]
     anchor_aliases: dict[str, tuple[str, ...]]
     strategies: tuple[str, ...]
+    selection_rules: dict[str, tuple[str, ...]]
     template_id: str
     layout_family: str
 
@@ -64,6 +72,7 @@ GENERIC_PROFILE = DocumentProfile(
     matched_terms=(),
     anchor_aliases={},
     strategies=(),
+    selection_rules={},
     template_id="",
     layout_family="",
 )
@@ -97,6 +106,27 @@ def _as_strategies(value: object, profile_path: Path) -> tuple[str, ...]:
     return strategies
 
 
+def _as_selection_rules(value: object, profile_path: Path) -> dict[str, tuple[str, ...]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{profile_path.name}: extraction.selection must be an object")
+    rules: dict[str, tuple[str, ...]] = {}
+    for field, sections in value.items():
+        if field not in ALLOWED_SELECTION_FIELDS:
+            raise ValueError(f"{profile_path.name}: unsupported selection field: {field}")
+        if not isinstance(sections, list) or not sections or not all(isinstance(item, str) for item in sections):
+            raise ValueError(f"{profile_path.name}: extraction.selection.{field} must be a nonempty string list")
+        normalized = tuple(item.strip().upper() for item in sections if item.strip())
+        invalid = sorted(set(normalized) - ALLOWED_VALUE_SECTIONS)
+        if invalid:
+            raise ValueError(f"{profile_path.name}: unsupported selection section: {', '.join(invalid)}")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError(f"{profile_path.name}: extraction.selection.{field} must not repeat sections")
+        rules[field] = normalized
+    return rules
+
+
 def _load_profile(path: Path) -> ProfileDefinition:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -123,9 +153,11 @@ def _load_profile(path: Path) -> ProfileDefinition:
             raise ValueError(f"{path.name}: cada alias debe indicar un campo")
         normalized_aliases[field.strip()] = _as_terms(values, f"anchor_aliases.{field}", path)
     strategies = _as_strategies(extraction.get("strategies"), path)
+    selection_rules = _as_selection_rules(extraction.get("selection"), path)
 
     all_terms = _as_terms(match.get("all_terms"), "match.all_terms", path)
     any_terms = _as_terms(match.get("any_terms"), "match.any_terms", path)
+    none_terms = _as_terms(match.get("none_terms"), "match.none_terms", path)
     is_default = bool(raw.get("default", False))
     if not is_default and not all_terms and not any_terms:
         raise ValueError(f"{path.name}: un perfil no predeterminado requiere una firma")
@@ -138,8 +170,10 @@ def _load_profile(path: Path) -> ProfileDefinition:
         provider_id=str(raw.get("provider_id", "")).strip(),
         all_terms=all_terms,
         any_terms=any_terms,
+        none_terms=none_terms,
         anchor_aliases=normalized_aliases,
         strategies=strategies,
+        selection_rules=selection_rules,
         template_id=str(raw.get("template_id", "")).strip(),
         layout_family=str(raw.get("layout_family", "")).strip(),
     )
@@ -321,6 +355,8 @@ def _provider_for(
 def _matching_terms(profile: ProfileDefinition, text: str) -> tuple[str, ...] | None:
     if any(term not in text for term in profile.all_terms):
         return None
+    if any(term in text for term in profile.none_terms):
+        return None
     matched_any = tuple(term for term in profile.any_terms if term in text)
     if profile.any_terms and not matched_any:
         return None
@@ -364,6 +400,7 @@ def detect_document_profile(
             matched_terms=GENERIC_PROFILE.matched_terms,
             anchor_aliases=GENERIC_PROFILE.anchor_aliases,
             strategies=GENERIC_PROFILE.strategies,
+            selection_rules=GENERIC_PROFILE.selection_rules,
             template_id=GENERIC_PROFILE.template_id,
             layout_family=GENERIC_PROFILE.layout_family,
         )
@@ -383,6 +420,7 @@ def detect_document_profile(
         matched_terms=matched,
         anchor_aliases=selected.anchor_aliases,
         strategies=selected.strategies,
+        selection_rules=selected.selection_rules,
         template_id=selected.template_id,
         layout_family=selected.layout_family,
     )
@@ -396,3 +434,8 @@ def profile_anchor_aliases(profile: DocumentProfile, field: str) -> tuple[str, .
 def profile_uses_strategy(profile: DocumentProfile, strategy: str) -> bool:
     """Indica si un perfil técnico autorizó una estrategia de extracción."""
     return strategy in profile.strategies
+
+
+def profile_selection_sections(profile: DocumentProfile, field: str) -> tuple[str, ...]:
+    """Return an approved value-section precedence declared by a template."""
+    return profile.selection_rules.get(field, ())

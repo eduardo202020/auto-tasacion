@@ -1,0 +1,28 @@
+{
+  "id": "quota-layout-a-v1",
+  "version": "1",
+  "description": "Quota Jalvo standard layout without the Hoja Resumen cover.",
+  "default": false,
+  "priority": 110,
+  "provider_id": "jalvo-tasaciones",
+  "template_id": "quota-layout-a-v1",
+  "layout_family": "LF-QUOTA-A",
+  "match": {
+    "all_terms": [
+      "JALVO",
+      "SOTANOS Y/O SEMISOTANOS"
+    ],
+    "none_terms": [
+      "HOJA RESUMEN"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {},
+    "selection": {
+      "commercial_value": [
+        "VALOR_COMERCIAL_FINAL",
+        "ANCLA_GENERAL"
+      ]
+    }
+  }
+}

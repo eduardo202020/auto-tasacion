@@ -1,0 +1,32 @@
+{
+  "id": "shared-valuation-layout-a-v1",
+  "version": "1",
+  "description": "Shared valuation layout observed across more than one provider.",
+  "default": false,
+  "priority": 90,
+  "template_id": "shared-valuation-layout-a-v1",
+  "layout_family": "LF-A",
+  "match": {
+    "all_terms": [
+      "VALOR DE REPOSICION",
+      "TASACION COMERCIAL"
+    ],
+    "none_terms": [
+      "SOLICITUD CONSTRUYO",
+      "PRIMER CONSTRUYO"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {},
+    "selection": {
+      "commercial_value": [
+        "VALOR_COMERCIAL_FINAL",
+        "ANCLA_GENERAL"
+      ],
+      "reconstruction_value": [
+        "REPOSICION",
+        "ANCLA_DECLARADA"
+      ]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "quota-layout-b-v1",
+  "version": "1",
+  "description": "Quota Jalvo layout identified by Hoja Resumen and the building table.",
+  "default": false,
+  "priority": 120,
+  "provider_id": "jalvo-tasaciones",
+  "template_id": "quota-layout-b-v1",
+  "layout_family": "LF-QUOTA-B",
+  "match": {
+    "all_terms": [
+      "JALVO",
+      "SOTANOS Y/O SEMISOTANOS",
+      "HOJA RESUMEN"
+    ]
+  },
+  "extraction": {
+    "anchor_aliases": {},
+    "selection": {
+      "commercial_value": [
+        "VALOR_COMERCIAL_FINAL",
+        "ANCLA_GENERAL"
+      ]
+    }
+  }
+}

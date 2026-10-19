@@ -13,8 +13,13 @@ from typing import Any, Optional
 
 import fitz
 
-from document_classifier import classify_document
-from profile_registry import detect_document_profile, profile_anchor_aliases, profile_uses_strategy
+from document_classifier import classify_document, text_is_insufficient
+from profile_registry import (
+    detect_document_profile,
+    profile_anchor_aliases,
+    profile_selection_sections,
+    profile_uses_strategy,
+)
 from provider_ocr import extract_braschi_floor_table_ocr, iter_provider_ocr_texts
 
 
@@ -317,6 +322,7 @@ class ValueSelection:
     page: Optional[int]
     candidates: tuple[ValueCandidate, ...]
     issues: tuple[str, ...]
+    ambiguous_currencies: tuple[str, ...]
 
 
 def _anchor_occurrences(text: str, anchor_re: re.Pattern[str], aliases: tuple[str, ...]) -> list[tuple[int, int, str]]:
@@ -414,10 +420,14 @@ def extract_value_candidates(
     return tuple(unique_candidates.values())
 
 
-def select_value_candidates(candidates: tuple[ValueCandidate, ...], *, issue_code: str) -> ValueSelection:
-    """Selecciona por prioridad declarada y nunca promociona un importe cero."""
+def select_value_candidates(
+    candidates: tuple[ValueCandidate, ...], *, issue_code: str,
+    preferred_sections: tuple[str, ...] = (),
+) -> ValueSelection:
+    """Select by documentary hierarchy, keeping unruled ties fail-closed."""
     selected: dict[str, ValueCandidate] = {}
     issues: list[str] = []
+    ambiguous_currencies: list[str] = []
     for currency in ("USD", "PEN"):
         currency_candidates = [item for item in candidates if item.currency == currency]
         positive = [item for item in currency_candidates if item.amount > 0]
@@ -426,19 +436,15 @@ def select_value_candidates(candidates: tuple[ValueCandidate, ...], *, issue_cod
             continue
         highest_priority = max(item.source_priority for item in pool)
         finalists = [item for item in pool if item.source_priority == highest_priority]
-        amounts = {item.amount for item in finalists}
-        # Un mismo informe puede repetir valores de trabajo en páginas o
-        # bloques distintos. Sin una regla de layout que los haga
-        # contradictorios, se conserva el primer candidato según la prioridad
-        # documental heredada. Solo se marca ambigüedad cuando el mismo
-        # rótulo final presenta importes distintos en la misma página.
-        same_final_label = all(
-            item.section == "VALOR_COMERCIAL_FINAL" and item.anchor == "VALOR COMERCIAL DEL INMUEBLE"
-            for item in finalists
-        )
-        same_page = len({item.page for item in finalists}) == 1
-        if len(amounts) > 1 and same_final_label and same_page:
+        if preferred_sections:
+            section_rank = {section: index for index, section in enumerate(preferred_sections)}
+            declared = [item for item in finalists if item.section in section_rank]
+            if declared:
+                best_rank = min(section_rank[item.section] for item in declared)
+                finalists = [item for item in declared if section_rank[item.section] == best_rank]
+        if len({item.amount for item in finalists}) > 1:
             issues.append(issue_code)
+            ambiguous_currencies.append(currency)
             continue
         selected[currency] = finalists[0]
     final = [item for item in selected.values()]
@@ -449,7 +455,21 @@ def select_value_candidates(candidates: tuple[ValueCandidate, ...], *, issue_cod
         page=page,
         candidates=candidates,
         issues=tuple(dict.fromkeys(issues)),
+        ambiguous_currencies=tuple(dict.fromkeys(ambiguous_currencies)),
     )
+
+
+def operational_selection_issues(selection: ValueSelection) -> tuple[str, ...]:
+    """Block only ambiguity in the currency that can feed the final row.
+
+    The macro emits PEN whenever a PEN value exists, otherwise USD. A conflict
+    in the unused currency remains in CONTROL candidates but cannot alter the
+    selected operational amount. A conflict in the selected/preferred currency
+    remains fail-closed.
+    """
+    available = {candidate.currency for candidate in selection.candidates}
+    output_currency = "PEN" if "PEN" in available else "USD" if "USD" in available else ""
+    return selection.issues if output_currency in selection.ambiguous_currencies else ()
 
 
 def candidates_for_control(candidates: tuple[ValueCandidate, ...]) -> str:
@@ -493,12 +513,22 @@ def extract_anio_construccion(doc: fitz.Document) -> tuple[Optional[int], Option
 
 
 def extract_anio_inicio_obra(doc: fitz.Document) -> tuple[Optional[int], Optional[int]]:
-    """Acepta inicio de obra solo para una construcción explícitamente vigente."""
-    start_re = re.compile(r"(?:FECHA\s+DE\s+)?INICIO\s+DE\s+(?:OBRA|CONSTRUCCION)(.*)", re.I)
-    for page_index, page in enumerate(doc):
-        text = norm_up(page.get_text("text"))
-        if "EN CONSTRUCCION" not in text and "PRIMER CONSTRUYO" not in text:
-            continue
+    """Acepta la fecha de inicio solo si el documento declara una obra vigente.
+
+    El estado y la fecha pueden estar en paginas distintas. Se valida la condicion
+    ``EN CONSTRUCCION`` o ``PRIMER CONSTRUYO`` a nivel del documento antes de
+    admitir una fecha que indique el inicio de la obra.
+    """
+    page_texts = [norm_up(page.get_text("text")) for page in doc]
+    document_text = " ".join(page_texts)
+    if "EN CONSTRUCCION" not in document_text and "PRIMER CONSTRUYO" not in document_text:
+        return None, None
+
+    start_re = re.compile(
+        r"(?:FECHA\s+DE\s+)?INICIO\s+DE\s+(?:LA\s+)?(?:OBRA|CONSTRUCCION)(.*)",
+        re.I,
+    )
+    for page_index, text in enumerate(page_texts):
         match = start_re.search(text)
         if not match:
             continue
@@ -824,14 +854,35 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         with fitz.open(stream=content, filetype="pdf") as doc:
             page_texts = tuple(page.get_text("text") for page in doc)
             document_classification = classify_document(page_texts)
+            ocr_texts: tuple[str, ...] = ()
+            if (
+                document_classification.document_type == "DESCONOCIDO"
+                and text_is_insufficient(page_texts)
+            ):
+                ocr_texts = tuple(iter_provider_ocr_texts(doc))
+                if ocr_texts:
+                    document_classification = classify_document((*page_texts, *ocr_texts))
+            profile = detect_document_profile(page_texts, ocr_texts)
             result["Tipo documento"] = document_classification.document_type
             result["Motivo tipo documento"] = document_classification.reason_code
+            result.update({
+                "Tasadora id": profile.provider_id,
+                "Tasadora detectada": profile.provider_name,
+                "Origen tasadora": profile.provider_source,
+                "Perfil plantilla": profile.profile_id,
+                "Version perfil": profile.version,
+                "Template id": profile.template_id,
+                "Familia layout": profile.layout_family,
+                "Estrategia extraccion": ",".join(profile.strategies),
+                "Confianza perfil": profile.confidence,
+                "Coincidencias perfil": ",".join(profile.matched_terms),
+            })
             if document_classification.document_type != "TASACION":
                 result["Observacion extraccion"] = document_classification.reason_code
                 return result
-            profile = detect_document_profile(page_texts)
             if not profile.provider_id:
-                ocr_texts = tuple(iter_provider_ocr_texts(doc))
+                if not ocr_texts:
+                    ocr_texts = tuple(iter_provider_ocr_texts(doc))
                 profile = detect_document_profile(page_texts, ocr_texts)
             direccion, page_direccion = extract_address(doc)
             solicitud_direccion, solicitud_page = extract_solicitud_construyo_address(doc)
@@ -845,7 +896,9 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
                 aliases=profile_anchor_aliases(profile, "commercial_value"),
             )
             commercial_selection = select_value_candidates(
-                commercial_candidates, issue_code="VALOR_COMERCIAL_AMBIGUO",
+                commercial_candidates,
+                issue_code="VALOR_COMERCIAL_AMBIGUO",
+                preferred_sections=profile_selection_sections(profile, "commercial_value"),
             )
             reconstruction_candidates = extract_value_candidates(
                 doc,
@@ -854,7 +907,9 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
                 aliases=profile_anchor_aliases(profile, "reconstruction_value"),
             )
             reconstruction_selection = select_value_candidates(
-                reconstruction_candidates, issue_code="VALOR_RECONSTRUCCION_AMBIGUO",
+                reconstruction_candidates,
+                issue_code="VALOR_RECONSTRUCCION_AMBIGUO",
+                preferred_sections=profile_selection_sections(profile, "reconstruction_value"),
             )
             commercial_usd, commercial_pen, page_commercial = (
                 commercial_selection.usd, commercial_selection.pen, commercial_selection.page,
@@ -862,8 +917,6 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             reconstruction_usd, reconstruction_pen, page_reconstruction = (
                 reconstruction_selection.usd, reconstruction_selection.pen, reconstruction_selection.page,
             )
-            observations.extend(commercial_selection.issues)
-            observations.extend(reconstruction_selection.issues)
             anio, page_anio = extract_anio_construccion(doc)
             inicio_obra, page_inicio_obra = extract_anio_inicio_obra(doc)
             edad_efectiva, page_edad_efectiva = extract_edad_efectiva(doc)
@@ -885,10 +938,14 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
 
     if tipo == "DEPARTAMENTO":
         chosen_type, chosen_usd, chosen_pen = "VALOR COMERCIAL", commercial_usd, commercial_pen
+        observations.extend(operational_selection_issues(commercial_selection))
     elif tipo == "CASA":
         chosen_type, chosen_usd, chosen_pen = "VALOR DE RECONSTRUCCION", reconstruction_usd, reconstruction_pen
+        observations.extend(operational_selection_issues(reconstruction_selection))
     else:
         chosen_type, chosen_usd, chosen_pen = "", None, None
+        observations.extend(commercial_selection.issues)
+        observations.extend(reconstruction_selection.issues)
 
     origen_anio = "AÑO DE CONSTRUCCIÓN" if anio is not None else ""
     if anio is None and edad_efectiva is not None and anio_expedicion is not None:
