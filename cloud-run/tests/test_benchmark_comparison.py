@@ -12,9 +12,14 @@ TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from run_extraction_benchmark import address_group_status, address_match_status, _macro_fields_from_extracted
+from run_extraction_benchmark import (
+    _macro_fields_from_extracted,
+    address_group_status,
+    address_match_status,
+    classify_golden_case,
+)
 from address_parser import extract_interior
-from pdf_extractor import VALOR_RECONSTRUCCION_RE, detect_pisos_sotanos_conflict
+from pdf_extractor import VALOR_RECONSTRUCCION_RE, detect_pisos_sotanos_conflict, extract_pisos_sotanos
 
 
 class AddressComparisonTests(unittest.TestCase):
@@ -63,3 +68,52 @@ class AddressComparisonTests(unittest.TestCase):
         )
         self.assertIn("Conflicto documental de pisos", detect_pisos_sotanos_conflict(document))
         document.close()
+
+    def test_approved_first_construyo_azotea_rule_does_not_count_a_labeled_rooftop(self):
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text(
+            (72, 72),
+            "Primer construyo de terreno sin construcciones proyectada a 2 pisos y azotea. "
+            "- 1 piso: sala. - 2 piso: dormitorios. - 3 piso: lavanderia y azotea comun.",
+        )
+        self.assertEqual(extract_pisos_sotanos(document), (2, 0, 1))
+        self.assertEqual(detect_pisos_sotanos_conflict(document), "")
+        document.close()
+
+    def test_unrelated_unit_count_is_never_used_as_floor_count(self):
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), "N de pisos en el edificio", fontsize=10)
+        page.insert_text((300, 72), "N de sotanos y/o semisotanos", fontsize=10)
+        page.insert_text((72, 120), "N Unidades en el conjunto", fontsize=10)
+        page.insert_text((460, 120), "1", fontsize=10)
+        self.assertEqual(extract_pisos_sotanos(document), (None, None, None))
+        document.close()
+
+    def test_golden_cannot_override_approved_first_construyo_rule(self):
+        classification, _reason = classify_golden_case(
+            matches={"pisos": False, "sotanos": False, "geografia": True},
+            address_status="EXACT_MATCH",
+            macro={},
+            fields={"Regla pisos/sotanos": "PRIMER_CONSTRUYO_TERRENO_PROYECTADO"},
+        )
+        self.assertEqual(classification, "GOLDEN_CONTRADICE_REGLA_APROBADA")
+
+    def test_complete_catalogued_geography_flags_golden_for_review(self):
+        classification, _reason = classify_golden_case(
+            matches={"pisos": True, "sotanos": True, "geografia": False},
+            address_status="EXACT_MATCH",
+            macro={"MUNICIPIO": "HUALMAY", "DIST_COD": "005", "PROV_COD": "06", "DEPT_COD": "15"},
+            fields={},
+        )
+        self.assertEqual(classification, "GOLDEN_POSIBLEMENTE_INCORRECTO")
+
+    def test_missing_floors_without_an_approved_fill_rule_stays_pending(self):
+        classification, _reason = classify_golden_case(
+            matches={"pisos": False, "sotanos": False, "geografia": True},
+            address_status="EXACT_MATCH",
+            macro={},
+            fields={"Campos faltantes": "PISOS; SOTANOS"},
+        )
+        self.assertEqual(classification, "REGLA_PENDIENTE")

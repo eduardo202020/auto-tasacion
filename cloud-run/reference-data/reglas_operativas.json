@@ -1,16 +1,23 @@
 {
-  "version": "2026-10-14-control-operador",
+  "version": "2026-10-19-validacion-operador",
+  "source": "reglas-de-negocio-ajustadas-operador.xlsx",
+  "precedence": [
+    "REGLA_APROBADA_OPERADOR",
+    "EVIDENCIA_PDF",
+    "EJEMPLO_GOLDEN"
+  ],
   "rules": [
-    "Dirección: priorizar dirección registral; usar como segundo respaldo la dirección según minuta y por último inspección ocular. Una dirección municipal o matriz no sustituye esas fuentes.",
-    "Pisos y sotanos: priorizar la tabla de caracteristicas del inmueble sobre la descripcion narrativa. La azotea es una cobertura y no cuenta como piso ni incrementa PISOS. La celda conjunta 'N de Pisos/Sotanos del edificio' se interpreta como pisos/sotanos, por ejemplo 3/0.",
-    "Primer construyo: cuando el informe declara simultáneamente primer construyo, terreno sin construcciones y una edificación proyectada a N pisos y azotea, usar N pisos, 0 sótanos y edad efectiva 0; el año se deriva de la fecha de expedición documentada. Una tasación que indica terreno se clasifica como CASA.",
-    "Fecha de expedición: tomar el primer año que sigue a la etiqueta 'Fecha de Expedición'; la fecha de caducidad no puede sustituirla.",
-    "Dirección de Solicitud Construyo: solo respalda la ubicación territorial si la dirección prioritaria no contiene distrito, provincia y departamento. Se admiten etiquetas abreviadas y el sufijo explícito distrito-provincia-departamento, siempre que la terna esté en DATOS.",
-    "Catálogo geográfico: Lambayeque del PDF equivale a la etiqueta histórica Lambayaque del bloque de departamentos de DATOS y conserva el código 15 existente.",
-    "Ubicación: si una referencia de dirección requerida no tiene código autorizado en DATOS, se deriva a revisión hasta ampliar el catálogo aprobado; no se inventan códigos.",
-    "Salida MASIVO: emitir DEPARTAMENTO/CASA, tipos de vía y ubicación con etiquetas completas; conservar los códigos del catálogo en CONTROL.",
-    "Importe: usar el valor elegido en PEN cuando exista, dejar VALOR DEL BIEN vacío y emitir IMPORTE como texto con miles y dos decimales en la salida MASIVO heredada.",
-    "PRESTAMO: Cloud Run solo lo recibe desde la proyección autorizada de la hoja de control y nunca lo infiere del PDF. Los lotes heredados pueden conservarlo vacío. SEGURO INMUEBLE sigue siendo una salida del proceso posterior.",
-    "ID_CASO: identificar cada PDF con el nombre interno del ZIP y su contenido, para que copias binarias con nombres distintos no compartan la llave de conciliación."
+    "Direccion canonica: priorizar direccion registral; segundo respaldo direccion segun minuta; ultimo respaldo inspeccion ocular. Una direccion municipal o matriz no sustituye esas fuentes.",
+    "Pisos y sotanos: priorizar la tabla de caracteristicas del inmueble cuando es legible. La azotea es una cobertura y no cuenta como piso. La celda conjunta N de Pisos/Sotanos del edificio se interpreta como pisos/sotanos, por ejemplo 3/0.",
+    "Primer Construyo: si el mismo informe declara primer construyo, terreno sin construcciones y una edificacion proyectada a N pisos y azotea, emitir PISOS=N, SOTANOS=0 y edad efectiva 0. Una enumeracion posterior de la azotea no incrementa PISOS. Una tasacion que indica terreno se clasifica como CASA.",
+    "Fecha de expedicion: tomar el ano asociado a la etiqueta Fecha de Expedicion; Caducidad no la sustituye.",
+    "Direccion de Solicitud Construyo: solo respalda la ubicacion territorial cuando la direccion prioritaria no incluye distrito, provincia y departamento, y la terna es unica en DATOS.",
+    "Geografia y catalogo: respetar la geografia explicita del PDF y usar unicamente una coincidencia autorizada y unica de DATOS. No se inventan codigos. Lambayeque del PDF equivale a la etiqueta historica Lambayaque de DATOS y conserva su codigo existente.",
+    "Ubicacion: UBICACION y UBICACION1 son opcionales. Si no existe codigo autorizado en DATOS permanecen vacias y no se reemplazan por SN; la fila puede continuar cuando distrito, provincia y departamento estan completos. Una nueva referencia requerida se agrega a DATOS unicamente por el proceso autorizado.",
+    "Campos para macro: PRESTAMO, tipo, moneda, importe, direccion, domicilio, exterior, distrito, provincia, departamento, pisos, sotanos y ano son obligatorios. Interior, referencia y ubicacion no son obligatorios.",
+    "CASA usa siempre valor de reconstruccion aunque MASIVO lo denomine VALOR A NUEVO; DEPARTAMENTO usa valor comercial, salvo excepcion futura explicita.",
+    "Importe y moneda: usar el valor seleccionado en PEN cuando exista, validar que sea positivo y conservar unicamente codigos de moneda autorizados.",
+    "PRESTAMO: la arquitectura vigente lo recibe exclusivamente de ControlEntrada, validado como texto de 20 digitos; no se infiere del PDF ni de IBM 3270.",
+    "ID_CASO: identificar cada PDF con nombre interno y contenido para mantener una llave tecnica de conciliacion."
   ]
 }

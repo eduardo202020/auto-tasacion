@@ -89,3 +89,40 @@ un conflicto documental que requiere regla de Operaciones. La representacion
 operativa de las direcciones D01 y D09, y la geografia golden de D08, requieren
 validacion del propietario del dato antes de aceptar discrepancias como
 resultado esperado.
+
+## Actualizacion: validacion de reglas por operador - 2026-10-19
+
+Esta seccion reemplaza la conclusion activa anterior, sin borrar el registro
+historico de la corrida del 2026-10-18. La fuente de verdad ahora es
+`reglas-de-negocio-ajustadas-operador.xlsx`: regla aprobada, evidencia PDF y
+despues ejemplo Golden.
+
+- D01: las celdas de pisos y sotanos siguen sin evidencia; el valor de
+  `N. Unidades en el conjunto` no se usa como piso. Permanece `PENDIENTE_IA` y
+  se etiqueta `REGLA_PENDIENTE` frente al Golden.
+- D07: `CASA` conserva valor de reconstruccion PEN `1,772,037.61`; el metodo
+  de costos o reposicion no se toma como el valor de reconstruccion.
+- D08: el PDF declara Hualmay, Huaura, Lima y DATOS autoriza distrito `005`.
+  La diferencia con Huacho/`004` se etiqueta
+  `GOLDEN_POSIBLEMENTE_INCORRECTO`.
+- D09: las paginas 3 y 9 contienen Primer Construyo, terreno sin
+  construcciones y edificacion de 2 pisos y azotea; la pagina 5 enumera la
+  azotea como tercer nivel. Aplica la regla aprobada `PISOS=2`, `SOTANOS=0`,
+  queda `LISTO_DETERMINISTA` y la diferencia Golden se etiqueta
+  `GOLDEN_CONTRADICE_REGLA_APROBADA`.
+
+Resultado Golden 10: 9 `LISTO_DETERMINISTA`, 1 `PENDIENTE_IA`, cero listos
+con importe no positivo, prestamo de control invalido o geografia critica
+faltante. Clasificacion: 6 `MATCH`, 1
+`GOLDEN_POSIBLEMENTE_INCORRECTO`, 1
+`GOLDEN_CONTRADICE_REGLA_APROBADA`, 1 `REGLA_PENDIENTE` y 1 `BUG_EXTRACTOR`.
+
+Resultado corpus: el subconjunto comparable de 120 pasa de 51 a 78
+`LISTO_DETERMINISTA`; el corpus completo pasa de 92 documentados en la
+iteracion anterior a 95. D124 conserva PEN `314367.68`; D130 y D131 son
+`DOCUMENTO_NO_TASACION`. El contrato de workbook no tuvo incidencias.
+
+Recomendacion de esta iteracion: **NO APTO PARA DESPLIEGUE** hasta resolver los
+33 importes ambiguos, las 10 conciliaciones de moneda y las reglas pendientes
+de multiples unidades, edad efectiva, IBM y OCR. Esta recomendacion no implica
+ningun despliegue.

@@ -412,7 +412,7 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(parsed["UBICACION 1"], "")
         self.assertEqual(parsed["REFERENCIA"], "SN")
 
-    def test_explicit_unhomologated_location_stays_in_review(self):
+    def test_explicit_unhomologated_location_stays_empty_without_blocking_complete_geography(self):
         extracted = {
             "PRESTAMO autorizado": "12345678901234567890",
             "Valor elegido US$": "", "Valor elegido S/": 475000,
@@ -427,8 +427,10 @@ class TasacionesServiceTests(unittest.TestCase):
             "PROVINCIA_COD": "01", "DEPARTAMENTO_COD": "08",
         }
         with patch("service.parse_address", return_value=(parsed, [])):
-            _row, issues = to_macro_row(extracted)
-        self.assertIn("UBICACION_NO_HOMOLOGADA: tipo de ubicación sin código autorizado en DATOS", issues)
+            row, issues = to_macro_row(extracted)
+        self.assertEqual(row[MACRO_COLUMNS.index("UBICACION")], "")
+        self.assertEqual(row[MACRO_COLUMNS.index("UBICACION1")], "")
+        self.assertFalse(any(item.startswith("UBICACION_NO_HOMOLOGADA") for item in issues))
 
     def test_conflicting_top_value_candidates_stay_unselected_without_template_rule(self):
         selection = select_value_candidates(
@@ -769,6 +771,7 @@ class TasacionesServiceTests(unittest.TestCase):
         self.assertEqual(lookup_location("CUSCO", "CUSCO", "WANCHAQ")["DISTRITO_COD"], "008")
         self.assertEqual(lookup_location("LAMBAYEQUE", "CHICLAYO", "JOSE LEONARDO ORTIZ")["DEPARTAMENTO_COD"], "15")
         self.assertEqual(lookup_location("HUANUCO", "LEONCIO PRADO", "RUPA RUPA")["DISTRITO_COD"], "004")
+        self.assertEqual(lookup_location("LIMA", "HUAURA", "HUALMAY")["DISTRITO_COD"], "005")
         self.assertEqual(
             lookup_location_from_text("Av. Afilador, Rupa Rupa - Leoncio Prado - Huanuco")["DISTRITO_COD"],
             "004",

@@ -21,9 +21,10 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
   se valida como texto de 20 dígitos y nunca se infiere del PDF ni del 3270.
   Los lotes históricos sin control pueden conservarlo vacío, pero se derivan a
   revisión y no quedan listos para la macro.
-- Reglas operativas confirmadas el 2026-10-14: dirección registral → minuta →
-  inspección ocular; terreno se clasifica como `CASA`; la falta de una
-  referencia de ubicación necesaria exige ampliar `DATOS`, sin inventar código.
+- Reglas operativas validadas por el operador el 2026-10-19: direccion registral -> minuta ->
+  inspeccion ocular; terreno se clasifica como `CASA`; Primer Construyo + terreno sin
+  construcciones + N pisos y azotea emite N/0; la geografia explicita se homologa
+  unicamente con una coincidencia unica de `DATOS`, sin inventar codigos.
 - Campos críticos sin evidencia, catálogos no autorizados o conflictos quedan
   en revisión.
 - Antes de extraer campos, cada PDF se clasifica como `TASACION`,
@@ -33,9 +34,10 @@ componente que obtiene su contenido. No se usa Microsoft Graph.
   una firma de tasadora puede conservar el perfil genérico hasta que una
   plantilla tenga evidencia suficiente. El perfil solo declara dónde buscar;
   la regla de negocio decide el valor para `CASA` o `DEPARTAMENTO`.
-- `N. INTERIOR`, `UBICACION` y `UBICACION1` permanecen vacíos cuando no hay
-  evidencia. `SN` se conserva únicamente como referencia textual; una
-  ubicación explícita sin código autorizado deriva a revisión.
+- `N. INTERIOR`, `UBICACION` y `UBICACION1` permanecen vacios cuando no hay
+  evidencia o cuando la ubicacion opcional no tiene codigo autorizado. `SN` se
+  conserva unicamente como referencia textual. Una nueva referencia que sea
+  obligatoria para la operacion requiere mantenimiento autorizado de `DATOS`.
 - El importe seleccionado debe ser numérico y mayor que cero antes de entrar
   a `PARA_PROCESAR`. `CONTROL` conserva candidatos con moneda, página,
   ancla segura y prioridad, sin texto documental completo.

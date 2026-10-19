@@ -110,6 +110,7 @@ CONTROL_COLUMNS = [
     "Origen año construccion", "Edad efectiva", "Pagina edad efectiva",
     "Año expedicion", "Pagina año expedicion", "Codigo tipo inmueble", "Codigo MASIVO",
     "Codigo valor del bien", "Nro pisos edificio", "Nro sotanos edificio", "Pagina pisos/sotanos",
+    "Regla pisos/sotanos",
     "Observacion extraccion", "Campos faltantes", "Incidencias de validacion", "Ruta final",
     "Revision IA ejecutada", "Modelo IA", "Campos enviados a IA", "Motivo IA",
     "Correcciones IA", "Evidencia IA", "Fila PARA_PROCESAR",
@@ -364,8 +365,9 @@ def to_macro_row(extracted: dict[str, Any]) -> tuple[list[Any], list[str]]:
         observations.append("Moneda sin código autorizado en DATOS")
     if parsed.get("TIPO VIA 1") and not via_code:
         observations.append("Tipo de vía sin abreviatura autorizada en DATOS")
-    if parsed.get("UBICACION TIPO") and not ubicacion_code:
-        observations.append("UBICACION_NO_HOMOLOGADA: tipo de ubicación sin código autorizado en DATOS")
+    # RN-07/PD-02 validadas por Operaciones: UBICACION es opcional. Si no hay
+    # codigo autorizado, se conserva vacia en MASIVO y la fila puede continuar
+    # cuando la geografia critica esta completa. Nunca se inventa un codigo.
     chosen_values = (extracted.get("Valor elegido US$"), extracted.get("Valor elegido S/"))
     if str(extracted.get("Valor elegido tipo") or "").strip() and any(
         not is_blank(value) for value in chosen_values

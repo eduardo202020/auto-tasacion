@@ -817,6 +817,9 @@ def extract_pisos_sotanos_descripcion(doc: fitz.Document) -> tuple[Optional[int]
             text,
         )
         if project and "SIN CONSTRUCCIONES" in text:
+            # Regla RN-03 validada por Operaciones: esta declaración contiene
+            # el total proyectado. La azotea es una cobertura y no constituye
+            # un piso adicional.
             return int(project.group(1)), 0, page_index + 1
     return None, None, None
 
@@ -837,13 +840,26 @@ def extract_pisos_sotanos(doc: fitz.Document) -> tuple[Optional[int], Optional[i
 
 
 def detect_pisos_sotanos_conflict(doc: fitz.Document) -> str:
-    """Block first-construction reports whose declared and listed floors conflict.
+    """Detecta conflictos que siguen sin regla, sin anular RN-03 aprobada.
 
-    A heading such as ``proyectada a 2 pisos y azotea`` is not enough when the
-    distribution of that same construction lists a higher numbered floor.  The
-    extractor keeps the documented value for traceability, but does not make a
-    business decision about which source must prevail.
+    Cuando el PDF declara ``Primer Construyo``, ``terreno sin construcciones``
+    y una edificación proyectada a ``N pisos y azotea``, Operaciones aprobó
+    PISOS=N y SOTANOS=0. Una distribución posterior puede enumerar la azotea
+    como un nivel (por ejemplo, ``3 piso: ... Azotea común``); esa enumeración
+    no revoca la declaración aprobada ni crea un conflicto de negocio.
     """
+    for page in doc:
+        text = norm_up(page.get_text("text"))
+        if (
+            "PRIMER CONSTRUYO" in text
+            and "SIN CONSTRUCCIONES" in text
+            and re.search(
+                r"\b(?:PROYECTAD[AO]\s+A\s+)?\d{1,3}\s+PISOS?\b.{0,60}?\bAZOTEA\b",
+                text,
+                re.I,
+            )
+        ):
+            return ""
     declaration = re.compile(
         r"\b(?:PRIMER|1)\s+CONSTRUYO\b.{0,220}?\b(?:PROYECTAD[AO]\s+A\s+)?(\d{1,3})\s+PISOS?\b.{0,60}?\bAZOTEA\b",
         re.I,
@@ -914,6 +930,7 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Nro pisos edificio": "",
         "Nro sotanos edificio": "",
         "Pagina pisos/sotanos": "",
+        "Regla pisos/sotanos": "",
         "PRESTAMO": "",
         "Observacion extraccion": "",
     }
@@ -995,6 +1012,20 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
             edad_efectiva, page_edad_efectiva = extract_edad_efectiva(doc)
             anio_expedicion, page_anio_expedicion = extract_anio_expedicion(doc)
             pisos, sotanos, page_pisos = extract_pisos_sotanos(doc)
+            regla_pisos_sotanos = ""
+            for page in doc:
+                page_text = norm_up(page.get_text("text"))
+                if (
+                    "PRIMER CONSTRUYO" in page_text
+                    and "SIN CONSTRUCCIONES" in page_text
+                    and re.search(
+                        r"\b(?:PROYECTAD[AO]\s+A\s+)?\d{1,3}\s+PISOS?\b.{0,60}?\bAZOTEA\b",
+                        page_text,
+                        re.I,
+                    )
+                ):
+                    regla_pisos_sotanos = "PRIMER_CONSTRUYO_TERRENO_PROYECTADO"
+                    break
             if pisos is None and profile_uses_strategy(profile, "braschi_floor_table_ocr"):
                 ocr_floors = extract_braschi_floor_table_ocr(doc)
                 if ocr_floors is not None:
@@ -1073,6 +1104,7 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         "Nro pisos edificio": pisos if pisos is not None else "",
         "Nro sotanos edificio": sotanos if sotanos is not None else "",
         "Pagina pisos/sotanos": page_pisos or "",
+        "Regla pisos/sotanos": regla_pisos_sotanos,
         "PRESTAMO": prestamo,
     })
     if not direccion:

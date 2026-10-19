@@ -1,194 +1,61 @@
 REGLAS DE NEGOCIO PENDIENTES - TASACIONES
-Estado: PARCIALMENTE IMPLEMENTADO SEGUN PROCESAMIENTO HISTORICO D01-D04
-Fecha: 2026-10-05
+Estado: ACTUALIZADO CON VALIDACION DEL OPERADOR
+Fecha: 2026-10-19
+Fuente: reglas-de-negocio-ajustadas-operador.xlsx
 
-Objetivo
----------
-Este documento registra decisiones que la evidencia del PDF no resuelve de
-forma unica. No es una especificacion ejecutable ni autoriza que Cloud Run
-rellene un valor por inferencia. Cada regla debe ser validada por Operaciones y
-su decision debe indicar responsable, fecha, ejemplos y excepciones.
-Una vez aprobada, cada regla debe convertirse en una entrada versionada de
-cloud-run/reference-data/reglas_operativas.json y en pruebas automáticas antes
-de habilitar su uso en PARA_PROCESAR.
+PRECEDENCIA
+-----------
+1. Regla general aprobada por el operador.
+2. Evidencia explicita del PDF.
+3. Ejemplo individual Golden.
 
-Como validar cada regla
------------------------
-1. Marcar una sola decision aprobada.
-2. Indicar el sistema o documento que tiene prioridad cuando las fuentes se
-   contradicen.
-3. Definir que debe hacer el flujo si faltan datos o persiste el conflicto:
-   detener para revision, dejar en blanco o aplicar una regla explicita.
-4. Conservar al menos dos PDFs anonimizados que cubran el caso normal y la
-   excepcion. Esos casos se convertiran en pruebas automaticas antes de cambiar
-   el codigo.
+HISTORIAL CONSERVADO
+--------------------
+Las secciones historicas de este archivo fechadas 2026-10-05 y 2026-10-14
+fueron reemplazadas como especificacion activa por la validacion del operador
+2026-10-19. No se eliminan como antecedente: sus reglas resueltas ahora estan
+versionadas en cloud-run/reference-data/reglas_operativas.json y en
+REGLAS_OPERADOR_VALIDADAS.md.
 
-1. PISOS, SOTANOS Y AZOTEA
---------------------------
-Campos afectados: PISOS y, de manera indirecta, CLASE.
+REGLAS RESUELTAS POR VALIDACION DEL OPERADOR
+--------------------------------------------
+- Direccion: registral -> minuta -> inspeccion ocular.
+- Pisos/sotanos: tabla legible primero; azotea no incrementa PISOS.
+- Primer Construyo + terreno sin construcciones + N pisos y azotea: N/0;
+  terreno se clasifica como CASA.
+- Fecha de expedicion, Solicitud Construyo territorial, Lambayeque/Lambayaque,
+  catalogo cerrado, importe PEN positivo, clase de inmueble, ID_CASO y salida.
+- CASA usa valor de reconstruccion; DEPARTAMENTO usa valor comercial.
+- UBICACION/UBICACION1 son opcionales: sin codigo DATOS quedan vacias y no
+  bloquean si distrito, provincia y departamento estan homologados.
+- PRESTAMO vigente: ControlEntrada, texto de 20 digitos, nunca PDF ni 3270.
 
-Evidencia observada en D03 y D04:
-- La tabla del informe indica 6 pisos y 2 sotanos.
-- La descripcion narrativa indica 5 pisos, mas azotea y 2 sotanos.
-- El Colab de origen y el codigo actual toman 5 desde la descripcion narrativa.
+PENDIENTES REALES
+-----------------
+1. PD-02 - PARCIALMENTE_RESUELTA / PENDIENTE_TECNICA
+   Una ubicacion opcional sin codigo ya esta resuelta: se deja vacia. Falta el
+   proceso operativo para incorporar referencias nuevas que realmente sean
+   necesarias al catalogo DATOS autorizado.
 
-Decision aprobada:
-- La azotea es una cobertura: no cuenta como piso ni incrementa PISOS.
-- La tabla de caracteristicas prevalece sobre la descripcion narrativa.
-- Los sotanos se informan por separado y no incrementan PISOS.
+2. PD-03 - PENDIENTE_OPERACIONES
+   Falta decidir si un PDF con varias unidades genera una fila por garantia,
+   una fila por unidad o revision humana. Mientras no exista decision, no se
+   multiplican filas ni se elige una unidad por inferencia.
 
-Responsable y fecha: Operacion hipotecaria, 2026-10-06.
-Ejemplos de prueba aprobados: informe con ``5 pisos, mas azotea y 2 sotanos``
-emite PISOS=5 y SOTANOS=2; D03 y D04 mantienen la prioridad de tabla.
+3. PD-05 - PENDIENTE_OPERACIONES
+   Falta definir edad efectiva 0, texto no numerico, rangos, remodelacion y
+   resultado improbable. Solo se calcula ano con evidencias autorizadas.
 
-2. DIRECCION CANONICA PARA LA OPERACION
----------------------------------------
-Campo afectado: DIRECCION.
+4. PD-06 - PENDIENTE_OPERACIONES
+   Falta la llave y la regla para cero/una/multiples coincidencias del tramo
+   IBM. No se cambia PAD, VBA, PCOMM ni 3270 desde este repositorio.
 
-Un informe puede contener una direccion registral, otra en la minuta y otra
-en la inspeccion ocular. La devolución operativa del 2026-10-14 confirmó el
-orden registral, luego minuta y por último inspección ocular. Las fuentes
-municipales o matriciales no sustituyen esas tres fuentes.
+5. PD-07 - PENDIENTE_TECNICA
+   Falta definir OCR corporativo aprobado, umbral y campos minimos. PDF sin
+   texto util permanece fuera de PARA_PROCESAR.
 
-Decisión incorporada en código: `REGISTRAL -> MINUTA -> INSPECCION`.
-
-3. UBICACION Y CODIGO DE UBICACION
-----------------------------------
-Campos afectados: UBICACION y UBICACION_COD.
-
-El catalogo DATOS de integración acepta un conjunto cerrado de valores. En D02 el
-PDF no presenta una ubicacion homologable al catalogo; por ello el flujo deja
-UBICACION y UBICACION_COD vacios de forma intencional. No debe inventarse un
-codigo.
-
-Preguntas para Operaciones:
-- Torre, condominio, sin numero (SN) u otras denominaciones deben quedar en
-  blanco, homologarse a un valor existente o requerir un nuevo codigo oficial?
-- Quien aprueba y mantiene el catalogo DATOS?
-- Una ubicacion sin codigo invalida la fila para IBM 3270 o puede completarse
-  antes de que Power Automate la envíe?
-
-Decision aprobada:
-Responsable y fecha:
-Ejemplos de prueba aprobados:
-
-4. TIPO DE INMUEBLE Y VALOR A REPORTAR
---------------------------------------
-Campos afectados: TIPO_INMUEBLE, TIPO_INMUEBLE_COD, MONEDA_COD y VALOR.
-
-El catalogo actual contempla CASA y DEPARTAMENTO. Los informes pueden incluir
-cocheras, depositos u otros componentes junto con el inmueble principal. Para
-un departamento el extractor prioriza el valor comercial. Para una casa toma
-el valor de reconstruccion, mientras que el catalogo de integración denomina la
-opcion de casa como "VALOR NUEVO". Esta equivalencia requiere confirmacion
-formal antes de usarse en casos productivos de casas.
-
-Preguntas para Operaciones:
-- Que tipo y valor se reportan si un mismo PDF incluye departamento, cochera y
-  deposito?
-- Debe generarse una fila por unidad o solo por la garantia principal?
-- "Valor de reconstruccion" satisface el campo que el catálogo denomina
-  "VALOR NUEVO" para una casa?
-- Que hacer con tipos no presentes en el catalogo?
-
-Decision aprobada:
-Responsable y fecha:
-Ejemplos de prueba aprobados:
-
-5. ANO DE CONSTRUCCION Y EDAD EFECTIVA
---------------------------------------
-Campos afectados: ANO, EDAD_EFECTIVA y ORIGEN_ANO.
-
-Regla tecnica vigente: se usa el ano de construccion explicito. Solo si no se
-encuentra, se calcula ANO = ano de expedicion - edad efectiva numerica. Si la
-edad indica "En construccion" u otro texto no numerico, no se realiza una
-resta inventada.
-
-Preguntas para Operaciones:
-- Esta regla coincide con la operativa en todos los tipos de tasacion?
-- Como se debe tratar edad 0, "En construccion", rangos de edad o anos de
-remodelacion?
-- Si el calculo genera un ano improbable, se bloquea la fila o se solicita
-correccion manual?
-
-Decision aprobada:
-Responsable y fecha:
-Ejemplos de prueba aprobados:
-
-6. PRESTAMO Y ESTADO DE LA FILA
--------------------------------
-Campos afectados: PRESTAMO y control de procesamiento.
-
-Esta regla histórica fue reemplazada para lotes con hoja de control: PRESTAMO
-llega validado desde la fila operativa autorizada. Los lotes sin control pueden
-conservarlo vacío. Debe definirse como se relaciona sin ambiguedad cada fila
-PARA_PROCESAR con la transaccion resultante y que ocurre si
-la consulta de IBM devuelve mas de una coincidencia o ninguna.
-
-Preguntas para Operaciones:
-- Cual es la llave de consulta y de conciliacion autorizada en IBM 3270?
-- Que datos se deben comparar antes de grabar?
-- Que estado recibe una fila con cero, una o varias coincidencias?
-- Quien puede reintentar, corregir o aprobar una excepcion?
-
-Decision aprobada:
-Responsable y fecha:
-Ejemplos de prueba aprobados:
-
-7. PDFs ESCANEADOS O SIN TEXTO EXTRAIBLE
-----------------------------------------
-Campos afectados: todos los campos extraidos.
-
-El procesamiento determinista utiliza texto y coordenadas del PDF. Si el PDF
-es una imagen escaneada o su texto esta corrupto, el dato puede no existir para
-el extractor aunque sea visible para una persona.
-
-Preguntas para Operaciones:
-- A partir de que senal se deriva una fila a OCR o a revision manual?
-- Que solucion corporativa de OCR esta aprobada para estos documentos?
-- Que campos son obligatorios para que una fila pueda continuar a IBM 3270?
-
-Decision aprobada:
-Responsable y fecha:
-Ejemplos de prueba aprobados:
-
-REGISTRO DE APROBACIONES
-------------------------
-Regla | Decision | Responsable | Fecha | Version de codigo | Casos de prueba
-
-ACTUALIZACION OPERATIVA - 2026-10-05
--------------------------------------
-El procesamiento historico de D01, D02, D03 y D04 fue autorizado como base
-para la implementacion activa. Las decisiones se versionaron en
-cloud-run/reference-data/reglas_operativas.json y se prueban con PDFs
-sinteticos.
-
-Regla | Decision implementada | Casos de referencia
-Pisos/sotanos | La tabla de caracteristicas prevalece sobre la descripcion. La azotea no cuenta como piso ni incrementa PISOS. | D03, D04: 6 pisos y 2 sotanos; prueba sintetica: 5 pisos, mas azotea y 2 sotanos.
-Direccion | Registral; minuta como segundo respaldo; inspeccion ocular como último. | D01, D02.
-Ubicacion | Una referencia necesaria sin homologación se deriva a revisión hasta ampliar DATOS. | D02.
-Salida MASIVO | Se emiten etiquetas completas para tipo de inmueble, via y ubicacion; los codigos del catalogo se conservan en CONTROL. | D01-D04.
-Importe | Se prioriza el valor elegido en PEN, con miles y dos decimales; VALOR DEL BIEN se deja vacio por compatibilidad MASIVO. | D01-D04.
-PRESTAMO y SEGURO INMUEBLE | En lotes con control, Cloud Run recibe PRESTAMO validado; en lotes heredados queda vacío. PAD/IBM 3270 registra el seguro después. | D01-D04.
-
-La tasación de terreno se clasifica como CASA y usa valor de reconstrucción,
-según la devolución del operador. Unidades múltiples, edad efectiva fuera de
-los casos observados y OCR permanecen pendientes de evidencia operativa.
-
-ACTUALIZACION AUTO-10 - 2026-10-05
------------------------------------
-La revisión de D01 a D10 incorporó reglas documentadas en
-``reglas_operativas.json`` y pruebas sintéticas. El lote de control resultó
-en nueve casos operables (D02-D10, excepto D01) y un caso de revisión.
-
-Regla | Evidencia usada | Decisión implementada
-Pisos/sótanos en una celda | D03, D04 y D05 muestran ``N° de Pisos/Sótanos del edificio`` con valores ``3/0`` y ``2/0``. | Leer ambos enteros como pisos y sótanos desde esa celda de tabla.
-Primer construyo | D09 declara primer construyo, terreno sin construcciones y construcción proyectada a 2 pisos y azotea. | Emitir 2 pisos, 0 sótanos y edad efectiva 0; derivar el año desde la fecha de expedición y clasificar terreno como CASA.
-Fecha de expedición | D01-D05 y D09 incluyen Expedición y Caducidad. | Tomar el año asociado a la etiqueta Expedición, nunca el de Caducidad.
-Dirección territorial | D08 incluye Dist./Prov./Dpto. en Solicitud Construyo; D01 usa Rupa Rupa - Leoncio Prado - Huánuco. | Usar esa fuente solo cuando la dirección prioritaria no incluye los tres niveles y la terna coincide de forma única con DATOS.
-Lambayeque | D04 y D05 indican Lambayeque; DATOS conserva Lambayaque en su bloque de departamentos. | Resolver al código existente 15 sin modificar DATOS.
-Llave técnica | D04 y D05 son binariamente iguales, pero representan filas separadas. | ID_CASO combina nombre del PDF interno y contenido para mantener una llave única por fila.
-
-D01 se mantiene en REVISION_IA: Solicitud Construyo confirma la ubicación,
-pero solo indica financiamiento del primer piso y no declara el total de pisos
-ni sótanos. No hay regla que autorice completar esos campos.
+REGLA DE D01
+------------
+D01 mantiene PISOS y SOTANOS sin evidencia. El valor 1 de "N. Unidades en el
+conjunto" no es un piso. La ruta continua fail-closed hasta contar con una
+regla explicita que autorice completar 1/0 en ese escenario.

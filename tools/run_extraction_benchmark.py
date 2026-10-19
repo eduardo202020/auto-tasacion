@@ -65,7 +65,7 @@ SAFE_CONTROL_FIELDS = (
     "Valor reconstruccion US$", "Valor reconstruccion S/", "Candidatos valor reconstruccion",
     "Tipo inmueble", "Nro pisos edificio", "Nro sotanos edificio", "Año construccion",
     "Pagina direccion", "Pagina tipo inmueble", "Pagina valor comercial", "Pagina valor reconstruccion",
-    "Pagina pisos/sotanos", "Ruta final", "Campos faltantes", "Incidencias de validacion",
+    "Pagina pisos/sotanos", "Regla pisos/sotanos", "Ruta final", "Campos faltantes", "Incidencias de validacion",
 )
 
 
@@ -287,6 +287,55 @@ def address_group_status(field_statuses: dict[str, str]) -> str:
     return "DIFFERENT"
 
 
+def classify_golden_case(
+    *,
+    matches: dict[str, bool],
+    address_status: str,
+    macro: dict[str, Any],
+    fields: dict[str, Any],
+) -> tuple[str, str]:
+    """Classify a Golden difference without allowing it to redefine a rule.
+
+    The benchmark never changes extraction output. It labels the comparison in
+    the published report so that an individual historical row cannot overrule
+    a documented operator decision or an explicit, uniquely catalogued value.
+    """
+    if all(matches.values()):
+        if address_status == "SEMANTIC_MATCH":
+            return "SEMANTIC_MATCH", "La única diferencia es una representación equivalente de dirección."
+        return "MATCH", "Todos los campos comparados coinciden."
+
+    if (
+        not matches.get("pisos", True)
+        and str(fields.get("Regla pisos/sotanos") or "") == "PRIMER_CONSTRUYO_TERRENO_PROYECTADO"
+    ):
+        return (
+            "GOLDEN_CONTRADICE_REGLA_APROBADA",
+            "La regla aprobada de Primer Construyo, terreno y azotea prevalece sobre la fila Golden.",
+        )
+
+    missing = str(fields.get("Campos faltantes") or "").upper()
+    if (
+        "PISOS" in missing
+        or "SOTANOS" in missing
+        or str(fields.get("Ruta final") or "") == "REGLA_NEGOCIO_PENDIENTE"
+    ):
+        return (
+            "REGLA_PENDIENTE",
+            "No existe evidencia suficiente ni una regla aprobada para completar el dato diferente.",
+        )
+
+    geography_complete = all(str(macro.get(field) or "").strip() for field in (
+        "MUNICIPIO", "DIST_COD", "PROV_COD", "DEPT_COD",
+    ))
+    if not matches.get("geografia", True) and geography_complete:
+        return (
+            "GOLDEN_POSIBLEMENTE_INCORRECTO",
+            "La geografía extraída tiene una terna completa y códigos autorizados por DATOS; requiere revisión del ejemplo Golden.",
+        )
+    return "BUG_EXTRACTOR", "La diferencia no está cubierta por una regla aprobada ni por una equivalencia semántica."
+
+
 def _field_with_suffix(fields: dict[str, Any], suffix: str) -> Any:
     """Read a stable semantic field when a legacy header has accent encoding variance."""
     return next((value for name, value in fields.items() if name.endswith(suffix)), "")
@@ -343,10 +392,18 @@ def _golden_comparison(
             _normalized_text(actual["geografia"].get(key)) == _normalized_text(value)
             for key, value in reference["geografia"].items()
         )
+        classification, classification_reason = classify_golden_case(
+            matches=matches,
+            address_status=address_status,
+            macro=macro,
+            fields={**fields, "Ruta final": entry["route"]},
+        )
         compared.append({
             "filename": entry["filename"],
             "route": entry["route"],
             "matches": matches,
+            "classification": classification,
+            "classification_reason": classification_reason,
             "address_comparison": {
                 "status": address_status,
                 "fields": address_fields,
@@ -354,6 +411,13 @@ def _golden_comparison(
         })
     return {
         "total": len(compared),
+        "classifications": _counter_with_empty(
+            Counter(item["classification"] for item in compared),
+            (
+                "MATCH", "SEMANTIC_MATCH", "GOLDEN_POSIBLEMENTE_INCORRECTO",
+                "GOLDEN_CONTRADICE_REGLA_APROBADA", "REGLA_PENDIENTE", "BUG_EXTRACTOR",
+            ),
+        ),
         "critical_matches": {
             field: sum(1 for item in compared if item["matches"].get(field))
             for field in (
